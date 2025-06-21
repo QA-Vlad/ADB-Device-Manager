@@ -46,4 +46,16 @@ object AdbService {
         device.executeShellCommand("wm size reset", NullOutputReceiver(), 15, TimeUnit.SECONDS)
         device.executeShellCommand("wm density reset", NullOutputReceiver(), 15, TimeUnit.SECONDS)
     }
+
+    fun setSize(device: IDevice, width: Int, height: Int) {
+        val command = "wm size ${width}x${height}"
+        device.executeShellCommand(command, NullOutputReceiver(), 15, TimeUnit.SECONDS)
+    }
+
+    // Новый метод для установки DPI
+    fun setDpi(device: IDevice, dpi: Int) {
+        val command = "wm density $dpi"
+        device.executeShellCommand(command, NullOutputReceiver(), 15, TimeUnit.SECONDS)
+    }
 }
+
