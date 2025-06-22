@@ -11,23 +11,47 @@ import javax.swing.table.DefaultTableModel
 
 class PresetTransferHandler : TransferHandler() {
     override fun getSourceActions(c: JComponent?) = MOVE
+
     override fun createTransferable(c: JComponent?): Transferable? {
         val table = c as? JTable ?: return null
         return StringSelection(table.selectedRow.toString())
     }
+
     override fun canImport(support: TransferSupport): Boolean {
-        return support.component is JTable && support.isDrop && support.isDataFlavorSupported(DataFlavor.stringFlavor)
+        val canImport = support.component is JTable && support.isDrop && support.isDataFlavorSupported(DataFlavor.stringFlavor)
+
+        if (canImport) {
+            support.setShowDropLocation(true)
+        }
+
+        return canImport
     }
+
     override fun importData(support: TransferSupport): Boolean {
         val table = support.component as? JTable ?: return false
         val model = table.model as? DefaultTableModel ?: return false
+
         try {
             val fromIndex = (support.transferable.getTransferData(DataFlavor.stringFlavor) as String).toInt()
-            var toIndex = table.rowAtPoint(support.dropLocation.dropPoint)
+
+            // Получаем правильный индекс для INSERT_ROWS режима
+            val dropLocation = support.dropLocation as? JTable.DropLocation
+            var toIndex = dropLocation?.row ?: -1
+
+            // Если drop location недоступен, используем старый метод
             if (toIndex == -1) {
-                toIndex = model.rowCount - 1
+                toIndex = table.rowAtPoint(support.dropLocation.dropPoint)
+                if (toIndex == -1) {
+                    toIndex = model.rowCount
+                }
             }
-            if (fromIndex != -1 && fromIndex != toIndex) {
+
+            // Корректируем индекс если перетаскиваем вниз
+            if (fromIndex < toIndex) {
+                toIndex--
+            }
+
+            if (fromIndex != -1 && fromIndex != toIndex && toIndex >= 0 && toIndex < model.rowCount) {
                 model.moveRow(fromIndex, fromIndex, toIndex)
                 table.setRowSelectionInterval(toIndex, toIndex)
                 return true

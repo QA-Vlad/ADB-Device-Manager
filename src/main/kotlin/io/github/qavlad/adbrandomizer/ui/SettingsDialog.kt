@@ -15,12 +15,14 @@ import io.github.qavlad.adbrandomizer.services.SettingsService
 import java.awt.BorderLayout
 import java.awt.Component
 import java.awt.Dimension
+import javax.swing.ToolTipManager
 import java.util.*
 import javax.swing.*
 import javax.swing.table.DefaultTableCellRenderer
 import javax.swing.table.DefaultTableModel
 import javax.swing.table.TableCellEditor
 import javax.swing.table.TableCellRenderer
+import javax.swing.SwingUtilities
 
 class SettingsDialog(project: Project?) : DialogWrapper(project) {
     private lateinit var table: JBTable
@@ -51,7 +53,10 @@ class SettingsDialog(project: Project?) : DialogWrapper(project) {
 
         tableModel = DevicePresetTableModel(dataVector, columnNames)
         tableModel.addTableModelListener { validateFields() }
+
+        // Возвращаемся к обычной JBTable
         table = JBTable(tableModel)
+
         setupTable()
         validateFields()
 
@@ -74,19 +79,40 @@ class SettingsDialog(project: Project?) : DialogWrapper(project) {
             setSelectionMode(ListSelectionModel.SINGLE_SELECTION)
             rowHeight = JBUI.scale(35)
             dragEnabled = true
-            dropMode = DropMode.USE_SELECTION
+            dropMode = DropMode.INSERT_ROWS
             transferHandler = PresetTransferHandler()
+
+            // Настраиваем быстрое появление tooltip
+            val toolTipManager = ToolTipManager.sharedInstance()
+            toolTipManager.initialDelay = 100  // Задержка перед первым показом (100мс)
+            toolTipManager.dismissDelay = 5000 // Время показа tooltip (5 сек)
+            toolTipManager.reshowDelay = 50    // Задержка при повторном показе (50мс)
+
+            // Отключаем hover эффекты, которые могут влиять на цвет
+            putClientProperty("JTable.stripedBackground", false)
+            putClientProperty("Table.isFileList", false)
 
             columnModel.getColumn(0).apply {
                 minWidth = JBUI.scale(30)
                 maxWidth = JBUI.scale(30)
-                cellRenderer = object : DefaultTableCellRenderer() { init { horizontalAlignment = CENTER } }
+                cellRenderer = object : DefaultTableCellRenderer() {
+                    init {
+                        horizontalAlignment = CENTER
+                        isOpaque = true
+                    }
+
+                    override fun getTableCellRendererComponent(table: JTable, value: Any?, isSelected: Boolean, hasFocus: Boolean, row: Int, column: Int): Component {
+                        val component = super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column)
+                        toolTipText = "Drag and drop"
+                        return component
+                    }
+                }
             }
             columnModel.getColumn(4).apply {
                 minWidth = JBUI.scale(40)
                 maxWidth = JBUI.scale(40)
                 cellRenderer = ButtonRenderer()
-                cellEditor = ButtonEditor(table) // Передаем саму таблицу
+                cellEditor = ButtonEditor(table)
             }
             setDefaultRenderer(Object::class.java, ValidationRenderer())
         }
@@ -96,7 +122,21 @@ class SettingsDialog(project: Project?) : DialogWrapper(project) {
         val panel = JPanel()
         panel.add(JButton("Add Preset", AllIcons.General.Add).apply {
             addActionListener {
+                // Добавляем новую строку
+                val newRowIndex = tableModel.rowCount
                 tableModel.addRow(Vector(listOf("☰", "", "", "", "Delete")))
+
+                // Выделяем новую строку, прокручиваем к ней и начинаем редактирование колонки Label
+                SwingUtilities.invokeLater {
+                    table.setRowSelectionInterval(newRowIndex, newRowIndex)
+
+                    // Прокручиваем таблицу к новой строке
+                    table.scrollRectToVisible(table.getCellRect(newRowIndex, 1, true))
+
+                    // Начинаем редактирование колонки Label (индекс 1)
+                    table.editCellAt(newRowIndex, 1)
+                    table.editorComponent?.requestFocus()
+                }
             }
         })
 
@@ -138,21 +178,45 @@ class SettingsDialog(project: Project?) : DialogWrapper(project) {
 
     inner class ValidationRenderer : DefaultTableCellRenderer() {
         override fun getTableCellRendererComponent(table: JTable, value: Any?, isSelected: Boolean, hasFocus: Boolean, row: Int, column: Int): Component {
-            val component = super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column)
-            if (column == 0 || column == 4) {
-                background = if (isSelected) table.selectionBackground else table.background
-                return component
+            // Сначала получаем стандартный компонент
+            super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column)
+
+            // Устанавливаем непрозрачность для корректного отображения
+            isOpaque = true
+
+            when (column) {
+                0, 4 -> {
+                    // Для колонок с иконками и кнопками - стандартное поведение
+                    background = if (isSelected) table.selectionBackground else table.background
+                    foreground = if (isSelected) table.selectionForeground else table.foreground
+                }
+                1 -> {
+                    // Для колонки Label - стандартное поведение без валидации
+                    background = if (isSelected) table.selectionBackground else table.background
+                    foreground = if (isSelected) table.selectionForeground else table.foreground
+                }
+                2, 3 -> {
+                    // Для колонок Size и DPI - с валидацией
+                    val text = value as? String ?: ""
+                    val isValid = if (text.isBlank()) true else when (column) {
+                        2 -> sizeRegex.matches(text)
+                        3 -> dpiRegex.matches(text)
+                        else -> true
+                    }
+
+                    if (!isValid) {
+                        // Невалидные поля всегда розовые
+                        background = JBColor.PINK
+                        foreground = JBColor.BLACK
+                    } else {
+                        // Валидные поля используют стандартные цвета
+                        background = if (isSelected) table.selectionBackground else table.background
+                        foreground = if (isSelected) table.selectionForeground else table.foreground
+                    }
+                }
             }
 
-            val text = value as? String ?: ""
-            val isValid = if (text.isBlank()) true else when (column) {
-                2 -> sizeRegex.matches(text)
-                3 -> dpiRegex.matches(text)
-                else -> true
-            }
-
-            component.background = if (isSelected) table.selectionBackground else if (isValid) table.background else JBColor.PINK
-            return component
+            return this
         }
     }
 }
