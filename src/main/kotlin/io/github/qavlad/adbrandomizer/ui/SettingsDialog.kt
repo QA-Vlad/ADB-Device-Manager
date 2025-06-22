@@ -5,163 +5,197 @@ package io.github.qavlad.adbrandomizer.ui
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.DialogWrapper
-import com.intellij.openapi.ui.ValidationInfo
-import com.intellij.ui.JBColor // ИСПРАВЛЕНО
+import com.intellij.ui.JBColor
 import com.intellij.ui.components.JBScrollPane
-import com.intellij.ui.components.JBTextField
+import com.intellij.ui.table.JBTable
+import com.intellij.util.ui.AbstractTableCellEditor
 import com.intellij.util.ui.JBUI
 import io.github.qavlad.adbrandomizer.services.DevicePreset
 import io.github.qavlad.adbrandomizer.services.SettingsService
 import java.awt.BorderLayout
+import java.awt.Component
 import java.awt.Dimension
-import java.awt.GridLayout
+import java.util.*
 import javax.swing.*
-import javax.swing.event.DocumentEvent
-import javax.swing.event.DocumentListener
+import javax.swing.table.DefaultTableCellRenderer
+import javax.swing.table.DefaultTableModel
+import javax.swing.table.TableCellEditor
+import javax.swing.table.TableCellRenderer
 
 class SettingsDialog(project: Project?) : DialogWrapper(project) {
+    private lateinit var table: JBTable
+    private lateinit var tableModel: DevicePresetTableModel
 
-    private val presetsPanel = JPanel().apply {
-        layout = BoxLayout(this, BoxLayout.Y_AXIS)
-    }
     private val sizeRegex = Regex("""^\d+\s*[xхXХ]\s*\d+$""")
-    private val dpiRegex = Regex("""^\d*$""")
+    private val dpiRegex = Regex("""^\d+$""")
 
     init {
         title = "ADB Randomizer Settings"
         setOKButtonText("Save")
         init()
-        loadPresets()
-        validateFields()
     }
 
     override fun createCenterPanel(): JComponent {
-        val mainPanel = JPanel(BorderLayout())
-
-        val headerPanel = JPanel(GridLayout(1, 4, JBUI.scale(10), 0))
-        headerPanel.add(JLabel("Label"))
-        headerPanel.add(JLabel("Size (e.g., 1080x1920)"))
-        headerPanel.add(JLabel("DPI (e.g., 480)"))
-        headerPanel.add(Box.createRigidArea(Dimension(JBUI.scale(30), 0)))
-        headerPanel.border = JBUI.Borders.emptyBottom(5)
-        mainPanel.add(headerPanel, BorderLayout.NORTH)
-
-        val scrollPane = JBScrollPane(presetsPanel).apply {
-            preferredSize = Dimension(600, 400)
-            verticalScrollBar.unitIncrement = 16
+        val columnNames = Vector(listOf(" ", "Label", "Size (e.g., 1080x1920)", "DPI (e.g., 480)", "  "))
+        val presets = SettingsService.getPresets()
+        val dataVector = Vector<Vector<Any>>()
+        presets.forEach {
+            val row = Vector<Any>()
+            row.add("☰")
+            row.add(it.label)
+            row.add(it.size)
+            row.add(it.dpi)
+            row.add("Delete")
+            dataVector.add(row)
         }
-        mainPanel.add(scrollPane, BorderLayout.CENTER)
 
-        val addButton = JButton("Add Preset", AllIcons.General.Add)
-        addButton.addActionListener {
-            val newRow = addPresetRow(DevicePreset("", "", ""))
-            val newLabelField = newRow.getComponent(0) as JBTextField
+        tableModel = DevicePresetTableModel(dataVector, columnNames)
+        tableModel.addTableModelListener { validateFields() }
+        table = JBTable(tableModel)
+        setupTable()
+        validateFields()
 
-            SwingUtilities.invokeLater {
-                val rect = newRow.bounds
-                presetsPanel.scrollRectToVisible(rect)
-                newLabelField.requestFocusInWindow()
+        val scrollPane = JBScrollPane(table).apply { preferredSize = Dimension(650, 400) }
+        val buttonPanel = createButtonPanel()
+
+        val tablePanel = JPanel(BorderLayout()).apply {
+            add(table.tableHeader, BorderLayout.NORTH)
+            add(scrollPane, BorderLayout.CENTER)
+        }
+
+        return JPanel(BorderLayout(0, JBUI.scale(10))).apply {
+            add(tablePanel, BorderLayout.CENTER)
+            add(buttonPanel, BorderLayout.SOUTH)
+        }
+    }
+
+    private fun setupTable() {
+        table.apply {
+            setSelectionMode(ListSelectionModel.SINGLE_SELECTION)
+            rowHeight = JBUI.scale(35)
+            dragEnabled = true
+            dropMode = DropMode.USE_SELECTION
+            transferHandler = PresetTransferHandler()
+
+            columnModel.getColumn(0).apply {
+                minWidth = JBUI.scale(30)
+                maxWidth = JBUI.scale(30)
+                cellRenderer = object : DefaultTableCellRenderer() { init { horizontalAlignment = CENTER } }
+            }
+            columnModel.getColumn(4).apply {
+                minWidth = JBUI.scale(40)
+                maxWidth = JBUI.scale(40)
+                cellRenderer = ButtonRenderer()
+                cellEditor = ButtonEditor(table) // Передаем саму таблицу
+            }
+            setDefaultRenderer(Object::class.java, ValidationRenderer())
+        }
+    }
+
+    private fun createButtonPanel(): JPanel {
+        val panel = JPanel()
+        panel.add(JButton("Add Preset", AllIcons.General.Add).apply {
+            addActionListener {
+                tableModel.addRow(Vector(listOf("☰", "", "", "", "Delete")))
+            }
+        })
+
+        val importButton = JButton("Import Common Devices")
+        importButton.addActionListener {
+            val commonPresets = listOf(
+                DevicePreset("Pixel 6 Pro", "1440x3120", "512"),
+                DevicePreset("Pixel 5", "1080x2340", "432")
+            )
+            val existingLabels = tableModel.getPresets().map { it.label }.toSet()
+            commonPresets.forEach {
+                if (!existingLabels.contains(it.label)) {
+                    tableModel.addRow(Vector(listOf("☰", it.label, it.size, it.dpi, "Delete")))
+                }
             }
         }
-        mainPanel.add(addButton, BorderLayout.SOUTH)
+        panel.add(importButton)
 
-        return mainPanel
-    }
-
-    private fun loadPresets() {
-        presetsPanel.removeAll()
-        SettingsService.getPresets().forEach { addPresetRow(it) }
-        presetsPanel.revalidate()
-        presetsPanel.repaint()
-    }
-
-    private fun addPresetRow(preset: DevicePreset): JPanel {
-        val rowPanel = JPanel(GridLayout(1, 4, JBUI.scale(10), 0))
-        rowPanel.maximumSize = Dimension(Integer.MAX_VALUE, JBUI.scale(30))
-
-        val labelField = JBTextField(preset.label)
-        val sizeField = JBTextField(preset.size)
-        val dpiField = JBTextField(preset.dpi)
-
-        val listener = object : DocumentListener {
-            override fun insertUpdate(e: DocumentEvent?) = validateFields()
-            override fun removeUpdate(e: DocumentEvent?) = validateFields()
-            override fun changedUpdate(e: DocumentEvent?) = validateFields()
-        }
-        sizeField.document.addDocumentListener(listener)
-        dpiField.document.addDocumentListener(listener)
-
-        val deleteButton = JButton(AllIcons.Actions.Cancel)
-        deleteButton.addActionListener {
-            presetsPanel.remove(rowPanel)
-            validateFields()
-            presetsPanel.revalidate()
-            presetsPanel.repaint()
-        }
-
-        rowPanel.add(labelField)
-        rowPanel.add(sizeField)
-        rowPanel.add(dpiField)
-        rowPanel.add(deleteButton)
-
-        presetsPanel.add(rowPanel)
-        presetsPanel.revalidate()
-        presetsPanel.repaint()
-
-        return rowPanel
+        return panel
     }
 
     private fun validateFields() {
-        var allFieldsValid = true
-        for (component in presetsPanel.components) {
-            if (component is JPanel && component.componentCount >= 3) {
-                val sizeField = component.getComponent(1) as JBTextField
-                val dpiField = component.getComponent(2) as JBTextField
-
-                val isSizeValid = sizeField.text.isBlank() || sizeRegex.matches(sizeField.text)
-                // ИСПРАВЛЕНО: используем JBColor
-                sizeField.background = if (isSizeValid) UIManager.getColor("TextField.background") else JBColor.PINK
-                if (!isSizeValid) allFieldsValid = false
-
-                val isDpiValid = dpiField.text.isBlank() || dpiRegex.matches(dpiField.text)
-                // ИСПРАВЛЕНО: используем JBColor
-                dpiField.background = if (isDpiValid) UIManager.getColor("TextField.background") else JBColor.PINK
-                if (!isDpiValid) allFieldsValid = false
-            }
+        var allValid = true
+        for (i in 0 until tableModel.rowCount) {
+            val size = tableModel.getValueAt(i, 2) as? String ?: ""
+            val dpi = tableModel.getValueAt(i, 3) as? String ?: ""
+            if (size.isNotBlank() && !sizeRegex.matches(size)) allValid = false
+            if (dpi.isNotBlank() && !dpiRegex.matches(dpi)) allValid = false
         }
-        isOKActionEnabled = allFieldsValid
-    }
-
-    override fun doValidate(): ValidationInfo? {
-        for (component in presetsPanel.components) {
-            if (component is JPanel && component.componentCount >= 3) {
-                val sizeField = component.getComponent(1) as JBTextField
-                val dpiField = component.getComponent(2) as JBTextField
-                if (!sizeField.text.isBlank() && !sizeRegex.matches(sizeField.text)) {
-                    return ValidationInfo("Invalid format in 'Size' field. Use '1080x1920' format.", sizeField)
-                }
-                if (!dpiField.text.isBlank() && !dpiRegex.matches(dpiField.text)) {
-                    return ValidationInfo("Invalid format in 'DPI' field. Use numbers only.", dpiField)
-                }
-            }
-        }
-        return null
+        isOKActionEnabled = allValid
+        table.repaint()
     }
 
     override fun doOKAction() {
-        val newPresets = mutableListOf<DevicePreset>()
-        for (component in presetsPanel.components) {
-            if (component is JPanel && component.componentCount >= 3) {
-                val label = (component.getComponent(0) as JBTextField).text
-                val size = (component.getComponent(1) as JBTextField).text.replace(" ", "").replace(Regex("[хХ]"), "x")
-                val dpi = (component.getComponent(2) as JBTextField).text.replace(" ", "")
-
-                if (label.isNotBlank() || size.isNotBlank() || dpi.isNotBlank()) {
-                    newPresets.add(DevicePreset(label, size, dpi))
-                }
-            }
-        }
-        SettingsService.savePresets(newPresets)
+        if (table.isEditing) table.cellEditor.stopCellEditing()
+        SettingsService.savePresets(tableModel.getPresets())
         super.doOKAction()
     }
+
+    inner class ValidationRenderer : DefaultTableCellRenderer() {
+        override fun getTableCellRendererComponent(table: JTable, value: Any?, isSelected: Boolean, hasFocus: Boolean, row: Int, column: Int): Component {
+            val component = super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column)
+            if (column == 0 || column == 4) {
+                background = if (isSelected) table.selectionBackground else table.background
+                return component
+            }
+
+            val text = value as? String ?: ""
+            val isValid = if (text.isBlank()) true else when (column) {
+                2 -> sizeRegex.matches(text)
+                3 -> dpiRegex.matches(text)
+                else -> true
+            }
+
+            component.background = if (isSelected) table.selectionBackground else if (isValid) table.background else JBColor.PINK
+            return component
+        }
+    }
+}
+
+private class ButtonRenderer : JButton(AllIcons.Actions.Cancel), TableCellRenderer {
+    init {
+        isOpaque = true
+        preferredSize = Dimension(JBUI.scale(40), JBUI.scale(35))
+        minimumSize = preferredSize
+        maximumSize = preferredSize
+    }
+    override fun getTableCellRendererComponent(table: JTable, value: Any?, isSelected: Boolean, hasFocus: Boolean, row: Int, column: Int): Component {
+        background = if (isSelected) table.selectionBackground else UIManager.getColor("Button.background")
+        return this
+    }
+}
+
+private class ButtonEditor(private val table: JTable) : AbstractTableCellEditor(), TableCellEditor {
+    private val button = JButton(AllIcons.Actions.Cancel)
+
+    init {
+        button.preferredSize = Dimension(JBUI.scale(40), JBUI.scale(35))
+        button.minimumSize = button.preferredSize
+        button.maximumSize = button.preferredSize
+
+        button.addActionListener {
+            // Когда кнопка нажата, мы получаем строку, которая сейчас редактируется.
+            // Это всегда будет правильная строка.
+            val modelRow = table.convertRowIndexToModel(table.editingRow)
+
+            // Останавливаем редактирование, чтобы избежать ошибок
+            fireEditingStopped()
+
+            if (modelRow != -1) {
+                (table.model as DefaultTableModel).removeRow(modelRow)
+            }
+        }
+    }
+
+    override fun getTableCellEditorComponent(table: JTable, value: Any?, isSelected: Boolean, row: Int, column: Int): Component {
+        button.background = table.selectionBackground
+        return button
+    }
+
+    override fun getCellEditorValue(): Any = "Delete"
 }
