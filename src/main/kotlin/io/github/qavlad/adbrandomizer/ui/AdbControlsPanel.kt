@@ -9,18 +9,19 @@ import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.Project
 import io.github.qavlad.adbrandomizer.services.AdbService
+import io.github.qavlad.adbrandomizer.services.DevicePreset
 import io.github.qavlad.adbrandomizer.services.SettingsService
-import java.awt.Component
 import javax.swing.BoxLayout
 import javax.swing.JButton
 import javax.swing.JPanel
 
 class AdbControlsPanel(private val project: Project) : JPanel() {
 
+    private var lastUsedPreset: DevicePreset? = null
+
     init {
         layout = BoxLayout(this, BoxLayout.Y_AXIS)
 
-        // --- Кнопки ---
         add(createCenteredButton("RANDOM SIZE AND DPI") {
             handleRandomAction(setSize = true, setDpi = true)
         })
@@ -34,7 +35,7 @@ class AdbControlsPanel(private val project: Project) : JPanel() {
             handleResetAction()
         })
         add(createCenteredButton("SETTING") {
-            SettingsDialog(project).show() // Используем .show() для немодального окна
+            SettingsDialog(project).show()
         })
     }
 
@@ -44,7 +45,7 @@ class AdbControlsPanel(private val project: Project) : JPanel() {
             showNotification("No connected devices found.")
             return
         }
-        object : Task.Backgroundable(project, "Resetting Screen and DPI") {
+        object : Task.Backgroundable(project, "Resetting screen and DPI") {
             override fun run(indicator: ProgressIndicator) {
                 devices.forEach { device ->
                     indicator.text = "Resetting ${device.name}..."
@@ -62,24 +63,36 @@ class AdbControlsPanel(private val project: Project) : JPanel() {
             return
         }
 
-        val presets = SettingsService.getPresets().filter {
-            // Фильтруем пресеты, чтобы в них были нужные нам данные
+        var availablePresets = SettingsService.getPresets().filter {
             (!setSize || it.size.isNotBlank()) && (!setDpi || it.dpi.isNotBlank())
         }
-        if (presets.isEmpty()) {
-            showNotification("No suitable presets found in settings.")
-            return
+
+        if (availablePresets.size > 1 && lastUsedPreset != null) {
+            availablePresets = availablePresets.filter { it != lastUsedPreset }
         }
 
-        object : Task.Backgroundable(project, "Applying Random Settings") {
+        if (availablePresets.isEmpty()) {
+            val allSuitablePresets = SettingsService.getPresets().filter {
+                (!setSize || it.size.isNotBlank()) && (!setDpi || it.dpi.isNotBlank())
+            }
+            if (allSuitablePresets.isNotEmpty()) {
+                availablePresets = allSuitablePresets
+            } else {
+                showNotification("No suitable presets found in settings.")
+                return
+            }
+        }
+
+        object : Task.Backgroundable(project, "Applying random settings") {
             override fun run(indicator: ProgressIndicator) {
-                val randomPreset = presets.random()
+                val randomPreset = availablePresets.random()
+                lastUsedPreset = randomPreset
                 val appliedSettings = mutableListOf<String>()
 
                 var width: Int? = null
                 var height: Int? = null
                 if (setSize) {
-                    val parts = randomPreset.size.split('x')
+                    val parts = randomPreset.size.split('x', 'X', 'х', 'Х').map { it.trim() }
                     width = parts.getOrNull(0)?.toIntOrNull()
                     height = parts.getOrNull(1)?.toIntOrNull()
                     if (width == null || height == null) {
@@ -91,7 +104,7 @@ class AdbControlsPanel(private val project: Project) : JPanel() {
 
                 var dpi: Int? = null
                 if (setDpi) {
-                    dpi = randomPreset.dpi.toIntOrNull()
+                    dpi = randomPreset.dpi.trim().toIntOrNull()
                     if (dpi == null) {
                         showErrorNotification("Invalid DPI format in preset '${randomPreset.label}': ${randomPreset.dpi}")
                         return
@@ -111,7 +124,7 @@ class AdbControlsPanel(private val project: Project) : JPanel() {
 
     private fun createCenteredButton(text: String, action: () -> Unit): JButton {
         val button = JButton(text)
-        button.alignmentX = Component.CENTER_ALIGNMENT
+        button.alignmentX = CENTER_ALIGNMENT
         button.addActionListener { action() }
         return button
     }
