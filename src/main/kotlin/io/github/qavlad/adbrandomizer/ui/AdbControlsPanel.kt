@@ -2,56 +2,144 @@
 
 package io.github.qavlad.adbrandomizer.ui
 
+import com.intellij.ui.components.JBList
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.Project
+import com.intellij.ui.JBColor
+import com.intellij.ui.components.JBScrollPane
 import io.github.qavlad.adbrandomizer.services.AdbService
 import io.github.qavlad.adbrandomizer.services.DevicePreset
 import io.github.qavlad.adbrandomizer.services.SettingsService
 import io.github.qavlad.adbrandomizer.utils.ButtonUtils
+import java.awt.BorderLayout
 import java.util.Locale.getDefault
-import javax.swing.BoxLayout
-import javax.swing.JButton
-import javax.swing.JPanel
+import javax.swing.*
 
-class AdbControlsPanel(private val project: Project) : JPanel() {
+class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
 
     private var lastUsedPreset: DevicePreset? = null
     private var currentPresetIndex: Int = -1
+    private val deviceListModel = DefaultListModel<DeviceInfo>()
+    private val deviceList = JBList(deviceListModel)
 
     init {
-        layout = BoxLayout(this, BoxLayout.Y_AXIS)
+        // Создаем верхнюю панель с кнопками
+        val buttonsPanel = createButtonsPanel()
 
-        add(createCenteredButton("RANDOM SIZE AND DPI") {
+        // Создаем нижнюю панель со списком устройств
+        val devicesPanel = createDevicesPanel()
+
+        // Создаем JSplitPane для разделения панелей по вертикали
+        val splitPane = JSplitPane(JSplitPane.VERTICAL_SPLIT, buttonsPanel, devicesPanel).apply {
+            // Убираем рамку, чтобы выглядело чище
+            border = null
+            // Распределяем дополнительное пространство поровну при изменении размера окна
+            resizeWeight = 0.5
+            // Устанавливаем начальное положение разделителя после того, как компонент будет отображен
+            SwingUtilities.invokeLater {
+                // Устанавливаем разделитель на 50% высоты
+                setDividerLocation(0.5)
+            }
+        }
+
+        // Добавляем JSplitPane на основную панель
+        add(splitPane, BorderLayout.CENTER)
+
+
+        // Запускаем периодическое обновление списка устройств
+        startDevicePolling()
+    }
+
+    private fun createButtonsPanel(): JPanel {
+        val panel = JPanel()
+        panel.layout = BoxLayout(panel, BoxLayout.Y_AXIS)
+        panel.border = BorderFactory.createTitledBorder("Controls")
+
+        panel.add(createCenteredButton("RANDOM SIZE AND DPI") {
             handleRandomAction(setSize = true, setDpi = true)
         })
-        add(createCenteredButton("RANDOM SIZE ONLY") {
+        panel.add(createCenteredButton("RANDOM SIZE ONLY") {
             handleRandomAction(setSize = true, setDpi = false)
         })
-        add(createCenteredButton("RANDOM DPI ONLY") {
+        panel.add(createCenteredButton("RANDOM DPI ONLY") {
             handleRandomAction(setSize = false, setDpi = true)
         })
-        add(createCenteredButton("NEXT PRESET") {
+        panel.add(createCenteredButton("NEXT PRESET") {
             handleNextPreset()
         })
-        add(createCenteredButton("PREVIOUS PRESET") {
+        panel.add(createCenteredButton("PREVIOUS PRESET") {
             handlePreviousPreset()
         })
-        add(createCenteredButton("Reset size and DPI to default") {
+        panel.add(createCenteredButton("Reset size and DPI to default") {
             handleResetAction(resetSize = true, resetDpi = true)
         })
-        add(createCenteredButton("RESET SIZE ONLY") {
+        panel.add(createCenteredButton("RESET SIZE ONLY") {
             handleResetAction(resetSize = true, resetDpi = false)
         })
-        add(createCenteredButton("RESET DPI ONLY") {
+        panel.add(createCenteredButton("RESET DPI ONLY") {
             handleResetAction(resetSize = false, resetDpi = true)
         })
-        add(createCenteredButton("SETTING") {
+        panel.add(createCenteredButton("SETTING") {
             SettingsDialog(project).show()
         })
+
+        return panel
+    }
+
+    private fun createDevicesPanel(): JPanel {
+        val panel = JPanel(BorderLayout())
+        panel.border = BorderFactory.createTitledBorder("Connected Devices")
+        // Удаляем установку предпочтительного размера, JSplitPane справится с этим лучше
+        // panel.preferredSize = JBUI.size(0, 200)
+
+        // Настраиваем список устройств
+        deviceList.cellRenderer = DeviceListCellRenderer()
+        deviceList.selectionMode = ListSelectionModel.SINGLE_SELECTION
+        deviceList.background = JBColor.background()
+
+        val scrollPane = JBScrollPane(deviceList)
+        scrollPane.border = BorderFactory.createEmptyBorder()
+
+        panel.add(scrollPane, BorderLayout.CENTER)
+
+        return panel
+    }
+
+    private fun startDevicePolling() {
+        val timer = Timer(3000) { updateDeviceList() }
+        timer.start()
+
+        // Первое обновление сразу
+        updateDeviceList()
+    }
+
+    private fun updateDeviceList() {
+        ApplicationManager.getApplication().executeOnPooledThread {
+            val devices = AdbService.getConnectedDevices(project)
+
+            ApplicationManager.getApplication().invokeLater {
+                val selectedValue = deviceList.selectedValue
+                deviceListModel.clear()
+
+                if (devices.isEmpty()) {
+                    // Показываем сообщение если нет устройств
+                    deviceListModel.addElement(DeviceInfo.empty())
+                } else {
+                    devices.forEach { device ->
+                        val deviceInfo = DeviceInfo(device)
+                        deviceListModel.addElement(deviceInfo)
+                        // Пытаемся сохранить выбор
+                        if (deviceInfo == selectedValue) {
+                            deviceList.setSelectedValue(deviceInfo, true)
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private fun handleNextPreset() {
@@ -241,6 +329,68 @@ class AdbControlsPanel(private val project: Project) : JPanel() {
             NotificationGroupManager.getInstance()
                 .getNotificationGroup("ADB Randomizer Notifications")
                 .createNotification(message, type).notify(project)
+        }
+    }
+
+    // Класс для хранения информации об устройстве
+    private data class DeviceInfo(
+        val device: com.android.ddmlib.IDevice?,
+        val isEmpty: Boolean = false
+    ) {
+        companion object {
+            fun empty() = DeviceInfo(null, true)
+        }
+
+        override fun toString(): String {
+            return if (isEmpty) {
+                "No devices connected"
+            } else {
+                device?.let { "${it.name} (${it.serialNumber})" } ?: "Unknown device"
+            }
+        }
+
+        // Переопределяем equals и hashCode для корректного сравнения и сохранения выбора в JList
+        override fun equals(other: Any?): Boolean {
+            if (this === other) return true
+            if (javaClass != other?.javaClass) return false
+
+            other as DeviceInfo
+
+            if (isEmpty != other.isEmpty) return false
+            if (device?.serialNumber != other.device?.serialNumber) return false
+
+            return true
+        }
+
+        override fun hashCode(): Int {
+            var result = device?.serialNumber?.hashCode() ?: 0
+            result = 31 * result + isEmpty.hashCode()
+            return result
+        }
+    }
+
+    // Рендерер для списка устройств
+    private class DeviceListCellRenderer : DefaultListCellRenderer() {
+        override fun getListCellRendererComponent(
+            list: JList<*>?,
+            value: Any?,
+            index: Int,
+            isSelected: Boolean,
+            cellHasFocus: Boolean
+        ): java.awt.Component {
+            val component = super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus)
+
+            if (component is JLabel && value is DeviceInfo) {
+                if (value.isEmpty) {
+                    component.foreground = JBColor.GRAY
+                    component.horizontalAlignment = CENTER
+                } else {
+                    component.foreground = list?.foreground ?: JBColor.foreground()
+                    component.horizontalAlignment = LEFT
+                }
+            }
+
+            return component
         }
     }
 }
