@@ -20,6 +20,7 @@ import javax.swing.JPanel
 class AdbControlsPanel(private val project: Project) : JPanel() {
 
     private var lastUsedPreset: DevicePreset? = null
+    private var currentPresetIndex: Int = -1
 
     init {
         layout = BoxLayout(this, BoxLayout.Y_AXIS)
@@ -32,6 +33,12 @@ class AdbControlsPanel(private val project: Project) : JPanel() {
         })
         add(createCenteredButton("RANDOM DPI ONLY") {
             handleRandomAction(setSize = false, setDpi = true)
+        })
+        add(createCenteredButton("NEXT PRESET") {
+            handleNextPreset()
+        })
+        add(createCenteredButton("PREVIOUS PRESET") {
+            handlePreviousPreset()
         })
         add(createCenteredButton("Reset size and DPI to default") {
             handleResetAction(resetSize = true, resetDpi = true)
@@ -47,7 +54,99 @@ class AdbControlsPanel(private val project: Project) : JPanel() {
         })
     }
 
-    private fun handleResetAction(resetSize: Boolean = true, resetDpi: Boolean = true) {
+    private fun handleNextPreset() {
+        val presets = SettingsService.getPresets()
+        if (presets.isEmpty()) {
+            showNotification("No presets found in settings.")
+            return
+        }
+
+        currentPresetIndex = (currentPresetIndex + 1) % presets.size
+        applyPresetByIndex(currentPresetIndex)
+    }
+
+    private fun handlePreviousPreset() {
+        val presets = SettingsService.getPresets()
+        if (presets.isEmpty()) {
+            showNotification("No presets found in settings.")
+            return
+        }
+
+        currentPresetIndex = if (currentPresetIndex <= 0) presets.size - 1 else currentPresetIndex - 1
+        applyPresetByIndex(currentPresetIndex)
+    }
+
+    private fun applyPresetByIndex(index: Int) {
+        val devices = AdbService.getConnectedDevices(project)
+        if (devices.isEmpty()) {
+            showNotification("No connected devices found.")
+            return
+        }
+
+        val presets = SettingsService.getPresets()
+        if (index < 0 || index >= presets.size) {
+            showNotification("Invalid preset index.")
+            return
+        }
+
+        val preset = presets[index]
+        applyPreset(preset, index + 1, setSize = true, setDpi = true)
+    }
+
+    private fun applyPreset(preset: DevicePreset, presetNumber: Int, setSize: Boolean, setDpi: Boolean) {
+        val devices = AdbService.getConnectedDevices(project)
+
+        object : Task.Backgroundable(project, "Applying preset") {
+            override fun run(indicator: ProgressIndicator) {
+                lastUsedPreset = preset
+                val appliedSettings = mutableListOf<String>()
+
+                var width: Int? = null
+                var height: Int? = null
+                if (setSize && preset.size.isNotBlank()) {
+                    val parts = preset.size.split('x', 'X', 'х', 'Х').map { it.trim() }
+                    width = parts.getOrNull(0)?.toIntOrNull()
+                    height = parts.getOrNull(1)?.toIntOrNull()
+                    if (width == null || height == null) {
+                        showErrorNotification("Invalid size format in preset '${preset.label}': ${preset.size}")
+                        return
+                    }
+                    appliedSettings.add("Size: ${preset.size}")
+                }
+
+                var dpi: Int? = null
+                if (setDpi && preset.dpi.isNotBlank()) {
+                    dpi = preset.dpi.trim().toIntOrNull()
+                    if (dpi == null) {
+                        showErrorNotification("Invalid DPI format in preset '${preset.label}': ${preset.dpi}")
+                        return
+                    }
+                    appliedSettings.add("DPI: ${preset.dpi}")
+                }
+
+                // Применяем только если есть что применять
+                if (appliedSettings.isEmpty()) {
+                    showNotification("No settings to apply for preset '${preset.label}'")
+                    return
+                }
+
+                devices.forEach { device ->
+                    indicator.text = "Applying '${preset.label}' to ${device.name}..."
+                    if (setSize && width != null && height != null) {
+                        AdbService.setSize(device, width, height)
+                    }
+                    if (setDpi && dpi != null) {
+                        AdbService.setDpi(device, dpi)
+                    }
+                }
+
+                val message = "<html>Preset №${presetNumber}: ${preset.label};<br>${appliedSettings.joinToString(", ")}</html>"
+                showSuccessNotification(message)
+            }
+        }.queue()
+    }
+
+    private fun handleResetAction(resetSize: Boolean, resetDpi: Boolean) {
         val devices = AdbService.getConnectedDevices(project)
         if (devices.isEmpty()) {
             showNotification("No connected devices found.")
@@ -112,51 +211,14 @@ class AdbControlsPanel(private val project: Project) : JPanel() {
             }
         }
 
-        object : Task.Backgroundable(project, "Applying random settings") {
-            override fun run(indicator: ProgressIndicator) {
-                val randomPreset = availablePresets.random()
-                lastUsedPreset = randomPreset
-                val appliedSettings = mutableListOf<String>()
+        val randomPreset = availablePresets.random()
 
-                var width: Int? = null
-                var height: Int? = null
-                if (setSize) {
-                    val parts = randomPreset.size.split('x', 'X', 'х', 'Х').map { it.trim() }
-                    width = parts.getOrNull(0)?.toIntOrNull()
-                    height = parts.getOrNull(1)?.toIntOrNull()
-                    if (width == null || height == null) {
-                        showErrorNotification("Invalid size format in preset '${randomPreset.label}': ${randomPreset.size}")
-                        return
-                    }
-                    appliedSettings.add("Size: ${randomPreset.size}")
-                }
+        // Обновляем currentPresetIndex при случайном выборе
+        val allPresets = SettingsService.getPresets()
+        currentPresetIndex = allPresets.indexOf(randomPreset)
+        val presetNumber = allPresets.indexOfFirst { it.label == randomPreset.label } + 1
 
-                var dpi: Int? = null
-                if (setDpi) {
-                    dpi = randomPreset.dpi.trim().toIntOrNull()
-                    if (dpi == null) {
-                        showErrorNotification("Invalid DPI format in preset '${randomPreset.label}': ${randomPreset.dpi}")
-                        return
-                    }
-                    appliedSettings.add("DPI: ${randomPreset.dpi}")
-                }
-
-                devices.forEach { device ->
-                    indicator.text = "Applying '${randomPreset.label}' to ${device.name}..."
-                    width?.let { w -> height?.let { h -> AdbService.setSize(device, w, h) } }
-                    dpi?.let { d -> AdbService.setDpi(device, d) }
-                }
-
-                // Находим номер пресета в списке всех пресетов
-                val allPresets = SettingsService.getPresets()
-                val presetNumber = allPresets.indexOfFirst { it.label == randomPreset.label } + 1
-
-                // Формируем HTML-сообщение с переносом строки
-                val message = "<html>Preset №${presetNumber}: ${randomPreset.label};<br>${appliedSettings.joinToString(", ")}</html>"
-
-                showSuccessNotification(message)
-            }
-        }.queue()
+        applyPreset(randomPreset, presetNumber, setSize, setDpi)
     }
 
     private fun createCenteredButton(text: String, action: () -> Unit): JButton {
