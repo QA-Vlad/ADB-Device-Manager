@@ -1,8 +1,6 @@
 // Файл: src/main/kotlin/io/github/qavlad/adbrandomizer/services/AdbService.kt
 
 package io.github.qavlad.adbrandomizer.services
-
-import com.android.ddmlib.AndroidDebugBridge
 import com.android.ddmlib.IDevice
 import com.android.ddmlib.NullOutputReceiver
 import com.intellij.openapi.project.Project
@@ -29,7 +27,7 @@ object AdbService {
         while (!bridge.hasInitialDeviceList() && attempts > 0) {
             try {
                 Thread.sleep(100)
-            } catch (e: InterruptedException) {
+            } catch (_: InterruptedException) {
                 // Игнорируем
             }
             attempts--
@@ -41,21 +39,25 @@ object AdbService {
         // --- КОНЕЦ ПРАВИЛЬНОГО РЕШЕНИЯ ---
     }
 
-    // Эта функция остается без изменений
-    fun resetScreen(device: IDevice) {
+    // Сброс только размера экрана
+    fun resetSize(device: IDevice) {
         device.executeShellCommand("wm size reset", NullOutputReceiver(), 15, TimeUnit.SECONDS)
+    }
+
+    // Сброс только DPI
+    fun resetDpi(device: IDevice) {
         device.executeShellCommand("wm density reset", NullOutputReceiver(), 15, TimeUnit.SECONDS)
     }
 
+    // Установка размера экрана
     fun setSize(device: IDevice, width: Int, height: Int) {
         val command = "wm size ${width}x${height}"
         device.executeShellCommand(command, NullOutputReceiver(), 15, TimeUnit.SECONDS)
     }
 
-    // Новый метод для установки DPI
+    // Установка DPI
     fun setDpi(device: IDevice, dpi: Int) {
         val command = "wm density $dpi"
         device.executeShellCommand(command, NullOutputReceiver(), 15, TimeUnit.SECONDS)
     }
 }
-

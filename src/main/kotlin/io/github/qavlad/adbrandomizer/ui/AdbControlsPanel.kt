@@ -12,6 +12,7 @@ import io.github.qavlad.adbrandomizer.services.AdbService
 import io.github.qavlad.adbrandomizer.services.DevicePreset
 import io.github.qavlad.adbrandomizer.services.SettingsService
 import io.github.qavlad.adbrandomizer.utils.ButtonUtils
+import java.util.Locale.getDefault
 import javax.swing.BoxLayout
 import javax.swing.JButton
 import javax.swing.JPanel
@@ -33,26 +34,53 @@ class AdbControlsPanel(private val project: Project) : JPanel() {
             handleRandomAction(setSize = false, setDpi = true)
         })
         add(createCenteredButton("Reset size and DPI to default") {
-            handleResetAction()
+            handleResetAction(resetSize = true, resetDpi = true)
+        })
+        add(createCenteredButton("RESET SIZE ONLY") {
+            handleResetAction(resetSize = true, resetDpi = false)
+        })
+        add(createCenteredButton("RESET DPI ONLY") {
+            handleResetAction(resetSize = false, resetDpi = true)
         })
         add(createCenteredButton("SETTING") {
             SettingsDialog(project).show()
         })
     }
 
-    private fun handleResetAction() {
+    private fun handleResetAction(resetSize: Boolean = true, resetDpi: Boolean = true) {
         val devices = AdbService.getConnectedDevices(project)
         if (devices.isEmpty()) {
             showNotification("No connected devices found.")
             return
         }
-        object : Task.Backgroundable(project, "Resetting screen and DPI") {
+
+        val actionDescription = when {
+            resetSize && resetDpi -> "Resetting screen and DPI"
+            resetSize -> "Resetting screen size"
+            resetDpi -> "Resetting DPI"
+            else -> "No action"
+        }
+
+        object : Task.Backgroundable(project, actionDescription) {
             override fun run(indicator: ProgressIndicator) {
                 devices.forEach { device ->
                     indicator.text = "Resetting ${device.name}..."
-                    AdbService.resetScreen(device)
+                    if (resetSize) {
+                        AdbService.resetSize(device)
+                    }
+                    if (resetDpi) {
+                        AdbService.resetDpi(device)
+                    }
                 }
-                showSuccessNotification("Screen and DPI have been reset for ${devices.size} device(s).")
+
+                val resetItems = mutableListOf<String>()
+                if (resetSize) resetItems.add("screen size")
+                if (resetDpi) resetItems.add("DPI")
+
+                showSuccessNotification("${
+                    resetItems.joinToString(" and ")
+                        .replaceFirstChar { if (it.isLowerCase()) it.titlecase(getDefault()) else it.toString() }
+                } reset for ${devices.size} device(s).")
             }
         }.queue()
     }
