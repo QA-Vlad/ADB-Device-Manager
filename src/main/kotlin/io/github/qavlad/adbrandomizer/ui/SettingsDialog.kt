@@ -12,17 +12,16 @@ import com.intellij.util.ui.AbstractTableCellEditor
 import com.intellij.util.ui.JBUI
 import io.github.qavlad.adbrandomizer.services.DevicePreset
 import io.github.qavlad.adbrandomizer.services.SettingsService
+import io.github.qavlad.adbrandomizer.utils.ButtonUtils
 import java.awt.BorderLayout
 import java.awt.Component
 import java.awt.Dimension
-import javax.swing.ToolTipManager
 import java.util.*
 import javax.swing.*
 import javax.swing.table.DefaultTableCellRenderer
 import javax.swing.table.DefaultTableModel
 import javax.swing.table.TableCellEditor
 import javax.swing.table.TableCellRenderer
-import javax.swing.SwingUtilities
 
 class SettingsDialog(project: Project?) : DialogWrapper(project) {
     private lateinit var table: JBTable
@@ -35,6 +34,29 @@ class SettingsDialog(project: Project?) : DialogWrapper(project) {
         title = "ADB Randomizer Settings"
         setOKButtonText("Save")
         init()
+
+        // Добавляем hover эффекты для кнопок диалога
+        SwingUtilities.invokeLater {
+            addHoverEffectToDialogButtons()
+        }
+    }
+
+    private fun addHoverEffectToDialogButtons() {
+        // Находим и обрабатываем кнопки OK и Cancel
+        fun processButtons(container: java.awt.Container) {
+            for (component in container.components) {
+                when (component) {
+                    is JButton -> {
+                        if (component.text == "Save" || component.text == "Cancel") {
+                            ButtonUtils.addHoverEffect(component)
+                        }
+                    }
+                    is java.awt.Container -> processButtons(component)
+                }
+            }
+        }
+
+        processButtons(contentPane)
     }
 
     override fun createCenterPanel(): JComponent {
@@ -54,7 +76,6 @@ class SettingsDialog(project: Project?) : DialogWrapper(project) {
         tableModel = DevicePresetTableModel(dataVector, columnNames)
         tableModel.addTableModelListener { validateFields() }
 
-        // Возвращаемся к обычной JBTable
         table = JBTable(tableModel)
 
         setupTable()
@@ -120,7 +141,8 @@ class SettingsDialog(project: Project?) : DialogWrapper(project) {
 
     private fun createButtonPanel(): JPanel {
         val panel = JPanel()
-        panel.add(JButton("Add Preset", AllIcons.General.Add).apply {
+
+        val addButton = JButton("Add Preset", AllIcons.General.Add).apply {
             addActionListener {
                 // Добавляем новую строку
                 val newRowIndex = tableModel.rowCount
@@ -138,21 +160,25 @@ class SettingsDialog(project: Project?) : DialogWrapper(project) {
                     table.editorComponent?.requestFocus()
                 }
             }
-        })
+        }
+        ButtonUtils.addHoverEffect(addButton)
+        panel.add(addButton)
 
-        val importButton = JButton("Import Common Devices")
-        importButton.addActionListener {
-            val commonPresets = listOf(
-                DevicePreset("Pixel 6 Pro", "1440x3120", "512"),
-                DevicePreset("Pixel 5", "1080x2340", "432")
-            )
-            val existingLabels = tableModel.getPresets().map { it.label }.toSet()
-            commonPresets.forEach {
-                if (!existingLabels.contains(it.label)) {
-                    tableModel.addRow(Vector(listOf("☰", it.label, it.size, it.dpi, "Delete")))
+        val importButton = JButton("Import Common Devices").apply {
+            addActionListener {
+                val commonPresets = listOf(
+                    DevicePreset("Pixel 6 Pro", "1440x3120", "512"),
+                    DevicePreset("Pixel 5", "1080x2340", "432")
+                )
+                val existingLabels = tableModel.getPresets().map { it.label }.toSet()
+                commonPresets.forEach {
+                    if (!existingLabels.contains(it.label)) {
+                        tableModel.addRow(Vector(listOf("☰", it.label, it.size, it.dpi, "Delete")))
+                    }
                 }
             }
         }
+        ButtonUtils.addHoverEffect(importButton)
         panel.add(importButton)
 
         return panel

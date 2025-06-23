@@ -11,6 +11,7 @@ import com.intellij.openapi.project.Project
 import io.github.qavlad.adbrandomizer.services.AdbService
 import io.github.qavlad.adbrandomizer.services.DevicePreset
 import io.github.qavlad.adbrandomizer.services.SettingsService
+import io.github.qavlad.adbrandomizer.utils.ButtonUtils
 import javax.swing.BoxLayout
 import javax.swing.JButton
 import javax.swing.JPanel
@@ -125,6 +126,10 @@ class AdbControlsPanel(private val project: Project) : JPanel() {
     private fun createCenteredButton(text: String, action: () -> Unit): JButton {
         val button = JButton(text)
         button.alignmentX = CENTER_ALIGNMENT
+
+        // Используем общую функцию
+        ButtonUtils.addHoverEffect(button)
+
         button.addActionListener { action() }
         return button
     }
