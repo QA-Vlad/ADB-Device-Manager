@@ -118,7 +118,15 @@ class AdbControlsPanel(private val project: Project) : JPanel() {
                     width?.let { w -> height?.let { h -> AdbService.setSize(device, w, h) } }
                     dpi?.let { d -> AdbService.setDpi(device, d) }
                 }
-                showSuccessNotification("${appliedSettings.joinToString(", ")} from '${randomPreset.label}' set for ${devices.size} device(s).")
+
+                // Находим номер пресета в списке всех пресетов
+                val allPresets = SettingsService.getPresets()
+                val presetNumber = allPresets.indexOfFirst { it.label == randomPreset.label } + 1
+
+                // Формируем HTML-сообщение с переносом строки
+                val message = "<html>Preset №${presetNumber}: ${randomPreset.label};<br>${appliedSettings.joinToString(", ")}</html>"
+
+                showSuccessNotification(message)
             }
         }.queue()
     }

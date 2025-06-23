@@ -37,7 +37,7 @@ object SettingsService {
             // Указываем Gson, что мы хотим получить именно List<DevicePreset>
             val type = object : TypeToken<List<DevicePreset>>() {}.type
             gson.fromJson(json, type)
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             // Если JSON некорректен, возвращаем дефолтные значения
             getDefaultPresets()
         }
