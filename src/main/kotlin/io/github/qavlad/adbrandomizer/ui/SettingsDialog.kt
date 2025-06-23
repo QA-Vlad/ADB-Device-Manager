@@ -60,15 +60,16 @@ class SettingsDialog(project: Project?) : DialogWrapper(project) {
     }
 
     override fun createCenterPanel(): JComponent {
-        val columnNames = Vector(listOf(" ", "Label", "Size (e.g., 1080x1920)", "DPI (e.g., 480)", "  "))
+        val columnNames = Vector(listOf(" ", "№", "Label", "Size (e.g., 1080x1920)", "DPI (e.g., 480)", "  "))
         val presets = SettingsService.getPresets()
         val dataVector = Vector<Vector<Any>>()
-        presets.forEach {
+        presets.forEachIndexed { index, preset ->
             val row = Vector<Any>()
             row.add("☰")
-            row.add(it.label)
-            row.add(it.size)
-            row.add(it.dpi)
+            row.add(index + 1) // Номер строки
+            row.add(preset.label)
+            row.add(preset.size)
+            row.add(preset.dpi)
             row.add("Delete")
             dataVector.add(row)
         }
@@ -105,14 +106,15 @@ class SettingsDialog(project: Project?) : DialogWrapper(project) {
 
             // Настраиваем быстрое появление tooltip
             val toolTipManager = ToolTipManager.sharedInstance()
-            toolTipManager.initialDelay = 100  // Задержка перед первым показом (100мс)
-            toolTipManager.dismissDelay = 5000 // Время показа tooltip (5 сек)
-            toolTipManager.reshowDelay = 50    // Задержка при повторном показе (50мс)
+            toolTipManager.initialDelay = 100
+            toolTipManager.dismissDelay = 5000
+            toolTipManager.reshowDelay = 50
 
             // Отключаем hover эффекты, которые могут влиять на цвет
             putClientProperty("JTable.stripedBackground", false)
             putClientProperty("Table.isFileList", false)
 
+            // Колонка 0: Drag handle
             columnModel.getColumn(0).apply {
                 minWidth = JBUI.scale(30)
                 maxWidth = JBUI.scale(30)
@@ -129,7 +131,21 @@ class SettingsDialog(project: Project?) : DialogWrapper(project) {
                     }
                 }
             }
-            columnModel.getColumn(4).apply {
+
+            // Колонка 1: Номер строки
+            columnModel.getColumn(1).apply {
+                minWidth = JBUI.scale(40)
+                maxWidth = JBUI.scale(40)
+                cellRenderer = object : DefaultTableCellRenderer() {
+                    init {
+                        horizontalAlignment = CENTER
+                        isOpaque = true
+                    }
+                }
+            }
+
+            // Колонка 5: Delete button (было 4, теперь 5)
+            columnModel.getColumn(5).apply {
                 minWidth = JBUI.scale(40)
                 maxWidth = JBUI.scale(40)
                 cellRenderer = ButtonRenderer()
@@ -146,17 +162,17 @@ class SettingsDialog(project: Project?) : DialogWrapper(project) {
             addActionListener {
                 // Добавляем новую строку
                 val newRowIndex = tableModel.rowCount
-                tableModel.addRow(Vector(listOf("☰", "", "", "", "Delete")))
+                tableModel.addRow(Vector(listOf("☰", newRowIndex + 1, "", "", "", "Delete")))
 
                 // Выделяем новую строку, прокручиваем к ней и начинаем редактирование колонки Label
                 SwingUtilities.invokeLater {
                     table.setRowSelectionInterval(newRowIndex, newRowIndex)
 
                     // Прокручиваем таблицу к новой строке
-                    table.scrollRectToVisible(table.getCellRect(newRowIndex, 1, true))
+                    table.scrollRectToVisible(table.getCellRect(newRowIndex, 2, true)) // Теперь Label в колонке 2
 
-                    // Начинаем редактирование колонки Label (индекс 1)
-                    table.editCellAt(newRowIndex, 1)
+                    // Начинаем редактирование колонки Label (индекс 2)
+                    table.editCellAt(newRowIndex, 2)
                     table.editorComponent?.requestFocus()
                 }
             }
@@ -173,7 +189,8 @@ class SettingsDialog(project: Project?) : DialogWrapper(project) {
                 val existingLabels = tableModel.getPresets().map { it.label }.toSet()
                 commonPresets.forEach {
                     if (!existingLabels.contains(it.label)) {
-                        tableModel.addRow(Vector(listOf("☰", it.label, it.size, it.dpi, "Delete")))
+                        val newRowIndex = tableModel.rowCount
+                        tableModel.addRow(Vector(listOf("☰", newRowIndex + 1, it.label, it.size, it.dpi, "Delete")))
                     }
                 }
             }
@@ -187,8 +204,8 @@ class SettingsDialog(project: Project?) : DialogWrapper(project) {
     private fun validateFields() {
         var allValid = true
         for (i in 0 until tableModel.rowCount) {
-            val size = tableModel.getValueAt(i, 2) as? String ?: ""
-            val dpi = tableModel.getValueAt(i, 3) as? String ?: ""
+            val size = tableModel.getValueAt(i, 3) as? String ?: "" // Теперь Size в колонке 3
+            val dpi = tableModel.getValueAt(i, 4) as? String ?: ""  // Теперь DPI в колонке 4
             if (size.isNotBlank() && !sizeRegex.matches(size)) allValid = false
             if (dpi.isNotBlank() && !dpiRegex.matches(dpi)) allValid = false
         }
@@ -204,38 +221,34 @@ class SettingsDialog(project: Project?) : DialogWrapper(project) {
 
     inner class ValidationRenderer : DefaultTableCellRenderer() {
         override fun getTableCellRendererComponent(table: JTable, value: Any?, isSelected: Boolean, hasFocus: Boolean, row: Int, column: Int): Component {
-            // Сначала получаем стандартный компонент
             super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column)
 
-            // Устанавливаем непрозрачность для корректного отображения
             isOpaque = true
 
             when (column) {
-                0, 4 -> {
-                    // Для колонок с иконками и кнопками - стандартное поведение
+                0, 1, 5 -> {
+                    // Для колонок с иконками, номерами и кнопками - стандартное поведение
                     background = if (isSelected) table.selectionBackground else table.background
                     foreground = if (isSelected) table.selectionForeground else table.foreground
                 }
-                1 -> {
+                2 -> {
                     // Для колонки Label - стандартное поведение без валидации
                     background = if (isSelected) table.selectionBackground else table.background
                     foreground = if (isSelected) table.selectionForeground else table.foreground
                 }
-                2, 3 -> {
+                3, 4 -> {
                     // Для колонок Size и DPI - с валидацией
                     val text = value as? String ?: ""
                     val isValid = if (text.isBlank()) true else when (column) {
-                        2 -> sizeRegex.matches(text)
-                        3 -> dpiRegex.matches(text)
+                        3 -> sizeRegex.matches(text) // Size теперь в колонке 3
+                        4 -> dpiRegex.matches(text)  // DPI теперь в колонке 4
                         else -> true
                     }
 
                     if (!isValid) {
-                        // Невалидные поля всегда розовые
                         background = JBColor.PINK
                         foreground = JBColor.BLACK
                     } else {
-                        // Валидные поля используют стандартные цвета
                         background = if (isSelected) table.selectionBackground else table.background
                         foreground = if (isSelected) table.selectionForeground else table.foreground
                     }
