@@ -37,3 +37,8 @@ build/
 # Windows
 Thumbs.db
 /Черновик.txt
+
+
+# Local sandbox override
+gradle-local.properties
+sandbox-persistent/

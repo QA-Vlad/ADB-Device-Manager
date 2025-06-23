@@ -1,5 +1,8 @@
 // Файл: build.gradle.kts
 
+import java.util.Properties
+import java.io.FileInputStream
+
 plugins {
     id("java")
     id("org.jetbrains.kotlin.jvm") version "1.9.21"
@@ -9,26 +12,35 @@ plugins {
 group = "io.github.qavlad"
 version = "0.1.0-SNAPSHOT"
 
-// --- ИЗМЕНЕНИЕ ЗДЕСЬ ---
+// Загружаем локальные properties если они есть
+val localPropertiesFile = rootProject.file("gradle-local.properties")
+if (localPropertiesFile.exists()) {
+    val localProperties = Properties()
+    FileInputStream(localPropertiesFile).use { localProperties.load(it) }
+    localProperties.forEach { key, value ->
+        project.ext[key.toString()] = value
+    }
+}
+
 repositories {
     mavenCentral()
     // Добавляем репозиторий Google, где лежат все Android-библиотеки, включая ddmlib
     google()
 }
 
-// Блок intellij остается без изменений
 intellij {
     version.set("2023.2.5")
     type.set("IC")
     plugins.set(listOf("org.jetbrains.android"))
+
+    // Позволяет локально переопределить путь к sandbox
+    sandboxDir.set(project.findProperty("intellij.sandboxDir") as String? ?: "build/idea-sandbox")
 }
 
-// Блок зависимостей остается без изменений
 dependencies {
     implementation("com.google.code.gson:gson:2.10.1")
 }
 
-// Блок tasks остается без изменений
 tasks {
     withType<JavaCompile> {
         sourceCompatibility = "17"
