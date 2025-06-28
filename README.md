@@ -1,138 +1,129 @@
 # ADB Screen Randomizer
 
-> 🔧 **IntelliJ IDEA/Android Studio plugin created with love for mobile QA and developers**
+> 🔧 **An IntelliJ IDEA/Android Studio plugin created with love for mobile QA and developers**
 
-⚠️ **Project is in early development stage** — functionality is being actively improved
+⚠️ **This project is in an early stage of development** — functionality is being actively improved and expanded.
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Status](https://img.shields.io/badge/Status-In%20Development-red.svg)]()
 
-## 📱 About the project
+## 📱 About the Project
 
-**ADB Screen Randomizer** is an IntelliJ IDEA plugin designed to simplify the process of testing mobile applications on various screen resolutions and DPI settings. The plugin allows you to quickly and conveniently change screen parameters of connected Android devices directly from the IDE, significantly speeding up the UI adaptability testing process.
+**ADB Screen Randomizer** is an IntelliJ IDEA plugin designed to simplify the process of testing mobile applications on various screen resolutions and DPIs. The plugin allows you to quickly and conveniently change the screen parameters of connected Android devices directly from the IDE, significantly speeding up the UI adaptability testing process.
 
-### 🎯 Project goal
+### 🎯 Project Goal
 
-Every mobile QA knows how tedious it can be to test an application on multiple different screens and pixel densities. Usually this requires:
-- Switching between multiple physical devices
-- Manual input of ADB commands in terminal
-- Constantly remembering screen sizes of various devices
+Every mobile QA knows how tedious it can be to test an application on multiple different screens. This usually requires:
+- Switching between multiple physical devices.
+- Manually entering ADB commands in the terminal.
+- Constantly remembering the screen sizes of various devices.
 
-**ADB Screen Randomizer** solves these problems by providing a simple and intuitive interface for instant screen parameter changes.
+**ADB Screen Randomizer** solves these problems by providing a simple and intuitive interface for instantly changing screen parameters and performing other useful actions.
 
-## ✨ Key features
+## ✨ Key Features
 
-### 🎲 Screen parameter randomization
-- **Random size and DPI** — instant application of random screen configuration
-- **Size only** — change screen resolution only
-- **DPI only** — change pixel density only
+### 🎲 Screen Parameter Management
+- **Random Size and DPI** — instantly apply a random configuration.
+- **Random Size Only** — change only the screen resolution.
+- **Random DPI Only** — change only the pixel density.
+- **Quick Reset** — revert to the device's original factory settings (full or partial).
 
-### 📋 Preset management
-- **Customizable device presets** — create and save configurations for popular devices
-- **Preset switching** — quick switching between pre-configured settings
-- **Import popular devices** — ready-made presets for common devices
+### 📋 Preset Manager
+- **Customizable Presets** — create and save configurations for popular devices.
+- **Quick Switching** — cycle through your presets with a single button.
+- **Import Popular Devices** — get ready-made presets for common devices.
 
-### 🔄 Quick reset
-- **Full reset** — return to original device parameters
-- **Partial reset** — reset only size or only DPI
+### ⚡ Additional Tools
+- **Connect via Wi-Fi** — enable wireless debugging mode for USB-connected devices in one click.
+- **Screen Mirroring ([scrcpy integration](https://github.com/Genymobile/scrcpy))** — start streaming your device's screen to your computer directly from the IDE.
 
-## 🚀 Quick start
+## 🚀 Quick Start
 
-> ⚠️ **Note:** Plugin is in development and not yet available in the official JetBrains marketplace
+> ⚠️ **Important:** The plugin is under development and has not yet been published to the official JetBrains Marketplace.
 
-### Build from source
+### Build from Source
 
 ```bash
 # Clone the repository
-git clone https://github.com/QA-Vlad/ADB-Screen-Randomizer.git
+git clone [https://github.com/QA-Vlad/ADB-Screen-Randomizer.git](https://github.com/QA-Vlad/ADB-Screen-Randomizer.git)
 cd ADB-Screen-Randomizer
 
-# Open project in IntelliJ IDEA and run via green Run button
-# or use gradle task 'runIde' from Gradle panel
+# Open the project in IntelliJ IDEA and run it
+# using the green 'Run' button or the 'runIde' Gradle task
 ```
 
-### First use
+### First Use
 
-1. **Connect Android device** via USB or Wi-Fi
-2. **Open plugin panel** — find "ADB Randomizer" in the right sidebar
-3. **Make sure device is displayed** in the connected devices list
-4. **Click "RANDOM SIZE AND DPI"** to apply random configuration
+1. **Connect an Android device** via USB.
+2. **Open the plugin panel** — find "ADB Randomizer" in the right sidebar.
+3. **Ensure your device is displayed** in the list.
+4. **Click "RANDOM SIZE AND DPI"** to apply a random configuration.
 
 ## 🛠️ Usage
 
-### Plugin interface
+### Plugin Interface
 
-The plugin provides a convenient toolbar with two main sections:
+The plugin consists of two main sections:
 
-#### Control panel
-- `RANDOM SIZE AND DPI` — apply random screen size and DPI
-- `RANDOM SIZE ONLY` — apply random screen size
-- `RANDOM DPI ONLY` — apply random DPI value
-- `NEXT PRESET` — switch to next preset
-- `PREVIOUS PRESET` — switch to previous preset
-- `Reset size and DPI to default` — reset all parameters to factory defaults
-- `RESET SIZE ONLY` — reset screen size only
-- `RESET DPI ONLY` — reset DPI only
-- `SETTING` — open preset configuration window
+#### Control Panel
+- `RANDOM SIZE AND DPI` — apply a random size and DPI.
+- `RANDOM SIZE ONLY` — apply a random size only.
+- `RANDOM DPI ONLY` — apply a random DPI value only.
+- `NEXT/PREVIOUS PRESET` — switch between your presets.
+- `Reset size and DPI to default` — reset all parameters to factory settings.
+- `RESET SIZE ONLY / RESET DPI ONLY` — reset only the size or DPI.
+- `PRESETS` — open the preset configuration window.
 
-#### Device panel
-- Displays all connected Android devices
-- Shows device name and serial number
-- Automatically updates every 3 seconds
+#### Device Panel
+- Displays all connected Android devices (both USB and Wi-Fi).
+- Automatically refreshes every 3 seconds.
+- Provides quick actions for each device:
+    - **[Monitor Icon]** — start screen mirroring via `scrcpy`.
+    - **Wi-Fi** — (for USB devices only) enable Wi-Fi debugging mode.
 
-### Preset configuration
+### Preset Configuration
 
-1. Click **"SETTING"** button
-2. In the opened window you can:
-   - **Add new preset** — "Add Preset" button
-   - **Import popular devices** — "Import Common Devices" button
-   - **Edit existing presets** — click on cell to edit
-   - **Delete preset** — trash icon button
-   - **Change order** — drag and drop presets with mouse
+1. Click the **"PRESETS"** button.
+2. In the window that opens, you can:
+   - **Add a new preset** — "Add Preset" button.
+   - **Import popular devices** — "Import Common Devices" button.
+   - **Edit existing ones** — simply click on a cell.
+   - **Delete a preset** — the trash can icon button.
+   - **Change the order** — drag and drop presets with your mouse.
 
-#### Settings format
-- **Label** — preset name (e.g., "Pixel 5")
-- **Size** — resolution in format `width x height` (e.g., "1080x2340")
-- **DPI** — pixel density (e.g., "432")
-
-### System requirements
-- **IntelliJ IDEA** 2023.2+ or **Android Studio** Flamingo+
-- **Android SDK** with configured ADB
+### System Requirements
+- **IntelliJ IDEA** 2023.2+ or **Android Studio** Iguana+
+- **Android SDK** with ADB configured.
 - **Java 17+**
+- **Scrcpy** (optional, for the screen mirroring feature). Must be in the system's `PATH` or specified manually on first use.
 
-### Technologies used
-- **Kotlin** — primary development language
-- **IntelliJ Platform SDK** — for IDE integration
-- **Android DDMLib** — for device interaction via ADB
-- **Gson** — for settings serialization
-- **Swing** — for user interface
+### Technologies Used
+- **Kotlin** — primary development language.
+- **IntelliJ Platform SDK** — for IDE integration.
+- **Android DDMLib** — for interacting with devices via ADB.
+- **Gson** — for settings serialization.
+- **Swing** — for the user interface.
 
 ## 🤝 Contributing
 
-The project is open for community contributions! Since the project is in active development, your contribution is especially valuable:
+The project is open to community contributions! As the plugin is under active development, your input is especially valuable.
 
-### Testing
-- 🧪 Test the plugin in various environments
-- 📝 Report found bugs
-- 💡 Suggest UX improvements
-
-### Suggesting improvements
-1. Describe desired functionality in a new Issue
-2. Explain what problem it solves
-3. Provide usage examples
+- 🧪 **Test** the plugin in various environments.
+- 📝 **Report any bugs** you find by creating an Issue.
+- 💡 **Suggest UX improvements** and new features.
 
 ## 📝 License
 
-This project is distributed under the [Apache License 2.0](LICENSE). This means you can freely use, modify, and distribute the code for both personal and commercial purposes, provided you include attribution and the license text.
+This project is distributed under the [Apache License 2.0](LICENSE). This means you can freely use, modify, and distribute the code for both personal and commercial purposes, provided you include the attribution and the license text.
 
 ---
 
 <div style="text-align: center;">
 
-**⭐ If you find the project interesting, please star the repository!**
+**⭐ If you find this project interesting, please star the repository!**
 
 *Created with ❤️ for the QA community*
 
-**Status:** 🚧 In active development
+**Status:** 🚧 Under active development
 
 </div>

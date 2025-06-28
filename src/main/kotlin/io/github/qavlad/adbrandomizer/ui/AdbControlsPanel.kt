@@ -56,7 +56,7 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
         panel.add(createCenteredButton("Reset size and DPI to default") { handleResetAction(resetSize = true, resetDpi = true) })
         panel.add(createCenteredButton("RESET SIZE ONLY") { handleResetAction(resetSize = true, resetDpi = false) })
         panel.add(createCenteredButton("RESET DPI ONLY") { handleResetAction(resetSize = false, resetDpi = true) })
-        panel.add(createCenteredButton("SETTING") { SettingsDialog(project).show() })
+        panel.add(createCenteredButton("PRESETS") { SettingsDialog(project).show() }) // <-- ИЗМЕНЕНИЕ ЗДЕСЬ
         return panel
     }
 
@@ -132,7 +132,7 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
 
                 if (scrcpyPath == null) {
                     indicator.text = "Scrcpy not found. Please select it."
-                    showNotification("Scrcpy executable not found in PATH or settings. Please select the file.")
+                    showNotification("scrcpy executable not found in PATH or settings. Please select the file.")
                     scrcpyPath = ScrcpyService.promptForScrcpyPath(project)
                 }
 
@@ -140,7 +140,7 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                     indicator.text = "Launching scrcpy for ${device.name}..."
                     ScrcpyService.launchScrcpy(scrcpyPath, device)
                 } else {
-                    showErrorNotification("Scrcpy path not provided. Could not start mirroring.")
+                    showErrorNotification("scrcpy path not provided. Could not start mirroring.")
                 }
             }
         }.queue()
