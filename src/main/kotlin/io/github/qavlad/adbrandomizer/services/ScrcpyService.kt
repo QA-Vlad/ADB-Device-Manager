@@ -2,7 +2,6 @@
 
 package io.github.qavlad.adbrandomizer.services
 
-import com.android.ddmlib.IDevice
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.fileChooser.FileChooserDescriptor
 import com.intellij.openapi.fileChooser.FileChooserFactory
@@ -41,11 +40,11 @@ object ScrcpyService {
     /**
      * Запускает scrcpy для указанного устройства.
      * @param scrcpyPath Полный путь к scrcpy.
-     * @param device Устройство для зеркалирования.
+     * @param serialNumber Устройство для зеркалирования.
      */
-    fun launchScrcpy(scrcpyPath: String, device: IDevice) {
+    fun launchScrcpy(scrcpyPath: String, serialNumber: String) {
         try {
-            ProcessBuilder(scrcpyPath, "-s", device.serialNumber).start()
+            ProcessBuilder(scrcpyPath, "-s", serialNumber).start()
         } catch (e: Exception) {
             e.printStackTrace()
         }
