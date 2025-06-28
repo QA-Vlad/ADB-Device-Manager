@@ -9,6 +9,8 @@ import com.intellij.ide.util.PropertiesComponent
 object SettingsService {
     // Ключ, под которым мы будем хранить весь JSON со списком пресетов
     private const val PRESETS_KEY = "ADB_RANDOMIZER_PRESETS_JSON"
+    // Ключ для хранения пути к scrcpy
+    private const val SCRCPY_PATH_KEY = "ADB_RANDOMIZER_SCRCPY_PATH"
 
     private val properties = PropertiesComponent.getInstance()
     private val gson = Gson()
@@ -50,5 +52,21 @@ object SettingsService {
     fun savePresets(presets: List<DevicePreset>) {
         val json = gson.toJson(presets)
         properties.setValue(PRESETS_KEY, json)
+    }
+
+    /**
+     * Сохраняет путь к исполняемому файлу scrcpy.
+     * @param path - путь к файлу для сохранения.
+     */
+    fun saveScrcpyPath(path: String) {
+        properties.setValue(SCRCPY_PATH_KEY, path)
+    }
+
+    /**
+     * Загружает сохраненный путь к scrcpy.
+     * @return String? - сохраненный путь или null, если ничего не сохранено.
+     */
+    fun getScrcpyPath(): String? {
+        return properties.getValue(SCRCPY_PATH_KEY)
     }
 }

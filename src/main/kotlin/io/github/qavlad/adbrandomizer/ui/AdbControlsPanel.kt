@@ -9,10 +9,12 @@ import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.util.IconLoader
 import com.intellij.ui.components.JBList
 import com.intellij.ui.components.JBScrollPane
 import io.github.qavlad.adbrandomizer.services.AdbService
 import io.github.qavlad.adbrandomizer.services.DevicePreset
+import io.github.qavlad.adbrandomizer.services.ScrcpyService
 import io.github.qavlad.adbrandomizer.services.SettingsService
 import io.github.qavlad.adbrandomizer.utils.ButtonUtils
 import java.awt.BorderLayout
@@ -71,13 +73,20 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                 val index = deviceList.locationToIndex(e.point)
                 if (index != -1) {
                     val deviceInfo = deviceListModel.getElementAt(index)
-                    if (deviceInfo.device != null && !deviceInfo.device.serialNumber.contains(":")) {
-                        val bounds = deviceList.getCellBounds(index, index)
-                        val buttonWidth = 80
-                        val buttonX = bounds.x + bounds.width - buttonWidth
+                    if (deviceInfo.device == null) return
 
-                        if (e.x >= buttonX) {
-                            handleWifiConnect(deviceInfo.device)
+                    val bounds = deviceList.getCellBounds(index, index)
+                    val totalButtonsWidth = 125
+                    val buttonsStartX = bounds.x + bounds.width - totalButtonsWidth
+
+                    if (e.x >= buttonsStartX) {
+                        val mirrorButtonEndX = buttonsStartX + 45
+                        if (e.x <= mirrorButtonEndX) {
+                            handleScrcpyMirror(deviceInfo.device)
+                        } else {
+                            if (!deviceInfo.device.serialNumber.contains(":")) {
+                                handleWifiConnect(deviceInfo.device)
+                            }
                         }
                     }
                 }
@@ -112,6 +121,31 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
             }
         }
     }
+
+    private fun handleScrcpyMirror(device: IDevice) {
+        object : Task.Backgroundable(project, "Starting screen mirroring") {
+            override fun run(indicator: ProgressIndicator) {
+                indicator.isIndeterminate = true
+                indicator.text = "Searching for scrcpy..."
+
+                var scrcpyPath = ScrcpyService.findScrcpyExecutable()
+
+                if (scrcpyPath == null) {
+                    indicator.text = "Scrcpy not found. Please select it."
+                    showNotification("Scrcpy executable not found in PATH or settings. Please select the file.")
+                    scrcpyPath = ScrcpyService.promptForScrcpyPath(project)
+                }
+
+                if (scrcpyPath != null) {
+                    indicator.text = "Launching scrcpy for ${device.name}..."
+                    ScrcpyService.launchScrcpy(scrcpyPath, device)
+                } else {
+                    showErrorNotification("Scrcpy path not provided. Could not start mirroring.")
+                }
+            }
+        }.queue()
+    }
+
 
     private fun handleWifiConnect(device: IDevice) {
         object : Task.Backgroundable(project, "Connecting to Device via Wi-Fi") {
@@ -319,28 +353,36 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
     }
 
     private inner class DeviceListCellRenderer : ListCellRenderer<DeviceInfo> {
+        private val scrcpyIcon: Icon = IconLoader.getIcon("/icons/scrcpy.svg", DeviceListCellRenderer::class.java)
+
         override fun getListCellRendererComponent(list: JList<out DeviceInfo>?, value: DeviceInfo?, index: Int, isSelected: Boolean, cellHasFocus: Boolean): Component {
             val panel = JPanel(BorderLayout())
             panel.background = if (isSelected) list?.selectionBackground else list?.background
-
-            // ДОБАВЛЯЕМ ОПИСАНИЕ ДЛЯ ACCESSIBILITY
             panel.accessibleContext.accessibleName = "Device: ${value.toString()}"
 
             val label = JLabel(value.toString())
             label.foreground = if (isSelected) list?.selectionForeground else list?.foreground
             panel.add(label, BorderLayout.CENTER)
 
-            value?.device?.let { device ->
-                if (!device.serialNumber.contains(":")) {
-                    val buttonPanel = JPanel(FlowLayout(FlowLayout.RIGHT, 5, 0))
-                    buttonPanel.isOpaque = false
+            value?.device?.let {
+                val buttonPanel = JPanel(FlowLayout(FlowLayout.RIGHT, 5, 0))
+                buttonPanel.isOpaque = false
+
+                val mirrorButton = JButton(scrcpyIcon)
+                mirrorButton.toolTipText = "Mirror screen with scrcpy"
+                mirrorButton.preferredSize = java.awt.Dimension(35, 25)
+                ButtonUtils.addHoverEffect(mirrorButton)
+                buttonPanel.add(mirrorButton)
+
+                if (!it.serialNumber.contains(":")) {
                     val wifiButton = JButton("Wi-Fi")
+                    wifiButton.toolTipText = "Connect via Wi-Fi"
                     wifiButton.preferredSize = java.awt.Dimension(70, 25)
                     ButtonUtils.addHoverEffect(wifiButton)
-                    wifiButton.addActionListener { handleWifiConnect(device) }
                     buttonPanel.add(wifiButton)
-                    panel.add(buttonPanel, BorderLayout.EAST)
                 }
+
+                panel.add(buttonPanel, BorderLayout.EAST)
             }
             return panel
         }
