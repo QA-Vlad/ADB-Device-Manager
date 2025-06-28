@@ -16,6 +16,10 @@ import io.github.qavlad.adbrandomizer.services.DevicePreset
 import io.github.qavlad.adbrandomizer.services.SettingsService
 import io.github.qavlad.adbrandomizer.utils.ButtonUtils
 import java.awt.BorderLayout
+import java.awt.Component
+import java.awt.FlowLayout
+import java.awt.event.MouseAdapter
+import java.awt.event.MouseEvent
 import java.util.Locale.getDefault
 import javax.swing.*
 
@@ -27,24 +31,14 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
     private val deviceList = JBList(deviceListModel)
 
     init {
-        // Создаем верхнюю панель с кнопками
         val buttonsPanel = createButtonsPanel()
-
-        // Создаем нижнюю панель со списком устройств
         val devicesPanel = createDevicesPanel()
-
-        // Создаем JSplitPane для разделения панелей по вертикали
         val splitPane = JSplitPane(JSplitPane.VERTICAL_SPLIT, buttonsPanel, devicesPanel).apply {
             border = null
             resizeWeight = 0.5
-            SwingUtilities.invokeLater {
-                setDividerLocation(0.5)
-            }
+            SwingUtilities.invokeLater { setDividerLocation(0.5) }
         }
-
         add(splitPane, BorderLayout.CENTER)
-
-        // Запускаем периодическое обновление списка устройств
         startDevicePolling()
     }
 
@@ -52,7 +46,6 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
         val panel = JPanel()
         panel.layout = BoxLayout(panel, BoxLayout.Y_AXIS)
         panel.border = BorderFactory.createTitledBorder("Controls")
-
         panel.add(createCenteredButton("RANDOM SIZE AND DPI") { handleRandomAction(setSize = true, setDpi = true) })
         panel.add(createCenteredButton("RANDOM SIZE ONLY") { handleRandomAction(setSize = true, setDpi = false) })
         panel.add(createCenteredButton("RANDOM DPI ONLY") { handleRandomAction(setSize = false, setDpi = true) })
@@ -62,7 +55,6 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
         panel.add(createCenteredButton("RESET SIZE ONLY") { handleResetAction(resetSize = true, resetDpi = false) })
         panel.add(createCenteredButton("RESET DPI ONLY") { handleResetAction(resetSize = false, resetDpi = true) })
         panel.add(createCenteredButton("SETTING") { SettingsDialog(project).show() })
-
         return panel
     }
 
@@ -70,16 +62,31 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
         val panel = JPanel(BorderLayout())
         panel.border = BorderFactory.createTitledBorder("Connected Devices")
 
-        // Настраиваем список устройств
         deviceList.cellRenderer = DeviceListCellRenderer()
         deviceList.selectionMode = ListSelectionModel.SINGLE_SELECTION
         deviceList.emptyText.text = "No devices connected"
 
+        deviceList.addMouseListener(object : MouseAdapter() {
+            override fun mouseClicked(e: MouseEvent) {
+                val index = deviceList.locationToIndex(e.point)
+                if (index != -1) {
+                    val deviceInfo = deviceListModel.getElementAt(index)
+                    if (deviceInfo.device != null && !deviceInfo.device.serialNumber.contains(":")) {
+                        val bounds = deviceList.getCellBounds(index, index)
+                        val buttonWidth = 80
+                        val buttonX = bounds.x + bounds.width - buttonWidth
+
+                        if (e.x >= buttonX) {
+                            handleWifiConnect(deviceInfo.device)
+                        }
+                    }
+                }
+            }
+        })
+
         val scrollPane = JBScrollPane(deviceList)
         scrollPane.border = BorderFactory.createEmptyBorder()
-
         panel.add(scrollPane, BorderLayout.CENTER)
-
         return panel
     }
 
@@ -92,22 +99,53 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
     private fun updateDeviceList() {
         ApplicationManager.getApplication().executeOnPooledThread {
             val devices = AdbService.getConnectedDevices(project)
-
             ApplicationManager.getApplication().invokeLater {
                 val selectedValue = deviceList.selectedValue
                 deviceListModel.clear()
-
-                // Добавляем устройства в модель. Если их нет, JBList сам покажет emptyText.
                 devices.forEach { device ->
                     val deviceInfo = DeviceInfo(device)
                     deviceListModel.addElement(deviceInfo)
-                    // Пытаемся сохранить выбор
                     if (deviceInfo == selectedValue) {
                         deviceList.setSelectedValue(deviceInfo, true)
                     }
                 }
             }
         }
+    }
+
+    private fun handleWifiConnect(device: IDevice) {
+        object : Task.Backgroundable(project, "Connecting to Device via Wi-Fi") {
+            override fun run(indicator: ProgressIndicator) {
+                indicator.isIndeterminate = true
+                indicator.text = "Getting IP address for ${device.name}..."
+
+                val ipAddress = AdbService.getDeviceIpAddress(device)
+
+                if (ipAddress.isNullOrBlank()) {
+                    showErrorNotification("Cannot find IP address for device ${device.name}. Make sure it's connected to Wi-Fi.")
+                    return
+                }
+
+                indicator.text = "Enabling TCP/IP mode on ${device.name}..."
+                try {
+                    AdbService.enableTcpIp(device)
+                    indicator.text = "Connecting to $ipAddress:5555..."
+                    val success = AdbService.connectWifi(project, ipAddress)
+                    Thread.sleep(2000)
+                    SwingUtilities.invokeLater {
+                        updateDeviceList()
+                    }
+
+                    if (success) {
+                        showSuccessNotification("Successfully initiated connection to ${device.name} at $ipAddress. Check the device list.")
+                    } else {
+                        showErrorNotification("Failed to connect to ${device.name} via Wi-Fi.")
+                    }
+                } catch (e: Exception) {
+                    showErrorNotification("Error connecting to device: ${e.message}")
+                }
+            }
+        }.queue()
     }
 
     private fun handleNextPreset() {
@@ -266,33 +304,45 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
 
     private data class DeviceInfo(val device: IDevice?) {
         override fun toString(): String {
-            return device?.let { "${it.name} (${it.serialNumber})" } ?: "Unknown device"
+            return device?.let {
+                val name = it.name.replace("SAMSUNG-", "").replace("_", " ")
+                "$name (${it.serialNumber})"
+            } ?: "Unknown device"
         }
-
         override fun equals(other: Any?): Boolean {
             if (this === other) return true
             if (javaClass != other?.javaClass) return false
             other as DeviceInfo
             return device?.serialNumber == other.device?.serialNumber
         }
-
-        override fun hashCode(): Int {
-            return device?.serialNumber?.hashCode() ?: 0
-        }
+        override fun hashCode(): Int = device?.serialNumber?.hashCode() ?: 0
     }
 
-    private class DeviceListCellRenderer : DefaultListCellRenderer() {
-        override fun getListCellRendererComponent(
-            list: JList<*>?,
-            value: Any?,
-            index: Int,
-            isSelected: Boolean,
-            cellHasFocus: Boolean
-        ): java.awt.Component {
-            super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus)
-            // Все элементы теперь обычные, выравниваем их по левому краю
-            horizontalAlignment = LEFT
-            return this
+    private inner class DeviceListCellRenderer : ListCellRenderer<DeviceInfo> {
+        override fun getListCellRendererComponent(list: JList<out DeviceInfo>?, value: DeviceInfo?, index: Int, isSelected: Boolean, cellHasFocus: Boolean): Component {
+            val panel = JPanel(BorderLayout())
+            panel.background = if (isSelected) list?.selectionBackground else list?.background
+
+            // ДОБАВЛЯЕМ ОПИСАНИЕ ДЛЯ ACCESSIBILITY
+            panel.accessibleContext.accessibleName = "Device: ${value.toString()}"
+
+            val label = JLabel(value.toString())
+            label.foreground = if (isSelected) list?.selectionForeground else list?.foreground
+            panel.add(label, BorderLayout.CENTER)
+
+            value?.device?.let { device ->
+                if (!device.serialNumber.contains(":")) {
+                    val buttonPanel = JPanel(FlowLayout(FlowLayout.RIGHT, 5, 0))
+                    buttonPanel.isOpaque = false
+                    val wifiButton = JButton("Wi-Fi")
+                    wifiButton.preferredSize = java.awt.Dimension(70, 25)
+                    ButtonUtils.addHoverEffect(wifiButton)
+                    wifiButton.addActionListener { handleWifiConnect(device) }
+                    buttonPanel.add(wifiButton)
+                    panel.add(buttonPanel, BorderLayout.EAST)
+                }
+            }
+            return panel
         }
     }
 }
