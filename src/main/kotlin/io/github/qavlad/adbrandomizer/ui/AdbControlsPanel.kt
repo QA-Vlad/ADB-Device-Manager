@@ -29,11 +29,14 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
     private var currentPresetIndex: Int = -1
     private val deviceListModel = DefaultListModel<DeviceInfo>()
     private val deviceList = JBList(deviceListModel)
-    private val wifiSerialRegex = Regex("""^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}:\d+$""")
 
     // Переменные для отслеживания hover-эффекта на кнопках в списке
     private var hoveredCellIndex: Int = -1
     private var hoveredButtonType: String? = null // "MIRROR" или "WIFI"
+
+    companion object {
+        private val wifiSerialRegex = Regex("""^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}:\d+$""")
+    }
 
     init {
         val buttonsPanel = createButtonsPanel()
@@ -71,50 +74,71 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
         deviceList.selectionMode = ListSelectionModel.SINGLE_SELECTION
         deviceList.emptyText.text = "No devices connected"
 
-        // Обработчик кликов
-        deviceList.addMouseListener(object : MouseAdapter() {
-            override fun mouseClicked(e: MouseEvent) {
-                if (hoveredCellIndex != -1 && hoveredButtonType != null) {
-                    val deviceInfo = deviceListModel.getElementAt(hoveredCellIndex)
-                    when (hoveredButtonType) {
-                        "MIRROR" -> handleScrcpyMirror(deviceInfo)
-                        "WIFI" -> handleWifiConnect(deviceInfo.device)
+        deviceList.clearSelection()
+        deviceList.selectionModel.clearSelection()
+
+        //  Единый обработчик движения мыши с изменением курсора
+        deviceList.addMouseMotionListener(object : MouseMotionAdapter() {
+            override fun mouseMoved(e: MouseEvent) {
+                val index = deviceList.locationToIndex(e.point)
+                var newButtonType: String? = null
+
+                if (index != -1 && index < deviceListModel.size()) {
+                    val bounds = deviceList.getCellBounds(index, index)
+                    val deviceInfo = deviceListModel.getElementAt(index)
+                    val buttonLayout = calculateButtonSizes(bounds, deviceInfo)
+
+                    newButtonType = when {
+                        buttonLayout.mirrorButtonRect.contains(e.point) -> "MIRROR"
+                        buttonLayout.wifiButtonRect?.contains(e.point) == true -> "WIFI"
+                        else -> null
                     }
                 }
+
+                // Меняем курсор в зависимости от того, на кнопке ли мы
+                deviceList.cursor = if (newButtonType != null) {
+                    Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+                } else {
+                    Cursor.getDefaultCursor()
+                }
+
+                if (index != hoveredCellIndex || newButtonType != hoveredButtonType) {
+                    hoveredCellIndex = index
+                    hoveredButtonType = newButtonType
+                    deviceList.repaint()
+                }
+            }
+        })
+
+        //  Обработчик кликов БЕЗ selection
+        deviceList.addMouseListener(object : MouseAdapter() {
+            override fun mouseClicked(e: MouseEvent) {
+                val index = deviceList.locationToIndex(e.point)
+                if (index != -1 && index < deviceListModel.size()) {
+                    val bounds = deviceList.getCellBounds(index, index)
+                    val deviceInfo = deviceListModel.getElementAt(index)
+                    val buttonLayout = calculateButtonSizes(bounds, deviceInfo)
+
+                    when {
+                        buttonLayout.mirrorButtonRect.contains(e.point) -> {
+                            handleScrcpyMirror(deviceInfo)
+                        }
+                        buttonLayout.wifiButtonRect?.contains(e.point) == true -> {
+                            handleWifiConnect(deviceInfo.device)
+                        }
+                    }
+                }
+
+                // Сбрасываем selection после любого клика
+                deviceList.clearSelection()
             }
 
             override fun mouseExited(e: MouseEvent?) {
                 if (hoveredCellIndex != -1) {
                     hoveredCellIndex = -1
                     hoveredButtonType = null
-                    deviceList.repaint()
-                }
-            }
-        })
-
-        // Обработчик движения мыши для hover-эффектов
-        deviceList.addMouseMotionListener(object : MouseMotionAdapter() {
-            override fun mouseMoved(e: MouseEvent) {
-                val index = deviceList.locationToIndex(e.point)
-                var newHoveredButton: String? = null
-
-                if (index != -1) {
-                    val bounds = deviceList.getCellBounds(index, index)
-                    // Расчет хитбоксов кнопок
-                    val mirrorButtonRect = Rectangle(bounds.x + bounds.width - 115, bounds.y, 35, bounds.height)
-                    val wifiButtonRect = Rectangle(bounds.x + bounds.width - 75, bounds.y, 70, bounds.height)
-                    val deviceInfo = deviceListModel.getElementAt(index)
-
-                    newHoveredButton = when {
-                        mirrorButtonRect.contains(e.point) -> "MIRROR"
-                        !wifiSerialRegex.matches(deviceInfo.logicalSerialNumber) && wifiButtonRect.contains(e.point) -> "WIFI"
-                        else -> null
-                    }
-                }
-
-                if (index != hoveredCellIndex || newHoveredButton != hoveredButtonType) {
-                    hoveredCellIndex = index
-                    hoveredButtonType = newHoveredButton
+                    //  Возвращаем обычный курсор при выходе
+                    deviceList.cursor = Cursor.getDefaultCursor()
                     deviceList.repaint()
                 }
             }
@@ -126,8 +150,39 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
         return panel
     }
 
+    // Класс для хранения информации о кнопках
+    private data class ButtonLayout(
+        val mirrorButtonRect: Rectangle,
+        val wifiButtonRect: Rectangle? // null для Wi-Fi устройств
+    )
+
+    // Меняем метод calculateButtonSizes:
+    private fun calculateButtonSizes(cellBounds: Rectangle, deviceInfo: DeviceInfo): ButtonLayout {
+        val buttonPanelWidth = 115
+        val buttonSpacing = 5
+        val mirrorButtonWidth = 35
+        val wifiButtonWidth = 70
+        val buttonHeight = 25
+
+        val buttonY = cellBounds.y + (cellBounds.height - buttonHeight) / 2
+        val buttonPanelX = cellBounds.x + cellBounds.width - buttonPanelWidth
+        val mirrorButtonX = buttonPanelX + buttonSpacing
+        val mirrorButtonRect = Rectangle(mirrorButtonX, buttonY, mirrorButtonWidth, buttonHeight)
+
+        // Используем companion object wifiSerialRegex
+        val wifiButtonRect = if (!wifiSerialRegex.matches(deviceInfo.logicalSerialNumber)) {
+            val wifiButtonX = mirrorButtonX + mirrorButtonWidth + buttonSpacing
+            Rectangle(wifiButtonX, buttonY, wifiButtonWidth, buttonHeight)
+        } else {
+            null
+        }
+
+        return ButtonLayout(mirrorButtonRect, wifiButtonRect)
+    }
+
+    // В AdbControlsPanel.kt - увеличиваем интервал polling
     private fun startDevicePolling() {
-        val timer = Timer(3000) { updateDeviceList() }
+        val timer = Timer(5000) { updateDeviceList() }  // Было 3000, стало 5000
         timer.start()
         updateDeviceList()
     }
@@ -145,7 +200,8 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                 var displaySerial = logicalSerial
 
                 if (wifiSerialRegex.matches(logicalSerial)) {
-                    val realSerial = device.getProperty("ro.serialno")
+                    // Улучшенное получение серийного номера с fallback
+                    val realSerial = getDeviceRealSerial(device)
                     if (!realSerial.isNullOrBlank()) {
                         displaySerial = realSerial
                     }
@@ -191,29 +247,85 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
         }
     }
 
+    // Улучшенное получение реального серийного номера
+    private fun getDeviceRealSerial(device: IDevice): String? {
+        val properties = listOf(
+            "ro.serialno",
+            "ro.boot.serialno",
+            "gsm.sn1",
+            "ril.serialnumber"
+        )
+
+        for (property in properties) {
+            try {
+                val serial = device.getProperty(property)
+                if (!serial.isNullOrBlank() && serial != "unknown" && serial.length > 3) {
+                    return serial
+                }
+            } catch (_: Exception) {
+                // Игнорируем ошибки и пробуем следующее свойство
+            }
+        }
+
+        return null
+    }
+
+    // Запуск scrcpy из UI Thread
     private fun handleScrcpyMirror(deviceInfo: DeviceInfo) {
         object : Task.Backgroundable(project, "Starting screen mirroring") {
+            private var scrcpyPath: String? = null
+
             override fun run(indicator: ProgressIndicator) {
                 indicator.isIndeterminate = true
                 indicator.text = "Searching for scrcpy..."
 
-                var scrcpyPath = ScrcpyService.findScrcpyExecutable()
+                scrcpyPath = ScrcpyService.findScrcpyExecutable()
 
                 if (scrcpyPath == null) {
-                    indicator.text = "Scrcpy not found. Please select it."
-                    showNotification("scrcpy executable not found in PATH or settings. Please select the file.")
-                    scrcpyPath = ScrcpyService.promptForScrcpyPath(project)
+                    indicator.text = "Scrcpy not found."
+                    // Перемещаем UI операцию в UI Thread
+                    ApplicationManager.getApplication().invokeLater {
+                        showNotification("scrcpy executable not found in PATH or settings. Please select the file.")
+                        promptForScrcpyInUIThread(deviceInfo)
+                    }
+                    return
                 }
 
-                if (scrcpyPath != null) {
-                    val serialToUse = deviceInfo.displaySerialNumber
-                    indicator.text = "Running: scrcpy -s $serialToUse"
-                    ScrcpyService.launchScrcpy(scrcpyPath, serialToUse)
-                } else {
-                    showErrorNotification("scrcpy path not provided. Could not start mirroring.")
-                }
+                launchScrcpyProcess(deviceInfo, scrcpyPath!!, indicator)
             }
         }.queue()
+    }
+
+    // Новый метод для работы с UI в правильном потоке
+    private fun promptForScrcpyInUIThread(deviceInfo: DeviceInfo) {
+        val scrcpyPath = ScrcpyService.promptForScrcpyPath(project)
+        if (scrcpyPath != null) {
+            // Запускаем новую background задачу для scrcpy
+            object : Task.Backgroundable(project, "Starting screen mirroring") {
+                override fun run(indicator: ProgressIndicator) {
+                    launchScrcpyProcess(deviceInfo, scrcpyPath, indicator)
+                }
+            }.queue()
+        } else {
+            showErrorNotification("scrcpy path not provided. Could not start mirroring.")
+        }
+    }
+
+    private fun launchScrcpyProcess(deviceInfo: DeviceInfo, scrcpyPath: String, indicator: ProgressIndicator) {
+        val serialToUse = deviceInfo.logicalSerialNumber
+        indicator.text = "Running: scrcpy -s $serialToUse"
+
+        // Передаем project в scrcpy для получения правильного ADB
+        val success = ScrcpyService.launchScrcpy(scrcpyPath, serialToUse, project)
+        if (success) {
+            ApplicationManager.getApplication().invokeLater {
+                showSuccessNotification("Screen mirroring started for ${deviceInfo.displayName}")
+            }
+        } else {
+            ApplicationManager.getApplication().invokeLater {
+                showErrorNotification("Failed to start screen mirroring for ${deviceInfo.displayName}")
+            }
+        }
     }
 
     private fun handleWifiConnect(device: IDevice) {
@@ -233,18 +345,60 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                 try {
                     AdbService.enableTcpIp(device)
                     indicator.text = "Connecting to $ipAddress:5555..."
-                    val success = AdbService.connectWifi(project, ipAddress)
-                    Thread.sleep(2000)
-                    SwingUtilities.invokeLater { updateDeviceList() }
+
+                    // Убираем хардкод задержки и добавляем polling подключения
+                    val success = connectWithRetry(ipAddress, indicator)
 
                     if (success) {
-                        showSuccessNotification("Successfully initiated connection to ${device.name} at $ipAddress. Check the device list.")
+                        showSuccessNotification("Successfully connected to ${device.name} at $ipAddress.")
                     } else {
-                        showErrorNotification("Failed to connect to ${device.name} via Wi-Fi.")
+                        showErrorNotification("Failed to connect to ${device.name} via Wi-Fi. Check device and network.")
                     }
                 } catch (e: Exception) {
                     showErrorNotification("Error connecting to device: ${e.message}")
                 }
+            }
+
+            private fun connectWithRetry(ipAddress: String, indicator: ProgressIndicator): Boolean {
+                // Даем время устройству переключиться в TCP режим
+                Thread.sleep(2000)
+
+                // Пытаемся подключиться
+                val initialSuccess = AdbService.connectWifi(project, ipAddress)
+
+                if (initialSuccess) {
+                    // Проверяем подключение через polling
+                    return waitForDeviceConnection(ipAddress, indicator)
+                }
+
+                return false
+            }
+
+            private fun waitForDeviceConnection(ipAddress: String, indicator: ProgressIndicator): Boolean {
+                val maxAttempts = 10
+                val delayBetweenAttempts = 1000L
+
+                repeat(maxAttempts) { attempt ->
+                    indicator.text = "Verifying connection... (${attempt + 1}/$maxAttempts)"
+
+                    // Обновляем список устройств и проверяем наличие Wi-Fi подключения
+                    val devices = AdbService.getConnectedDevices(project)
+                    val wifiConnected = devices.any { it.serialNumber.startsWith(ipAddress) }
+
+                    if (wifiConnected) {
+                        // Обновляем UI в главном потоке
+                        SwingUtilities.invokeLater { updateDeviceList() }
+                        return true
+                    }
+
+                    if (attempt < maxAttempts - 1) {
+                        Thread.sleep(delayBetweenAttempts)
+                    }
+                }
+
+                // Если не подключились, все равно обновляем UI
+                SwingUtilities.invokeLater { updateDeviceList() }
+                return false
             }
         }.queue()
     }
@@ -360,10 +514,11 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
         }
     }
 
+    // Улучшенное сравнение устройств
     private data class DeviceInfo(
         val device: IDevice,
         val displayName: String,
-        val displaySerialNumber: String,
+        val displaySerialNumber: String?,  // Теперь может быть null
         val logicalSerialNumber: String,
         val androidVersion: String,
         val apiLevel: String,
@@ -376,6 +531,21 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
             return logicalSerialNumber == other.logicalSerialNumber
         }
         override fun hashCode(): Int = logicalSerialNumber.hashCode()
+
+        // Метод для безопасного сравнения устройств
+        fun isSamePhysicalDevice(other: DeviceInfo): Boolean {
+            // Если оба серийных номера не null и не пустые
+            if (!displaySerialNumber.isNullOrBlank() && !other.displaySerialNumber.isNullOrBlank()) {
+                return displaySerialNumber == other.displaySerialNumber
+            }
+
+            // Если один из них Wi-Fi, а другой USB, но с похожими именами
+            if (wifiSerialRegex.matches(logicalSerialNumber) != wifiSerialRegex.matches(other.logicalSerialNumber)) {
+                return displayName == other.displayName && androidVersion == other.androidVersion
+            }
+
+            return false
+        }
     }
 
     private inner class DeviceListCellRenderer : ListCellRenderer<DeviceInfo> {
@@ -397,7 +567,9 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
         ): Component {
             val mainPanel = JPanel(BorderLayout(10, 0)).apply {
                 border = BorderFactory.createEmptyBorder(5, 5, 5, 5)
-                background = if (isSelected) list?.selectionBackground else list?.background
+                // Hover только на кнопках, НЕ на всей области
+                background = list?.background ?: JBColor.background()
+                isOpaque = true
             }
 
             if (value == null || list == null) return mainPanel
@@ -410,8 +582,9 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                 isOpaque = false
             }
 
-            val nameLabel = JLabel("${value.displayName} (${value.displaySerialNumber})").apply {
-                foreground = if (isSelected) list.selectionForeground else list.foreground
+            val serialForDisplay = value.displaySerialNumber ?: value.logicalSerialNumber
+            val nameLabel = JLabel("${value.displayName} ($serialForDisplay)").apply {
+                foreground = list.foreground
                 alignmentX = LEFT_ALIGNMENT
             }
             textPanel.add(nameLabel)
@@ -421,12 +594,20 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                 alignmentX = LEFT_ALIGNMENT
             }
 
-            val ipInfo = if (wifiSerialRegex.matches(value.logicalSerialNumber)) value.logicalSerialNumber else value.ipAddress ?: "IP not available"
+            val ipInfo = if (wifiSerialRegex.matches(value.logicalSerialNumber)) {
+                value.logicalSerialNumber
+            } else {
+                if (value.ipAddress != null) {
+                    "${value.ipAddress}:5555"
+                } else {
+                    "IP not available"
+                }
+            }
             val infoText = "Android ${value.androidVersion} (API ${value.apiLevel}) - $ipInfo"
 
             val infoLabel = JLabel(infoText).apply {
                 font = JBFont.small()
-                foreground = if (isSelected) list.selectionForeground?.brighter() else JBColor.GRAY
+                foreground = JBColor.GRAY
             }
             infoPanel.add(infoLabel)
 
@@ -435,7 +616,7 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                 var wifiConnectionExists = false
                 for (i in 0 until model.size) {
                     val otherDevice = model.getElementAt(i)
-                    if (otherDevice.displaySerialNumber == value.displaySerialNumber && wifiSerialRegex.matches(otherDevice.logicalSerialNumber)) {
+                    if (value.isSamePhysicalDevice(otherDevice) && wifiSerialRegex.matches(otherDevice.logicalSerialNumber)) {
                         wifiConnectionExists = true
                         break
                     }
@@ -448,34 +629,64 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
             textPanel.add(infoPanel)
             mainPanel.add(textPanel, BorderLayout.CENTER)
 
-            val buttonPanel = JPanel(FlowLayout(FlowLayout.RIGHT, 5, 0)).apply {
+            // Создаем кнопки как отдельные компоненты с правильными границами
+            val buttonPanel = createButtonPanel(value, index)
+            mainPanel.add(buttonPanel, BorderLayout.EAST)
+
+            return mainPanel
+        }
+
+        private fun createButtonPanel(deviceInfo: DeviceInfo, index: Int): JComponent {
+            val panel = JPanel().apply {
+                layout = FlowLayout(FlowLayout.RIGHT, 5, 0)
                 isOpaque = false
                 preferredSize = Dimension(115, 30)
             }
 
+            // Кнопка Mirror
             val mirrorButton = JButton(scrcpyIcon).apply {
                 preferredSize = Dimension(35, 25)
                 toolTipText = "Mirror screen with scrcpy"
                 isBorderPainted = false
                 isFocusPainted = false
-                isContentAreaFilled = isSelected || (hoveredCellIndex == index && hoveredButtonType == "MIRROR")
-            }
-            buttonPanel.add(mirrorButton)
 
-            if (!wifiSerialRegex.matches(value.logicalSerialNumber)) {
+                // Hover эффект
+                isContentAreaFilled = (hoveredCellIndex == index && hoveredButtonType == "MIRROR")
+                background = if (hoveredCellIndex == index && hoveredButtonType == "MIRROR") {
+                    JBColor.LIGHT_GRAY
+                } else {
+                    UIManager.getColor("Button.background")
+                }
+                addActionListener {
+                    handleScrcpyMirror(deviceInfo)
+                }
+            }
+            panel.add(mirrorButton)
+
+            // Кнопка Wi-Fi (только для USB устройств)
+            if (!wifiSerialRegex.matches(deviceInfo.logicalSerialNumber)) {
                 val wifiButton = JButton("Wi-Fi").apply {
                     preferredSize = Dimension(70, 25)
                     toolTipText = "Connect via Wi-Fi"
                     isFocusPainted = false
-                    isContentAreaFilled = isSelected || (hoveredCellIndex == index && hoveredButtonType == "WIFI")
+
+                    // Hover эффект
+                    isContentAreaFilled = (hoveredCellIndex == index && hoveredButtonType == "WIFI")
+                    background = if (hoveredCellIndex == index && hoveredButtonType == "WIFI") {
+                        JBColor.LIGHT_GRAY
+                    } else {
+                        UIManager.getColor("Button.background")
+                    }
+                    addActionListener {
+                        handleWifiConnect(deviceInfo.device)
+                    }
                 }
-                buttonPanel.add(wifiButton)
+                panel.add(wifiButton)
             } else {
-                buttonPanel.add(Box.createRigidArea(Dimension(70, 25)))
+                panel.add(Box.createRigidArea(Dimension(70, 25)))
             }
 
-            mainPanel.add(buttonPanel, BorderLayout.EAST)
-            return mainPanel
+            return panel
         }
     }
 }

@@ -1,15 +1,15 @@
 <!-- Файл: src/main/resources/META-INF/plugin.xml -->
 <idea-plugin>
-    <!-- 1. Уникальный ID твоего плагина, основанный на пакете -->
+    <!-- 1. Уникальный ID плагина, основанный на пакете -->
     <id>io.github.qavlad.adbrandomizer</id>
 
-    <!-- 2. Публичное имя плагина, которое увидят пользователи -->
+    <!-- 2. Публичное имя плагина -->
     <name>ADB Screen Randomizer</name>
 
     <!-- 3. Информация об авторе -->
     <vendor url="https://github.com/QA-Vlad">QA-Vlad</vendor>
 
-    <!-- 4. Описание плагина. Можно сделать более подробным. -->
+    <!-- 4. Описание плагина -->
     <description><![CDATA[
     A simple plugin to set random screen sizes and DPI on connected Android devices using ADB commands.
     Very useful for testing UI adaptability and different screen configurations directly from the IDE.
@@ -17,12 +17,12 @@
 
     <!-- 5. Секция зависимостей. Это критически важно. -->
     <depends>com.intellij.modules.platform</depends>
-    <!-- Зависимость от плагина Android, чтобы мы могли использовать его классы (например, для поиска ADB) -->
+    <!-- Зависимость от плагина Android -->
     <depends>org.jetbrains.android</depends>
 
     <!-- 6. Секция расширений. Здесь мы "встраиваемся" в IDE. -->
     <extensions defaultExtensionNs="com.intellij">
-        <!-- Регистрация нашего бокового окна (Tool Window) -->
+        <!-- Регистрация  бокового окна (Tool Window) -->
         <toolWindow
                 id="ADB Randomizer"
                 anchor="right"
