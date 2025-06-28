@@ -215,10 +215,31 @@ class SettingsDialog(project: Project?) : DialogWrapper(project) {
 
     override fun doOKAction() {
         if (table.isEditing) table.cellEditor.stopCellEditing()
+
+        // Удаляем пустые строки перед сохранением
+        val rowsToRemove = mutableListOf<Int>()
+
+        // Проходим по всем строкам и находим пустые
+        for (i in 0 until tableModel.rowCount) {
+            val label = (tableModel.getValueAt(i, 2) as? String ?: "").trim()
+            val size = (tableModel.getValueAt(i, 3) as? String ?: "").trim()
+            val dpi = (tableModel.getValueAt(i, 4) as? String ?: "").trim()
+
+            // Если все три поля пустые, помечаем строку для удаления
+            if (label.isEmpty() && size.isEmpty() && dpi.isEmpty()) {
+                rowsToRemove.add(i)
+            }
+        }
+
+        // Удаляем строки в обратном порядке (с конца), чтобы не сбить индексы
+        rowsToRemove.reversed().forEach { rowIndex ->
+            tableModel.removeRow(rowIndex)
+        }
+
+        // Сохраняем только непустые пресеты
         SettingsService.savePresets(tableModel.getPresets())
         super.doOKAction()
     }
-
     inner class ValidationRenderer : DefaultTableCellRenderer() {
         override fun getTableCellRendererComponent(table: JTable, value: Any?, isSelected: Boolean, hasFocus: Boolean, row: Int, column: Int): Component {
             super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column)
