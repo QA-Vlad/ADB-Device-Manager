@@ -9,6 +9,8 @@ import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.Project
+import com.intellij.util.ui.JBUI
+import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.util.IconLoader
 import com.intellij.ui.JBColor
 import com.intellij.ui.components.JBList
@@ -29,6 +31,7 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
     private var currentPresetIndex: Int = -1
     private val deviceListModel = DefaultListModel<DeviceInfo>()
     private val deviceList = JBList(deviceListModel)
+    private val deviceIpCache = mutableMapOf<String, String?>()
 
     // Переменные для отслеживания hover-эффекта на кнопках в списке
     private var hoveredCellIndex: Int = -1
@@ -63,6 +66,8 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
         panel.add(createCenteredButton("RESET SIZE ONLY") { handleResetAction(resetSize = true, resetDpi = false) })
         panel.add(createCenteredButton("RESET DPI ONLY") { handleResetAction(resetSize = false, resetDpi = true) })
         panel.add(createCenteredButton("PRESETS") { SettingsDialog(project).show() })
+        // НОВАЯ КНОПКА
+        panel.add(createCenteredButton("CONNECT DEVICE") { handleConnectDevice() })
         return panel
     }
 
@@ -133,7 +138,7 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                 deviceList.clearSelection()
             }
 
-            override fun mouseExited(e: MouseEvent?) {
+            override fun mouseExited(event: MouseEvent?) {
                 if (hoveredCellIndex != -1) {
                     hoveredCellIndex = -1
                     hoveredButtonType = null
@@ -148,6 +153,103 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
         scrollPane.border = BorderFactory.createEmptyBorder()
         panel.add(scrollPane, BorderLayout.CENTER)
         return panel
+    }
+
+    // НОВЫЙ МЕТОД - обработка ручного подключения
+    // НОВЫЙ МЕТОД - обработка ручного подключения
+    // ПРОСТОЙ ВАРИАНТ - используем стандартный ввод
+    private fun handleConnectDevice() {
+        val input = Messages.showInputDialog(
+            project,
+            "Enter device IP address and port (example: 192.168.1.100:5555):",
+            "Connect Device via Wi-Fi",
+            Messages.getQuestionIcon(),
+            "192.168.1.100:5555",
+            null
+        )
+
+        if (input != null && input.isNotBlank()) {
+            val parts = input.trim().split(":")
+            if (parts.size != 2) {
+                Messages.showErrorDialog(project, "Please enter in format: IP:PORT", "Invalid Format")
+                return
+            }
+
+            val ip = parts[0].trim()
+            val portText = parts[1].trim()
+
+            val port = try {
+                portText.toInt()
+            } catch (_: NumberFormatException) {
+                Messages.showErrorDialog(project, "Port must be a number", "Invalid Input")
+                return
+            }
+
+            if (port < 1 || port > 65535) {
+                Messages.showErrorDialog(project, "Port must be between 1 and 65535", "Invalid Input")
+                return
+            }
+
+            if (!isValidIpAddress(ip)) {
+                Messages.showErrorDialog(project, "Please enter valid IP address", "Invalid Input")
+                return
+            }
+
+            handleManualWifiConnect(ip, port)
+        }
+    }
+
+    // ДОБАВЛЯЕМ МЕТОД валидации IP (был объявлен, но не определен)
+    private fun isValidIpAddress(ip: String): Boolean {
+        val parts = ip.split(".")
+        if (parts.size != 4) return false
+
+        return parts.all { part ->
+            try {
+                val num = part.toInt()
+                num in 0..255
+            } catch (_: NumberFormatException) {
+                false
+            }
+        }
+    }
+
+    // Ручное подключение по Wi-Fi
+    private fun handleManualWifiConnect(ipAddress: String, port: Int) {
+        object : Task.Backgroundable(project, "Connecting to $ipAddress:$port") {
+            override fun run(indicator: ProgressIndicator) {
+                indicator.isIndeterminate = true
+                indicator.text = "Connecting to $ipAddress:$port..."
+
+                try {
+                    val success = AdbService.connectWifi(project, ipAddress, port)
+
+                    if (success) {
+                        // Ждем немного и проверяем подключение
+                        Thread.sleep(2000)
+                        val devices = AdbService.getConnectedDevices(project)
+                        val connected = devices.any { it.serialNumber.startsWith(ipAddress) }
+
+                        ApplicationManager.getApplication().invokeLater {
+                            if (connected) {
+                                showSuccessNotification("Successfully connected to device at $ipAddress:$port")
+                                updateDeviceList() // Обновляем список устройств
+                            } else {
+                                showErrorNotification("Connected to $ipAddress:$port but device not visible. Check device settings.")
+                            }
+                        }
+                    } else {
+                        ApplicationManager.getApplication().invokeLater {
+                            showErrorNotification("Failed to connect to $ipAddress:$port. Make sure device is in TCP/IP mode.")
+                        }
+                    }
+                } catch (e: Exception) {
+                    ApplicationManager.getApplication().invokeLater {
+                        showErrorNotification("Error connecting to device: ${e.message}")
+                    }
+                }
+            }
+        }.queue()
     }
 
     // Класс для хранения информации о кнопках
@@ -219,6 +321,17 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                 )
             }
 
+            // КЭШИРОВАНИЕ IP - логируем только при изменениях
+            deviceInfos.forEach { deviceInfo ->
+                val cachedIp = deviceIpCache[deviceInfo.logicalSerialNumber]
+                if (cachedIp != deviceInfo.ipAddress) {
+                    deviceIpCache[deviceInfo.logicalSerialNumber] = deviceInfo.ipAddress
+                    if (deviceInfo.ipAddress != null) {
+                        println("ADB_Randomizer: Device ${deviceInfo.displayName} IP: ${deviceInfo.ipAddress}")
+                    }
+                }
+            }
+
             ApplicationManager.getApplication().invokeLater {
                 val selectedValue = deviceList.selectedValue
                 val currentSerials = (0 until deviceListModel.size()).map { deviceListModel.getElementAt(it).logicalSerialNumber }.toSet()
@@ -228,6 +341,8 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                 (currentSerials - newSerials).forEach { serialToRemove ->
                     val elementToRemove = (0 until deviceListModel.size()).find { deviceListModel.getElementAt(it).logicalSerialNumber == serialToRemove }
                     if (elementToRemove != null) deviceListModel.removeElementAt(elementToRemove)
+                    // Также удаляем из кэша
+                    deviceIpCache.remove(serialToRemove)
                 }
 
                 // Добавляем или обновляем
@@ -539,7 +654,7 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                 return displaySerialNumber == other.displaySerialNumber
             }
 
-            // Если один из них Wi-Fi, а другой USB, но с похожими именами
+// Если один из них Wi-Fi, а другой USB, но с похожими именами
             if (wifiSerialRegex.matches(logicalSerialNumber) != wifiSerialRegex.matches(other.logicalSerialNumber)) {
                 return displayName == other.displayName && androidVersion == other.androidVersion
             }

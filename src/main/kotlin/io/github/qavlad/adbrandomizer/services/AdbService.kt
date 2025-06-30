@@ -8,35 +8,138 @@ import com.android.ddmlib.IDevice
 import com.android.ddmlib.NullOutputReceiver
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.project.Project
-import org.jetbrains.android.sdk.AndroidSdkUtils
+import java.io.File
 import java.util.concurrent.TimeUnit
 import java.util.regex.Pattern
 
 object AdbService {
 
+    private var customBridge: AndroidDebugBridge? = null
+    private var isInitialized = false
+    private var lastDeviceCount = -1
+
+    private fun findAdbExecutable(): String? {
+        val adbName = if (System.getProperty("os.name").startsWith("Windows")) "adb.exe" else "adb"
+
+        // Стандартные пути для разных ОС
+        val standardPaths = when {
+            System.getProperty("os.name").contains("Mac") -> listOf(
+                System.getProperty("user.home") + "/Library/Android/sdk/platform-tools/adb",
+                "/usr/local/bin/adb",
+                "/opt/homebrew/bin/adb"
+            )
+            System.getProperty("os.name").startsWith("Windows") -> listOf(
+                System.getenv("LOCALAPPDATA") + "\\Android\\Sdk\\platform-tools\\adb.exe",
+                System.getenv("USERPROFILE") + "\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe"
+            )
+            else -> listOf( // Linux
+                System.getProperty("user.home") + "/Android/Sdk/platform-tools/adb",
+                "/usr/bin/adb"
+            )
+        }
+
+        // Проверяем стандартные пути
+        for (path in standardPaths) {
+            val file = File(path)
+            if (file.exists() && file.canExecute()) {
+                println("ADB_Randomizer: Found ADB at: $path")
+                return path
+            }
+        }
+
+        // Ищем в PATH
+        val pathDirs = System.getenv("PATH")?.split(File.pathSeparator) ?: emptyList()
+        for (dir in pathDirs) {
+            val file = File(dir, adbName)
+            if (file.exists() && file.canExecute()) {
+                println("ADB_Randomizer: Found ADB in PATH at: ${file.absolutePath}")
+                return file.absolutePath
+            }
+        }
+
+        println("ADB_Randomizer: ADB not found in standard locations or PATH")
+        return null
+    }
+
+    private fun getOrCreateDebugBridge(): AndroidDebugBridge? {
+        if (customBridge != null && customBridge!!.isConnected) {
+            return customBridge
+        }
+
+        val adbPath = findAdbExecutable()
+        if (adbPath == null) {
+            println("ADB_Randomizer: ADB executable not found")
+            return null
+        }
+
+        try {
+            // ПРИНУДИТЕЛЬНО запускаем ADB сервер
+            println("ADB_Randomizer: Starting ADB server...")
+            val startServerCmd = ProcessBuilder(adbPath, "start-server")
+            val process = startServerCmd.start()
+            process.waitFor(5, TimeUnit.SECONDS)
+
+            if (!isInitialized) {
+                AndroidDebugBridge.init(false)
+                isInitialized = true
+                println("ADB_Randomizer: AndroidDebugBridge initialized")
+            }
+
+            customBridge = AndroidDebugBridge.createBridge(adbPath, false)
+
+            // Увеличиваем время ожидания
+            var attempts = 100  // было 50, стало 100
+            while (customBridge != null && !customBridge!!.isConnected && attempts > 0) {
+                Thread.sleep(200)  // было 100, стало 200
+                attempts--
+            }
+
+            if (customBridge != null && customBridge!!.isConnected) {
+                println("ADB_Randomizer: Successfully created ADB bridge with $adbPath")
+                return customBridge
+            } else {
+                println("ADB_Randomizer: Failed to connect ADB bridge")
+                return null
+            }
+        } catch (e: Exception) {
+            println("ADB_Randomizer: Error creating ADB bridge: ${e.message}")
+            e.printStackTrace()
+            return null
+        }
+    }
+
     fun getConnectedDevices(project: Project): List<IDevice> {
         var bridge: AndroidDebugBridge? = null
 
         ApplicationManager.getApplication().invokeAndWait {
-            bridge = AndroidSdkUtils.getDebugBridge(project)
+            bridge = getOrCreateDebugBridge()
         }
 
         if (bridge == null) {
-            println("ADB_Randomizer: AndroidDebugBridge is not available. ADB might not be started.")
+            println("ADB_Randomizer: AndroidDebugBridge is not available")
             return emptyList()
         }
 
-        var attempts = 10
+        var attempts = 20
         while (!bridge!!.hasInitialDeviceList() && attempts > 0) {
             try {
                 Thread.sleep(100)
             } catch (_: InterruptedException) {
-                // Игнорируем
+                Thread.currentThread().interrupt()
+                return emptyList()
             }
             attempts--
         }
 
-        return bridge!!.devices.filter { it.isOnline }
+        val devices = bridge!!.devices.filter { it.isOnline }
+
+        // ЛОГИРУЕМ ТОЛЬКО ПРИ ИЗМЕНЕНИЯХ
+        if (devices.size != lastDeviceCount) {
+            println("ADB_Randomizer: Found ${devices.size} online devices")
+            lastDeviceCount = devices.size
+        }
+
+        return devices
     }
 
     fun getDeviceIpAddress(device: IDevice): String? {
@@ -57,14 +160,11 @@ object AdbService {
                         val ip = matcher.group(1)
                         // Проверяем, что это не localhost и не служебный адрес
                         if (ip != null && !ip.startsWith("127.") && !ip.startsWith("169.254.")) {
-                            println("ADB_Randomizer: Found IP $ip on interface $interfaceName")
                             return ip
                         }
                     }
                 }
             } catch (e: Exception) {
-                println("ADB_Randomizer: Error checking interface $interfaceName: ${e.message}")
-                // Продолжаем проверку других интерфейсов
             }
         }
 
@@ -87,7 +187,6 @@ object AdbService {
                 if (matcher.find()) {
                     val ip = matcher.group(1)
                     if (ip != null && !ip.startsWith("127.") && !ip.startsWith("169.254.")) {
-                        println("ADB_Randomizer: Found IP via netcfg: $ip")
                         return ip
                     }
                 }
@@ -105,7 +204,6 @@ object AdbService {
                 if (matcher.find()) {
                     val ip = matcher.group(1)
                     if (ip != null && !ip.startsWith("127.") && !ip.startsWith("169.254.")) {
-                        println("ADB_Randomizer: Found IP via ifconfig: $ip")
                         return ip
                     }
                 }
@@ -160,11 +258,9 @@ object AdbService {
         }
     }
 
-    // В AdbService.kt - улучшенный connectWifi
-    @Suppress("DEPRECATION")
     fun connectWifi(project: Project, ipAddress: String, port: Int = 5555): Boolean {
         return try {
-            val adbPath = AndroidSdkUtils.getAdb(project)?.absolutePath
+            val adbPath = findAdbExecutable()
             if (adbPath == null) {
                 println("ADB_Randomizer: ADB path not found.")
                 return false

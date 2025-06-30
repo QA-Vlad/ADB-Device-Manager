@@ -5,191 +5,286 @@ package io.github.qavlad.adbrandomizer.services
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.fileChooser.FileChooserDescriptor
 import com.intellij.openapi.fileChooser.FileChooserFactory
+import com.intellij.openapi.progress.ProcessCanceledException
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.ui.Messages
 import java.io.File
-import org.jetbrains.android.sdk.AndroidSdkUtils
 
 object ScrcpyService {
 
     private val scrcpyName = if (System.getProperty("os.name").startsWith("Windows")) "scrcpy.exe" else "scrcpy"
 
-    /**
-     * Ищет исполняемый файл scrcpy.
-     * Сначала в сохраненных настройках, потом в системном PATH.
-     * @return Путь к файлу или null, если не найден.
-     */
-    fun findScrcpyExecutable(): String? {
-        // 1. Проверяем сохраненный путь
-        val savedPath = SettingsService.getScrcpyPath()
-        if (savedPath != null && File(savedPath).canExecute()) {
-            return savedPath
-        }
-
-        // 2. Ищем в системном PATH
-        val pathDirs = System.getenv("PATH").split(File.pathSeparator)
+    private fun findExecutableInSystemPath(name: String): String? {
+        val pathDirs = System.getenv("PATH")?.split(File.pathSeparator) ?: emptyList()
         for (dir in pathDirs) {
-            val file = File(dir, scrcpyName)
+            val file = File(dir, name)
             if (file.exists() && file.canExecute()) {
-                SettingsService.saveScrcpyPath(file.absolutePath) // Нашли - сохраняем
                 return file.absolutePath
             }
         }
         return null
     }
 
-    fun launchScrcpy(scrcpyPath: String, serialNumber: String, project: Project): Boolean {
-        return try {
-            // Валидация входных параметров
-            if (scrcpyPath.isBlank()) {
-                println("ADB_Randomizer: Empty scrcpy path provided")
-                return false
-            }
+    private fun findAdbExecutable(): String? {
+        val adbName = if (System.getProperty("os.name").startsWith("Windows")) "adb.exe" else "adb"
 
-            if (serialNumber.isBlank()) {
-                println("ADB_Randomizer: Empty serial number provided")
+        val standardPaths = when {
+            System.getProperty("os.name").contains("Mac") -> listOf(
+                System.getProperty("user.home") + "/Library/Android/sdk/platform-tools/adb",
+                "/usr/local/bin/adb",
+                "/opt/homebrew/bin/adb"
+            )
+            System.getProperty("os.name").startsWith("Windows") -> listOf(
+                System.getenv("LOCALAPPDATA") + "\\Android\\Sdk\\platform-tools\\adb.exe",
+                System.getenv("USERPROFILE") + "\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe"
+            )
+            else -> listOf( // Linux
+                System.getProperty("user.home") + "/Android/Sdk/platform-tools/adb",
+                "/usr/bin/adb"
+            )
+        }
+
+        for (path in standardPaths) {
+            val file = File(path)
+            if (file.exists() && file.canExecute()) {
+                return path
+            }
+        }
+
+        return findExecutableInSystemPath(adbName)
+    }
+
+    fun findScrcpyExecutable(): String? {
+        val savedPath = SettingsService.getScrcpyPath()
+        if (savedPath != null && File(savedPath).canExecute()) {
+            return savedPath
+        }
+
+        val pathFromSystem = findExecutableInSystemPath(scrcpyName)
+        if (pathFromSystem != null) {
+            SettingsService.saveScrcpyPath(pathFromSystem)
+            return pathFromSystem
+        }
+
+        return null
+    }
+
+    fun launchScrcpy(scrcpyPath: String, serialNumber: String, project: Project): Boolean {
+        try {
+            if (scrcpyPath.isBlank() || serialNumber.isBlank()) {
+                println("ADB_Randomizer: Empty scrcpy path or serial number provided")
                 return false
             }
 
             val scrcpyFile = File(scrcpyPath)
-            if (!scrcpyFile.exists()) {
-                println("ADB_Randomizer: Scrcpy executable not found at: $scrcpyPath")
-                return false
-            }
-
-            if (!scrcpyFile.canExecute()) {
-                println("ADB_Randomizer: Scrcpy file is not executable: $scrcpyPath")
+            if (!scrcpyFile.exists() || !scrcpyFile.canExecute()) {
+                println("ADB_Randomizer: Scrcpy executable not found or not executable at: $scrcpyPath")
                 return false
             }
 
             println("ADB_Randomizer: Starting scrcpy for device: $serialNumber")
-            
-            @Suppress("DEPRECATION")
-            val adbPath = AndroidSdkUtils.getAdb(project)?.absolutePath
+
+            val adbPath = findAdbExecutable()
             if (adbPath == null) {
-                println("ADB_Randomizer: Cannot get ADB path from IDE")
+                println("ADB_Randomizer: Cannot find ADB executable")
                 return false
             }
 
             println("ADB_Randomizer: Using ADB: $adbPath")
 
-            // Команда без рестарта ADB
-            val processBuilder = ProcessBuilder(
-                scrcpyPath,
-                "-s", serialNumber
-            )
+            val version = checkScrcpyVersion(scrcpyPath)
+            val success = tryDifferentScrcpyMethods(scrcpyPath, serialNumber, adbPath)
 
-            // КРИТИЧЕСКИ ВАЖНО: Устанавливаем переменную среды ADB для scrcpy
+            if (!success) {
+                var retry = false
+                ApplicationManager.getApplication().invokeAndWait {
+                    val dialog = io.github.qavlad.adbrandomizer.ui.ScrcpyCompatibilityDialog(
+                        project,
+                        version.ifBlank { "Unknown" },
+                        serialNumber
+                    )
+                    dialog.show()
+                    if (dialog.exitCode == io.github.qavlad.adbrandomizer.ui.ScrcpyCompatibilityDialog.RETRY_EXIT_CODE) {
+                        retry = true
+                    }
+                }
+
+                if (retry) {
+                    println("ADB_Randomizer: New scrcpy path selected. Retrying screen mirroring...")
+                    val newPath = findScrcpyExecutable()
+                    if (newPath != null) {
+                        return launchScrcpy(newPath, serialNumber, project)
+                    }
+                }
+            }
+
+            return success
+
+        } catch (e: ProcessCanceledException) {
+            throw e
+        } catch (e: Exception) {
+            println("ADB_Randomizer: Unexpected error starting scrcpy: ${e.message}")
+            e.printStackTrace()
+            return false
+        }
+    }
+
+    private fun tryDifferentScrcpyMethods(scrcpyPath: String, serialNumber: String, adbPath: String): Boolean {
+        if (tryScrcpyWithDisplayId(scrcpyPath, serialNumber, adbPath)) return true
+        if (tryScrcpyWithV4l2(scrcpyPath, serialNumber, adbPath)) return true
+        if (tryScrcpyWithCompatibilityFlags(scrcpyPath, serialNumber, adbPath)) return true
+        if (tryMinimalScrcpy(scrcpyPath, serialNumber, adbPath)) return true
+
+        showScrcpyUpdateMessage()
+        return false
+    }
+
+    private fun tryScrcpyWithDisplayId(scrcpyPath: String, serialNumber: String, adbPath: String): Boolean {
+        println("ADB_Randomizer: Trying scrcpy with display-id 0...")
+        val command = listOf(scrcpyPath, "-s", serialNumber, "--no-audio", "--display-id=0", "--video-codec=h264")
+        return launchScrcpyProcess(command, adbPath, scrcpyPath, serialNumber)
+    }
+
+    private fun tryScrcpyWithV4l2(scrcpyPath: String, serialNumber: String, adbPath: String): Boolean {
+        println("ADB_Randomizer: Trying scrcpy with force software encoder...")
+        val command = listOf(scrcpyPath, "-s", serialNumber, "--no-audio", "--video-codec=h264", "--video-encoder=OMX.google.h264.encoder")
+        return launchScrcpyProcess(command, adbPath, scrcpyPath, serialNumber)
+    }
+
+    private fun showScrcpyUpdateMessage() {
+        println("ADB_Randomizer: =================================================")
+        println("ADB_Randomizer: SCRCPY COMPATIBILITY ISSUE DETECTED")
+        println("ADB_Randomizer: Your scrcpy version has known issues with Android 15")
+        println("ADB_Randomizer: Showing compatibility dialog to user...")
+        println("ADB_Randomizer: =================================================")
+    }
+
+    private fun tryScrcpyWithCompatibilityFlags(scrcpyPath: String, serialNumber: String, adbPath: String): Boolean {
+        println("ADB_Randomizer: Trying scrcpy with compatibility flags...")
+        val command = mutableListOf(scrcpyPath, "-s", serialNumber)
+        command.addAll(listOf(
+            "--no-audio",
+            "--no-cleanup",
+            "--video-codec=h264",
+            "--max-size=1920",
+            "--video-bit-rate=8M",
+            "--disable-screensaver",
+            "--stay-awake"
+        ))
+        return launchScrcpyProcess(command, adbPath, scrcpyPath, serialNumber)
+    }
+
+    private fun tryMinimalScrcpy(scrcpyPath: String, serialNumber: String, adbPath: String): Boolean {
+        println("ADB_Randomizer: Trying minimal scrcpy...")
+        val command = listOf(scrcpyPath, "-s", serialNumber, "--no-audio")
+        return launchScrcpyProcess(command, adbPath, scrcpyPath, serialNumber)
+    }
+
+    private fun launchScrcpyProcess(command: List<String>, adbPath: String, scrcpyPath: String, serialNumber: String): Boolean {
+        try {
+            println("ADB_Randomizer: Command: ${command.joinToString(" ")}")
+            val processBuilder = ProcessBuilder(command)
             processBuilder.environment()["ADB"] = adbPath
-
-            // Настраиваем рабочую директорию
-            processBuilder.directory(scrcpyFile.parentFile)
-
-            // Перенаправляем потоки для лучшего логирования
-            processBuilder.redirectErrorStream(true)
-
+            processBuilder.directory(File(scrcpyPath).parentFile)
             val process = processBuilder.start()
 
-            // Проверяем, что процесс успешно запустился
-            Thread.sleep(1000) // Даем время процессу запуститься
+            val outputReader = Thread {
+                try {
+                    process.inputStream.bufferedReader().use { reader ->
+                        reader.lineSequence().take(20).forEach { line ->
+                            println("ADB_Randomizer: scrcpy stdout: $line")
+                        }
+                    }
+                } catch (_: Exception) { /* Игнорируем ошибки чтения */ }
+            }
+
+            val errorReader = Thread {
+                try {
+                    process.errorStream.bufferedReader().use { reader ->
+                        reader.lineSequence().take(20).forEach { line ->
+                            println("ADB_Randomizer: scrcpy stderr: $line")
+                        }
+                    }
+                } catch (_: Exception) { /* Игнорируем ошибки чтения */ }
+            }
+
+            outputReader.start()
+            errorReader.start()
+
+            Thread.sleep(2000)
 
             if (!process.isAlive) {
                 val exitCode = process.exitValue()
-                val output = process.inputStream.bufferedReader().use { it.readText() }
-                println("ADB_Randomizer: Scrcpy failed to start. Exit code: $exitCode")
-                println("ADB_Randomizer: Scrcpy output: $output")
-                return false
+                println("ADB_Randomizer: Scrcpy process finished early. Exit code: $exitCode")
+                return exitCode == 0
+            }
+
+            Thread.sleep(3000)
+
+            if (!process.isAlive) {
+                val exitCode = process.exitValue()
+                println("ADB_Randomizer: Scrcpy process closed after startup. Exit code: $exitCode")
+                return exitCode == 0
             }
 
             println("ADB_Randomizer: Scrcpy started successfully for device: $serialNumber")
 
-            // Запускаем мониторинг процесса в отдельном потоке
             Thread {
-                monitorScrcpyProcess(process, serialNumber)
+                try {
+                    val exitCode = process.waitFor()
+                    println("ADB_Randomizer: Scrcpy for device $serialNumber closed with exit code: $exitCode")
+                    outputReader.join(1000)
+                    errorReader.join(1000)
+                } catch (e: InterruptedException) {
+                    println("ADB_Randomizer: Scrcpy monitoring interrupted for device: $serialNumber")
+                    Thread.currentThread().interrupt()
+                } catch (e: Exception) {
+                    println("ADB_Randomizer: Error monitoring scrcpy process: ${e.message}")
+                }
             }.start()
 
-            true
+            return true
 
-        } catch (e: SecurityException) {
-            println("ADB_Randomizer: Security error starting scrcpy: ${e.message}")
-            false
-        } catch (e: java.io.IOException) {
-            println("ADB_Randomizer: IO error starting scrcpy: ${e.message}")
-            false
         } catch (e: Exception) {
-            println("ADB_Randomizer: Unexpected error starting scrcpy: ${e.message}")
-            e.printStackTrace()
-            false
+            println("ADB_Randomizer: Error launching scrcpy process: ${e.message}")
+            return false
         }
     }
 
-    // Мониторинг процесса scrcpy для логирования
-    private fun monitorScrcpyProcess(process: Process, @Suppress("UNUSED_PARAMETER") serialNumber: String) {
-        try {
-            val exitCode = process.waitFor()
-            when (exitCode) {
-                0 -> println("ADB_Randomizer: Scrcpy for device $serialNumber closed normally")
-                1 -> println("ADB_Randomizer: Scrcpy for device $serialNumber closed with generic error")
-                2 -> println("ADB_Randomizer: Scrcpy for device $serialNumber: Device disconnected")
-                else -> println("ADB_Randomizer: Scrcpy for device $serialNumber closed with exit code: $exitCode")
-            }
-        } catch (_: InterruptedException) {
-            println("ADB_Randomizer: Scrcpy monitoring interrupted for device: $serialNumber")
-            Thread.currentThread().interrupt()
+    private fun checkScrcpyVersion(scrcpyPath: String): String {
+        return try {
+            val process = ProcessBuilder(scrcpyPath, "--version").start()
+            process.inputStream.bufferedReader().use { it.readText() }.trim()
         } catch (e: Exception) {
-            println("ADB_Randomizer: Error monitoring scrcpy process: ${e.message}")
+            println("ADB_Randomizer: Could not get scrcpy version: ${e.message}")
+            ""
         }
     }
 
-    /**
-     * Показывает диалог выбора файла или папки, чтобы пользователь указал путь к scrcpy.
-     * @return Путь к файлу или null, если пользователь отменил выбор или файл не найден.
-     */
     fun promptForScrcpyPath(project: Project?): String? {
         var path: String? = null
         ApplicationManager.getApplication().invokeAndWait {
             val descriptor = FileChooserDescriptor(true, true, false, false, false, false)
                 .withTitle("Select Scrcpy Executable or Its Containing Folder")
                 .withDescription("Please locate the '$scrcpyName' file or the folder it's in.")
-
             val files = FileChooserFactory.getInstance().createFileChooser(descriptor, project, null).choose(project)
 
             if (files.isNotEmpty()) {
                 val selectedFile = File(files[0].path)
                 var scrcpyExe: File? = null
-
                 if (selectedFile.isDirectory) {
                     val potentialExe = File(selectedFile, scrcpyName)
                     if (potentialExe.exists() && potentialExe.canExecute()) {
                         scrcpyExe = potentialExe
-                    } else {
-                        // Дополнительная проверка в поддиректориях (для Windows с scrcpy в папке)
-                        val subdirs = selectedFile.listFiles { file -> file.isDirectory }
-                        for (subdir in subdirs ?: emptyArray()) {
-                            val subPotentialExe = File(subdir, scrcpyName)
-                            if (subPotentialExe.exists() && subPotentialExe.canExecute()) {
-                                scrcpyExe = subPotentialExe
-                                break
-                            }
-                        }
                     }
                 } else if (selectedFile.isFile && selectedFile.name.equals(scrcpyName, ignoreCase = true)) {
                     scrcpyExe = selectedFile
                 }
-
                 if (scrcpyExe != null) {
                     val finalPath = scrcpyExe.absolutePath
                     SettingsService.saveScrcpyPath(finalPath)
                     path = finalPath
                     println("ADB_Randomizer: Scrcpy path saved: $finalPath")
                 } else {
-                    val errorMessage = "Could not find the executable file '$scrcpyName' in the selected location. " +
-                            "Please select the correct file or folder containing scrcpy."
-                    Messages.showErrorDialog(
-                        project,
-                        errorMessage,
-                        "Executable Not Found"
-                    )
                     println("ADB_Randomizer: User selected invalid scrcpy path: ${selectedFile.absolutePath}")
                 }
             } else {
