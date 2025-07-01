@@ -22,60 +22,56 @@ import javax.swing.*
 class ScrcpyCompatibilityDialog(
     private val project: Project?,
     private val currentVersion: String,
-    private val deviceName: String
+    // Device name parameter is kept for future use
+    @Suppress("UNUSED_PARAMETER")
+    private val deviceName: String = "",
+    private val problemType: ProblemType = ProblemType.NOT_WORKING // по умолчанию универсальная проблема
 ) : DialogWrapper(project) {
+
+    enum class ProblemType {
+        NOT_FOUND, // scrcpy не найден
+        NOT_WORKING, // scrcpy найден, но не запускается/ошибка
+        INCOMPATIBLE // scrcpy несовместим (например, слишком старая версия)
+    }
 
     private val scrcpyName = if (System.getProperty("os.name").startsWith("Windows")) "scrcpy.exe" else "scrcpy"
 
     companion object {
-        // <<< ИЗМЕНЕНИЕ 2: Новый код выхода для сигнала о повторной попытке
         const val RETRY_EXIT_CODE = 101
     }
 
     init {
-        title = "Scrcpy Compatibility Issue"
+        title = "Scrcpy Problem Solver"
         setOKButtonText("Close")
         init()
     }
 
-    // <<< ИЗМЕНЕНИЕ 1: Оставляем только одну кнопку "Close"
     override fun createActions(): Array<Action> {
         return arrayOf(okAction)
     }
 
-    // ... (createCenterPanel и другие методы остаются без изменений) ...
     override fun createCenterPanel(): JComponent {
         val mainPanel = JPanel(BorderLayout())
-        mainPanel.preferredSize = Dimension(700, 500)
+        mainPanel.preferredSize = Dimension(635, 681)
+        mainPanel.minimumSize = Dimension(635, 681)
 
-        // Заголовок с иконкой предупреждения
         val headerPanel = JPanel(FlowLayout(FlowLayout.LEFT))
         val warningIcon = UIManager.getIcon("OptionPane.warningIcon")
         headerPanel.add(JLabel(warningIcon))
 
-        val titleLabel = JBLabel("Screen Mirroring Failed").apply {
+        val titleLabel = JBLabel("Scrcpy problem detected").apply {
             font = font.deriveFont(Font.BOLD, 16f)
         }
         headerPanel.add(titleLabel)
-
         mainPanel.add(headerPanel, BorderLayout.NORTH)
 
-        // Основной контент
         val contentPanel = JPanel()
         contentPanel.layout = BoxLayout(contentPanel, BoxLayout.Y_AXIS)
-        contentPanel.border = JBUI.Borders.empty(15, 20, 15, 20)
+        contentPanel.border = JBUI.Borders.empty(15, 20)
 
         // Описание проблемы
         val problemText = JBTextArea().apply {
-            text = """
-                Unable to start screen mirroring for device: $deviceName
-                
-                Problem: Your current scrcpy version ($currentVersion) has compatibility issues with Android 15 devices.
-                The error is caused by changes in Android's SurfaceControl API that require a newer version of scrcpy.
-                
-                This is a known issue that has been resolved in scrcpy version 2.4 and later.
-            """.trimIndent()
-
+            text = getProblemDescription()
             isEditable = false
             isOpaque = false
             lineWrap = true
@@ -85,66 +81,85 @@ class ScrcpyCompatibilityDialog(
             rows = 6
         }
         contentPanel.add(problemText)
-
         contentPanel.add(Box.createVerticalStrut(25))
 
-        // Варианты решения
         val solutionsLabel = JBLabel("Solutions:").apply {
             font = font.deriveFont(Font.BOLD, 14f)
         }
         contentPanel.add(solutionsLabel)
-
         contentPanel.add(Box.createVerticalStrut(15))
 
-        // Решение 1: Указать путь к новой версии
+        // Решение 1: Указать путь к scrcpy
         val solution1Panel = createSolutionPanel(
             "1. Use a different scrcpy version",
-            "If you have a newer version of scrcpy installed elsewhere, you can specify its path directly.",
+            "If you have another version of scrcpy installed, you can specify its path directly.",
             "Select scrcpy Path"
         ) {
-            // НЕ закрываем диалог сразу
             promptForScrcpyPathWithRetry()
         }
         contentPanel.add(solution1Panel)
-
         contentPanel.add(Box.createVerticalStrut(15))
 
-        // Решение 2: Скачать с GitHub
-        val solution2Panel = createSolutionPanel(
-            "2. Download latest version from GitHub",
-            "Download the latest scrcpy release that supports Android 15.",
-            "Open GitHub Releases"
-        ) {
-            BrowserUtil.browse("https://github.com/Genymobile/scrcpy/releases")
+        // Решение 2: Скачать или обновить scrcpy
+        val solution2Title: String
+        val solution2Desc: String
+        val solution2Button: String
+        val solution2Action: () -> Unit
+        if (problemType == ProblemType.NOT_FOUND) {
+            solution2Title = "2. Download and install scrcpy"
+            solution2Desc = "Download the latest scrcpy release and follow the installation instructions."
+            solution2Button = "Open GitHub Releases"
+            solution2Action = { BrowserUtil.browse("https://github.com/Genymobile/scrcpy/releases") }
+        } else {
+            solution2Title = "2. Download latest version from GitHub"
+            solution2Desc = "Download the latest scrcpy release that supports your device."
+            solution2Button = "Open GitHub Releases"
+            solution2Action = { BrowserUtil.browse("https://github.com/Genymobile/scrcpy/releases") }
         }
+        val solution2Panel = createSolutionPanel(solution2Title, solution2Desc, solution2Button, solution2Action)
         contentPanel.add(solution2Panel)
-
         contentPanel.add(Box.createVerticalStrut(15))
 
-        // Решение 3: Обновить через терминал
-        val updateCommand = getUpdateCommand()
-        val solution3Panel = createSolutionPanel(
-            "3. Update via terminal/command line",
-            "Run the following command to update scrcpy:\n$updateCommand",
-            "Copy Command"
-        ) {
-            // Копируем команду в буфер обмена
-            copyToClipboard(updateCommand)
-            // Показываем уведомление
-            JOptionPane.showMessageDialog(
-                this.contentPane,
-                "Command copied to clipboard!\nPaste it into your terminal and press Enter.",
-                "Command Copied",
-                JOptionPane.INFORMATION_MESSAGE
-            )
+        // Решение 3: Команды для установки/обновления scrcpy
+        val commands = getCommandList()
+        val solution3Panel = JPanel()
+        solution3Panel.layout = BoxLayout(solution3Panel, BoxLayout.Y_AXIS)
+        solution3Panel.isOpaque = false
+        val solution3Title = when (problemType) {
+            ProblemType.NOT_FOUND -> "3. Install scrcpy via terminal/command line"
+            else -> "3. Update scrcpy via terminal/command line"
+        }
+        val solution3Label = JBLabel(solution3Title).apply { font = font.deriveFont(Font.BOLD) }
+        solution3Panel.add(solution3Label)
+        solution3Panel.add(Box.createVerticalStrut(5))
+        for ((desc, cmd) in commands) {
+            val cmdPanel = JPanel(BorderLayout())
+            cmdPanel.isOpaque = false
+            val cmdArea = JBTextArea(cmd).apply {
+                isEditable = false
+                isOpaque = false
+                lineWrap = true
+                wrapStyleWord = true
+                font = UIUtil.getLabelFont()
+                foreground = UIUtil.getLabelForeground()
+                border = JBUI.Borders.empty(2)
+                rows = 2
+            }
+            val copyBtn = JButton("Copy").apply {
+                addActionListener { copyToClipboard(cmd) }
+            }
+            ButtonUtils.addHoverEffect(copyBtn)
+            cmdPanel.add(JLabel(desc), BorderLayout.NORTH)
+            cmdPanel.add(cmdArea, BorderLayout.CENTER)
+            cmdPanel.add(copyBtn, BorderLayout.EAST)
+            solution3Panel.add(cmdPanel)
+            solution3Panel.add(Box.createVerticalStrut(5))
         }
         contentPanel.add(solution3Panel)
-
         contentPanel.add(Box.createVerticalStrut(20))
 
-        // Дополнительная информация
         val noteText = JBTextArea().apply {
-            text = "Note: After updating scrcpy, you may need to restart the IDE for the changes to take effect."
+            text = "Note: After installing or updating scrcpy, you may need to restart the IDE for the changes to take effect."
             isEditable = false
             isOpaque = false
             lineWrap = true
@@ -154,10 +169,64 @@ class ScrcpyCompatibilityDialog(
             rows = 2
         }
         contentPanel.add(noteText)
-
         mainPanel.add(contentPanel, BorderLayout.CENTER)
-
         return mainPanel
+    }
+
+    private fun getProblemDescription(): String {
+        return when (problemType) {
+            ProblemType.NOT_FOUND ->
+                "scrcpy executable was not found on your system.\n\n" +
+                "Screen mirroring cannot be started because scrcpy is missing.\n" +
+                "You need to install scrcpy or specify its path."
+            ProblemType.NOT_WORKING ->
+                "scrcpy could not be started or failed to run.\n\n" +
+                "This may be caused by an outdated or broken scrcpy installation, or by missing dependencies.\n" +
+                "Try updating scrcpy or selecting a different version."
+            ProblemType.INCOMPATIBLE ->
+                "Your current scrcpy version ($currentVersion) is incompatible with your device or Android version.\n\n" +
+                "Please update scrcpy to the latest version or select a compatible version."
+        }
+    }
+
+    private fun getCommandList(): List<Pair<String, String>> {
+        val osName = System.getProperty("os.name").lowercase()
+        return when (problemType) {
+            ProblemType.NOT_FOUND -> when {
+                osName.contains("mac") -> listOf(
+                    "Homebrew:" to "brew install scrcpy"
+                )
+                osName.contains("windows") -> listOf(
+                    "Chocolatey:" to "choco install scrcpy",
+                    "Scoop:" to "scoop install scrcpy",
+                    "Winget:" to "winget install scrcpy"
+                )
+                osName.contains("linux") -> listOf(
+                    "Ubuntu/Debian:" to "sudo apt update && sudo apt install scrcpy",
+                    "Arch Linux:" to "sudo pacman -S scrcpy",
+                    "Fedora:" to "sudo dnf install scrcpy",
+                    "Snap:" to "sudo snap install scrcpy"
+                )
+                else -> listOf("Manual installation:" to "See https://github.com/Genymobile/scrcpy for instructions.")
+            }
+            else -> when {
+                osName.contains("mac") -> listOf(
+                    "Homebrew:" to "brew upgrade scrcpy"
+                )
+                osName.contains("windows") -> listOf(
+                    "Chocolatey:" to "choco upgrade scrcpy",
+                    "Scoop:" to "scoop update scrcpy",
+                    "Winget:" to "winget upgrade scrcpy"
+                )
+                osName.contains("linux") -> listOf(
+                    "Ubuntu/Debian:" to "sudo apt update && sudo apt upgrade scrcpy",
+                    "Arch Linux:" to "sudo pacman -Syu scrcpy",
+                    "Fedora:" to "sudo dnf upgrade scrcpy",
+                    "Snap:" to "sudo snap refresh scrcpy"
+                )
+                else -> listOf("Manual update:" to "See https://github.com/Genymobile/scrcpy for instructions.")
+            }
+        }
     }
 
     private fun copyToClipboard(text: String) {
@@ -199,7 +268,7 @@ class ScrcpyCompatibilityDialog(
         val button = JButton(buttonText).apply {
             addActionListener { buttonAction() }
         }
-        ButtonUtils.addHoverEffect(button) // Предполагается, что ButtonUtils существует
+        ButtonUtils.addHoverEffect(button)
 
         panel.add(textPanel, BorderLayout.CENTER)
         panel.add(button, BorderLayout.EAST)
@@ -207,42 +276,6 @@ class ScrcpyCompatibilityDialog(
         return panel
     }
 
-    private fun getUpdateCommand(): String {
-        val osName = System.getProperty("os.name").lowercase()
-        return when {
-            osName.contains("mac") -> "brew upgrade scrcpy"
-            osName.contains("windows") -> {
-                """
-                # If you have Chocolatey:
-                choco upgrade scrcpy
-                
-                # If you have Scoop:
-                scoop update scrcpy
-                
-                # If you have Winget:
-                winget upgrade scrcpy
-                """.trimIndent()
-            }
-            osName.contains("linux") -> {
-                """
-                # For Ubuntu/Debian:
-                sudo apt update && sudo apt upgrade scrcpy
-                
-                # For Arch Linux:
-                sudo pacman -Syu scrcpy
-                
-                # For Fedora:
-                sudo dnf upgrade scrcpy
-                
-                # Or use Snap:
-                sudo snap refresh scrcpy
-                """.trimIndent()
-            }
-            else -> "# Please check your package manager documentation for updating scrcpy"
-        }
-    }
-
-    // <<< ИЗМЕНЕНИЕ 3: Логика выбора папки или файла
     private fun selectScrcpyFileOrFolder(): String? {
         val descriptor = FileChooserDescriptor(true, true, false, false, false, false)
             .withTitle("Select Scrcpy Executable or Its Containing Folder")
@@ -254,12 +287,10 @@ class ScrcpyCompatibilityDialog(
 
         val selectedIoFile = File(chosenFile.path)
 
-        // Проверяем, если пользователь выбрал сам исполняемый файл
         if (selectedIoFile.isFile && selectedIoFile.name.equals(scrcpyName, ignoreCase = true)) {
             return selectedIoFile.absolutePath
         }
 
-        // Проверяем, если пользователь выбрал папку, содержащую исполняемый файл
         if (selectedIoFile.isDirectory) {
             val potentialExe = File(selectedIoFile, scrcpyName)
             if (potentialExe.exists() && potentialExe.isFile) {
@@ -267,7 +298,6 @@ class ScrcpyCompatibilityDialog(
             }
         }
 
-        // Если ничего не подошло, возвращаем исходный путь, чтобы проверка isValideScrcpyPath показала ошибку
         return selectedIoFile.absolutePath
     }
 
@@ -280,7 +310,7 @@ class ScrcpyCompatibilityDialog(
             val process = ProcessBuilder(path, "--version").start()
             val finished = process.waitFor(3, TimeUnit.SECONDS)
             return finished && process.exitValue() == 0
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             return false
         }
     }
@@ -290,13 +320,12 @@ class ScrcpyCompatibilityDialog(
             val resolvedScrcpyPath = selectScrcpyFileOrFolder()
 
             if (resolvedScrcpyPath == null) {
-                return // Пользователь отменил выбор
+                return
             }
 
             if (isValidScrcpyPath(resolvedScrcpyPath)) {
                 SettingsService.saveScrcpyPath(resolvedScrcpyPath)
                 SwingUtilities.invokeLater {
-                    // <<< ИЗМЕНЕНИЕ 2: Закрываем диалог с кастомным кодом
                     close(RETRY_EXIT_CODE)
                 }
                 return
@@ -317,7 +346,7 @@ class ScrcpyCompatibilityDialog(
                 )
 
                 if (result != JOptionPane.YES_OPTION) {
-                    return // Пользователь не хочет продолжать
+                    return
                 }
             }
         }

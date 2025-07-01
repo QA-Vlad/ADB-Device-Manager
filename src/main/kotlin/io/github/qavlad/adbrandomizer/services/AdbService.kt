@@ -311,7 +311,7 @@ object AdbService {
     }
 
     // Валидация IP адреса
-    private fun isValidIpAddress(ip: String): Boolean {
+    fun isValidIpAddress(ip: String): Boolean {
         val parts = ip.split(".")
         if (parts.size != 4) return false
 

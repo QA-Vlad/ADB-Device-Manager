@@ -9,7 +9,6 @@ import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.Project
-import com.intellij.util.ui.JBUI
 import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.util.IconLoader
 import com.intellij.ui.JBColor
@@ -190,27 +189,12 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                 return
             }
 
-            if (!isValidIpAddress(ip)) {
+            if (!AdbService.isValidIpAddress(ip)) {
                 Messages.showErrorDialog(project, "Please enter valid IP address", "Invalid Input")
                 return
             }
 
             handleManualWifiConnect(ip, port)
-        }
-    }
-
-    // ДОБАВЛЯЕМ МЕТОД валидации IP (был объявлен, но не определен)
-    private fun isValidIpAddress(ip: String): Boolean {
-        val parts = ip.split(".")
-        if (parts.size != 4) return false
-
-        return parts.all { part ->
-            try {
-                val num = part.toInt()
-                num in 0..255
-            } catch (_: NumberFormatException) {
-                false
-            }
         }
     }
 
@@ -413,16 +397,28 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
 
     // Новый метод для работы с UI в правильном потоке
     private fun promptForScrcpyInUIThread(deviceInfo: DeviceInfo) {
-        val scrcpyPath = ScrcpyService.promptForScrcpyPath(project)
-        if (scrcpyPath != null) {
-            // Запускаем новую background задачу для scrcpy
-            object : Task.Backgroundable(project, "Starting screen mirroring") {
-                override fun run(indicator: ProgressIndicator) {
-                    launchScrcpyProcess(deviceInfo, scrcpyPath, indicator)
-                }
-            }.queue()
+        // Показываем диалог совместимости, если scrcpy не найден
+        val dialog = ScrcpyCompatibilityDialog(
+            project,
+            "Not found",
+            deviceInfo.displayName,
+            ScrcpyCompatibilityDialog.ProblemType.NOT_FOUND
+        )
+        dialog.show()
+        if (dialog.exitCode == ScrcpyCompatibilityDialog.RETRY_EXIT_CODE) {
+            // Пользователь выбрал путь к scrcpy, пробуем снова
+            val scrcpyPath = ScrcpyService.findScrcpyExecutable()
+            if (scrcpyPath != null) {
+                object : Task.Backgroundable(project, "Starting screen mirroring") {
+                    override fun run(indicator: ProgressIndicator) {
+                        launchScrcpyProcess(deviceInfo, scrcpyPath, indicator)
+                    }
+                }.queue()
+            } else {
+                showErrorNotification("scrcpy path not provided. Could not start mirroring.")
+            }
         } else {
-            showErrorNotification("scrcpy path not provided. Could not start mirroring.")
+            showErrorNotification("scrcpy not found. Could not start mirroring.")
         }
     }
 

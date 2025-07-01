@@ -3,8 +3,6 @@
 package io.github.qavlad.adbrandomizer.services
 
 import com.intellij.openapi.application.ApplicationManager
-import com.intellij.openapi.fileChooser.FileChooserDescriptor
-import com.intellij.openapi.fileChooser.FileChooserFactory
 import com.intellij.openapi.progress.ProcessCanceledException
 import com.intellij.openapi.project.Project
 import java.io.File
@@ -260,37 +258,4 @@ object ScrcpyService {
         }
     }
 
-    fun promptForScrcpyPath(project: Project?): String? {
-        var path: String? = null
-        ApplicationManager.getApplication().invokeAndWait {
-            val descriptor = FileChooserDescriptor(true, true, false, false, false, false)
-                .withTitle("Select Scrcpy Executable or Its Containing Folder")
-                .withDescription("Please locate the '$scrcpyName' file or the folder it's in.")
-            val files = FileChooserFactory.getInstance().createFileChooser(descriptor, project, null).choose(project)
-
-            if (files.isNotEmpty()) {
-                val selectedFile = File(files[0].path)
-                var scrcpyExe: File? = null
-                if (selectedFile.isDirectory) {
-                    val potentialExe = File(selectedFile, scrcpyName)
-                    if (potentialExe.exists() && potentialExe.canExecute()) {
-                        scrcpyExe = potentialExe
-                    }
-                } else if (selectedFile.isFile && selectedFile.name.equals(scrcpyName, ignoreCase = true)) {
-                    scrcpyExe = selectedFile
-                }
-                if (scrcpyExe != null) {
-                    val finalPath = scrcpyExe.absolutePath
-                    SettingsService.saveScrcpyPath(finalPath)
-                    path = finalPath
-                    println("ADB_Randomizer: Scrcpy path saved: $finalPath")
-                } else {
-                    println("ADB_Randomizer: User selected invalid scrcpy path: ${selectedFile.absolutePath}")
-                }
-            } else {
-                println("ADB_Randomizer: User cancelled scrcpy path selection")
-            }
-        }
-        return path
-    }
 }

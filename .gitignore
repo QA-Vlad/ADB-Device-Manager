@@ -42,3 +42,4 @@ Thumbs.db
 # Local sandbox override
 gradle-local.properties
 sandbox-persistent/
+/.cursor/rules/standart.mdc
