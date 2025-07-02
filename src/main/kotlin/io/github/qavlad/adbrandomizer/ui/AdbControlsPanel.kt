@@ -3,8 +3,6 @@
 package io.github.qavlad.adbrandomizer.ui
 
 import com.android.ddmlib.IDevice
-import com.intellij.notification.NotificationGroupManager
-import com.intellij.notification.NotificationType
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.Task
@@ -17,6 +15,7 @@ import com.intellij.ui.components.JBScrollPane
 import com.intellij.util.ui.JBFont
 import io.github.qavlad.adbrandomizer.services.*
 import io.github.qavlad.adbrandomizer.utils.ButtonUtils
+import io.github.qavlad.adbrandomizer.utils.NotificationUtils
 import java.awt.*
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
@@ -65,7 +64,6 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
         panel.add(createCenteredButton("RESET SIZE ONLY") { handleResetAction(resetSize = true, resetDpi = false) })
         panel.add(createCenteredButton("RESET DPI ONLY") { handleResetAction(resetSize = false, resetDpi = true) })
         panel.add(createCenteredButton("PRESETS") { SettingsDialog(project).show() })
-        // НОВАЯ КНОПКА
         panel.add(createCenteredButton("CONNECT DEVICE") { handleConnectDevice() })
         return panel
     }
@@ -154,9 +152,6 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
         return panel
     }
 
-    // НОВЫЙ МЕТОД - обработка ручного подключения
-    // НОВЫЙ МЕТОД - обработка ручного подключения
-    // ПРОСТОЙ ВАРИАНТ - используем стандартный ввод
     private fun handleConnectDevice() {
         val input = Messages.showInputDialog(
             project,
@@ -216,20 +211,20 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
 
                         ApplicationManager.getApplication().invokeLater {
                             if (connected) {
-                                showSuccessNotification("Successfully connected to device at $ipAddress:$port")
+                                NotificationUtils.showSuccess(project, "Successfully connected to device at $ipAddress:$port")
                                 updateDeviceList() // Обновляем список устройств
                             } else {
-                                showErrorNotification("Connected to $ipAddress:$port but device not visible. Check device settings.")
+                                NotificationUtils.showError(project, "Connected to $ipAddress:$port but device not visible. Check device settings.")
                             }
                         }
                     } else {
                         ApplicationManager.getApplication().invokeLater {
-                            showErrorNotification("Failed to connect to $ipAddress:$port. Make sure device is in TCP/IP mode.")
+                            NotificationUtils.showError(project, "Failed to connect to $ipAddress:$port. Make sure device is in TCP/IP mode.")
                         }
                     }
                 } catch (e: Exception) {
                     ApplicationManager.getApplication().invokeLater {
-                        showErrorNotification("Error connecting to device: ${e.message}")
+                        NotificationUtils.showError(project, "Error connecting to device: ${e.message}")
                     }
                 }
             }
@@ -384,7 +379,7 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                     indicator.text = "Scrcpy not found."
                     // Перемещаем UI операцию в UI Thread
                     ApplicationManager.getApplication().invokeLater {
-                        showNotification("scrcpy executable not found in PATH or settings. Please select the file.")
+                        NotificationUtils.showInfo(project, "scrcpy executable not found in PATH or settings. Please select the file.")
                         promptForScrcpyInUIThread(deviceInfo)
                     }
                     return
@@ -415,10 +410,10 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                     }
                 }.queue()
             } else {
-                showErrorNotification("scrcpy path not provided. Could not start mirroring.")
+                NotificationUtils.showError(project, "scrcpy path not provided. Could not start mirroring.")
             }
         } else {
-            showErrorNotification("scrcpy not found. Could not start mirroring.")
+            NotificationUtils.showError(project, "scrcpy not found. Could not start mirroring.")
         }
     }
 
@@ -430,11 +425,11 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
         val success = ScrcpyService.launchScrcpy(scrcpyPath, serialToUse, project)
         if (success) {
             ApplicationManager.getApplication().invokeLater {
-                showSuccessNotification("Screen mirroring started for ${deviceInfo.displayName}")
+                NotificationUtils.showSuccess(project, "Screen mirroring started for ${deviceInfo.displayName}")
             }
         } else {
             ApplicationManager.getApplication().invokeLater {
-                showErrorNotification("Failed to start screen mirroring for ${deviceInfo.displayName}")
+                NotificationUtils.showError(project, "Failed to start screen mirroring for ${deviceInfo.displayName}")
             }
         }
     }
@@ -448,7 +443,7 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                 val ipAddress = AdbService.getDeviceIpAddress(device)
 
                 if (ipAddress.isNullOrBlank()) {
-                    showErrorNotification("Cannot find IP address for device ${device.name}. Make sure it's connected to Wi-Fi.")
+                    NotificationUtils.showError(project, "Cannot find IP address for device ${device.name}. Make sure it's connected to Wi-Fi.")
                     return
                 }
 
@@ -461,12 +456,12 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                     val success = connectWithRetry(ipAddress, indicator)
 
                     if (success) {
-                        showSuccessNotification("Successfully connected to ${device.name} at $ipAddress.")
+                        NotificationUtils.showSuccess(project, "Successfully connected to ${device.name} at $ipAddress.")
                     } else {
-                        showErrorNotification("Failed to connect to ${device.name} via Wi-Fi. Check device and network.")
+                        NotificationUtils.showError(project, "Failed to connect to ${device.name} via Wi-Fi. Check device and network.")
                     }
                 } catch (e: Exception) {
-                    showErrorNotification("Error connecting to device: ${e.message}")
+                    NotificationUtils.showError(project, "Error connecting to device: ${e.message}")
                 }
             }
 
@@ -516,23 +511,35 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
 
     private fun handleNextPreset() {
         val presets = SettingsService.getPresets()
-        if (presets.isEmpty()) { showNotification("No presets found in settings."); return }
+        if (presets.isEmpty()) {
+            NotificationUtils.showInfo(project, "No presets found in settings.")
+            return
+        }
         currentPresetIndex = (currentPresetIndex + 1) % presets.size
         applyPresetByIndex(currentPresetIndex)
     }
 
     private fun handlePreviousPreset() {
         val presets = SettingsService.getPresets()
-        if (presets.isEmpty()) { showNotification("No presets found in settings."); return }
+        if (presets.isEmpty()) {
+            NotificationUtils.showInfo(project, "No presets found in settings.")
+            return
+        }
         currentPresetIndex = if (currentPresetIndex <= 0) presets.size - 1 else currentPresetIndex - 1
         applyPresetByIndex(currentPresetIndex)
     }
 
     private fun applyPresetByIndex(index: Int) {
         val devices = AdbService.getConnectedDevices(project)
-        if (devices.isEmpty()) { showNotification("No connected devices found."); return }
+        if (devices.isEmpty()) {
+            NotificationUtils.showInfo(project, "No connected devices found.")
+            return
+        }
         val presets = SettingsService.getPresets()
-        if (index < 0 || index >= presets.size) { showNotification("Invalid preset index."); return }
+        if (index < 0 || index >= presets.size) {
+            NotificationUtils.showInfo(project, "Invalid preset index.")
+            return
+        }
         applyPreset(presets[index], index + 1, setSize = true, setDpi = true)
     }
 
@@ -546,30 +553,42 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                 if (setSize && preset.size.isNotBlank()) {
                     val parts = preset.size.split('x', 'X', 'х', 'Х').map { it.trim() }
                     width = parts.getOrNull(0)?.toIntOrNull(); height = parts.getOrNull(1)?.toIntOrNull()
-                    if (width == null || height == null) { showErrorNotification("Invalid size format in preset '${preset.label}': ${preset.size}"); return }
+                    if (width == null || height == null) {
+                        NotificationUtils.showError(project, "Invalid size format in preset '${preset.label}': ${preset.size}")
+                        return
+                    }
                     appliedSettings.add("Size: ${preset.size}")
                 }
                 var dpi: Int? = null
                 if (setDpi && preset.dpi.isNotBlank()) {
                     dpi = preset.dpi.trim().toIntOrNull()
-                    if (dpi == null) { showErrorNotification("Invalid DPI format in preset '${preset.label}': ${preset.dpi}"); return }
+                    if (dpi == null) {
+                        NotificationUtils.showError(project, "Invalid DPI format in preset '${preset.label}': ${preset.dpi}")
+                        return
+                    }
                     appliedSettings.add("DPI: ${preset.dpi}")
                 }
-                if (appliedSettings.isEmpty()) { showNotification("No settings to apply for preset '${preset.label}'"); return }
+                if (appliedSettings.isEmpty()) {
+                    NotificationUtils.showInfo(project, "No settings to apply for preset '${preset.label}'")
+                    return
+                }
                 devices.forEach { device ->
                     indicator.text = "Applying '${preset.label}' to ${device.name}..."
                     if (setSize && width != null && height != null) AdbService.setSize(device, width, height)
                     if (setDpi && dpi != null) AdbService.setDpi(device, dpi)
                 }
                 val message = "<html>Preset №${presetNumber}: ${preset.label};<br>${appliedSettings.joinToString(", ")}</html>"
-                showSuccessNotification(message)
+                NotificationUtils.showSuccess(project, message)
             }
         }.queue()
     }
 
     private fun handleResetAction(resetSize: Boolean, resetDpi: Boolean) {
         val devices = AdbService.getConnectedDevices(project)
-        if (devices.isEmpty()) { showNotification("No connected devices found."); return }
+        if (devices.isEmpty()) {
+            NotificationUtils.showInfo(project, "No connected devices found.")
+            return
+        }
         val actionDescription = when {
             resetSize && resetDpi -> "Resetting screen and DPI"
             resetSize -> "Resetting screen size"
@@ -586,19 +605,25 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                 val resetItems = mutableListOf<String>()
                 if (resetSize) resetItems.add("screen size")
                 if (resetDpi) resetItems.add("DPI")
-                showSuccessNotification("${resetItems.joinToString(" and ").replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }} reset for ${devices.size} device(s).")
+                NotificationUtils.showSuccess(project, "${resetItems.joinToString(" and ").replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }} reset for ${devices.size} device(s).")
             }
         }.queue()
     }
 
     private fun handleRandomAction(setSize: Boolean, setDpi: Boolean) {
         val devices = AdbService.getConnectedDevices(project)
-        if (devices.isEmpty()) { showNotification("No connected devices found."); return }
+        if (devices.isEmpty()) {
+            NotificationUtils.showInfo(project, "No connected devices found.")
+            return
+        }
         var availablePresets = SettingsService.getPresets().filter { (!setSize || it.size.isNotBlank()) && (!setDpi || it.dpi.isNotBlank()) }
         if (availablePresets.size > 1 && lastUsedPreset != null) { availablePresets = availablePresets.filter { it != lastUsedPreset } }
         if (availablePresets.isEmpty()) {
             val allSuitablePresets = SettingsService.getPresets().filter { (!setSize || it.size.isNotBlank()) && (!setDpi || it.dpi.isNotBlank()) }
-            if (allSuitablePresets.isNotEmpty()) { availablePresets = allSuitablePresets } else { showNotification("No suitable presets found in settings."); return }
+            if (allSuitablePresets.isNotEmpty()) { availablePresets = allSuitablePresets } else {
+                NotificationUtils.showInfo(project, "No suitable presets found in settings.")
+                return
+            }
         }
         val randomPreset = availablePresets.random()
         val allPresets = SettingsService.getPresets()
@@ -613,16 +638,6 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
         ButtonUtils.addHoverEffect(button)
         button.addActionListener { action() }
         return button
-    }
-
-    private fun showNotification(message: String) = showPopup(message, NotificationType.INFORMATION)
-    private fun showSuccessNotification(message: String) = showPopup(message, NotificationType.INFORMATION)
-    private fun showErrorNotification(message: String) = showPopup(message, NotificationType.ERROR)
-
-    private fun showPopup(message: String, type: NotificationType) {
-        ApplicationManager.getApplication().invokeLater {
-            NotificationGroupManager.getInstance().getNotificationGroup("ADB Randomizer Notifications").createNotification(message, type).notify(project)
-        }
     }
 
     // Улучшенное сравнение устройств
@@ -650,7 +665,7 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                 return displaySerialNumber == other.displaySerialNumber
             }
 
-// Если один из них Wi-Fi, а другой USB, но с похожими именами
+            // Если один из них Wi-Fi, а другой USB, но с похожими именами
             if (wifiSerialRegex.matches(logicalSerialNumber) != wifiSerialRegex.matches(other.logicalSerialNumber)) {
                 return displayName == other.displayName && androidVersion == other.androidVersion
             }
