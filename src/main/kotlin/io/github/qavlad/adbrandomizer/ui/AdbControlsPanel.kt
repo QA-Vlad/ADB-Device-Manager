@@ -38,6 +38,13 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
     }
 
     init {
+        setupUI()
+        startDevicePolling()
+    }
+
+    // ==================== UI SETUP ====================
+
+    private fun setupUI() {
         val buttonsPanel = createButtonsPanel()
         val devicesPanel = createDevicesPanel()
         val splitPane = JSplitPane(JSplitPane.VERTICAL_SPLIT, buttonsPanel, devicesPanel).apply {
@@ -46,23 +53,28 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
             SwingUtilities.invokeLater { setDividerLocation(0.5) }
         }
         add(splitPane, BorderLayout.CENTER)
-        startDevicePolling()
     }
 
     private fun createButtonsPanel(): JPanel {
         val panel = JPanel()
         panel.layout = BoxLayout(panel, BoxLayout.Y_AXIS)
         panel.border = BorderFactory.createTitledBorder("Controls")
-        panel.add(createCenteredButton("RANDOM SIZE AND DPI") { handleRandomAction(setSize = true, setDpi = true) })
-        panel.add(createCenteredButton("RANDOM SIZE ONLY") { handleRandomAction(setSize = true, setDpi = false) })
-        panel.add(createCenteredButton("RANDOM DPI ONLY") { handleRandomAction(setSize = false, setDpi = true) })
-        panel.add(createCenteredButton("NEXT PRESET") { handleNextPreset() })
-        panel.add(createCenteredButton("PREVIOUS PRESET") { handlePreviousPreset() })
-        panel.add(createCenteredButton("Reset size and DPI to default") { handleResetAction(resetSize = true, resetDpi = true) })
-        panel.add(createCenteredButton("RESET SIZE ONLY") { handleResetAction(resetSize = true, resetDpi = false) })
-        panel.add(createCenteredButton("RESET DPI ONLY") { handleResetAction(resetSize = false, resetDpi = true) })
-        panel.add(createCenteredButton("PRESETS") { SettingsDialog(project).show() })
-        panel.add(createCenteredButton("CONNECT DEVICE") { handleConnectDevice() })
+
+        // Группируем кнопки логически
+        panel.add(createCenteredButton("RANDOM SIZE AND DPI") { executeRandomAction(setSize = true, setDpi = true) })
+        panel.add(createCenteredButton("RANDOM SIZE ONLY") { executeRandomAction(setSize = true, setDpi = false) })
+        panel.add(createCenteredButton("RANDOM DPI ONLY") { executeRandomAction(setSize = false, setDpi = true) })
+
+        panel.add(createCenteredButton("NEXT PRESET") { navigateToNextPreset() })
+        panel.add(createCenteredButton("PREVIOUS PRESET") { navigateToPreviousPreset() })
+
+        panel.add(createCenteredButton("Reset size and DPI to default") { executeResetAction(resetSize = true, resetDpi = true) })
+        panel.add(createCenteredButton("RESET SIZE ONLY") { executeResetAction(resetSize = true, resetDpi = false) })
+        panel.add(createCenteredButton("RESET DPI ONLY") { executeResetAction(resetSize = false, resetDpi = true) })
+
+        panel.add(createCenteredButton("PRESETS") { openPresetSettings() })
+        panel.add(createCenteredButton("CONNECT DEVICE") { promptForManualConnection() })
+
         return panel
     }
 
@@ -70,86 +82,8 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
         val panel = JPanel(BorderLayout())
         panel.border = BorderFactory.createTitledBorder("Connected Devices")
 
-        // Создаем рендерер с callback'ами
-        deviceList.cellRenderer = DeviceListRenderer(
-            hoveredCellIndex = { hoveredCellIndex },
-            hoveredButtonType = { hoveredButtonType },
-            onMirrorClick = { deviceInfo -> handleScrcpyMirror(deviceInfo) },
-            onWifiClick = { device -> handleWifiConnect(device) }
-        )
-
-        deviceList.selectionMode = ListSelectionModel.SINGLE_SELECTION
-        deviceList.emptyText.text = "No devices connected"
-
-        deviceList.clearSelection()
-        deviceList.selectionModel.clearSelection()
-
-        //  Единый обработчик движения мыши с изменением курсора
-        deviceList.addMouseMotionListener(object : MouseMotionAdapter() {
-            override fun mouseMoved(e: MouseEvent) {
-                val index = deviceList.locationToIndex(e.point)
-                var newButtonType: String? = null
-
-                if (index != -1 && index < deviceListModel.size()) {
-                    val bounds = deviceList.getCellBounds(index, index)
-                    val deviceInfo = deviceListModel.getElementAt(index)
-                    val buttonLayout = calculateButtonSizes(bounds, deviceInfo)
-
-                    newButtonType = when {
-                        buttonLayout.mirrorButtonRect.contains(e.point) -> "MIRROR"
-                        buttonLayout.wifiButtonRect?.contains(e.point) == true -> "WIFI"
-                        else -> null
-                    }
-                }
-
-                // Меняем курсор в зависимости от того, на кнопке ли мы
-                deviceList.cursor = if (newButtonType != null) {
-                    Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
-                } else {
-                    Cursor.getDefaultCursor()
-                }
-
-                if (index != hoveredCellIndex || newButtonType != hoveredButtonType) {
-                    hoveredCellIndex = index
-                    hoveredButtonType = newButtonType
-                    deviceList.repaint()
-                }
-            }
-        })
-
-        //  Обработчик кликов БЕЗ selection
-        deviceList.addMouseListener(object : MouseAdapter() {
-            override fun mouseClicked(e: MouseEvent) {
-                val index = deviceList.locationToIndex(e.point)
-                if (index != -1 && index < deviceListModel.size()) {
-                    val bounds = deviceList.getCellBounds(index, index)
-                    val deviceInfo = deviceListModel.getElementAt(index)
-                    val buttonLayout = calculateButtonSizes(bounds, deviceInfo)
-
-                    when {
-                        buttonLayout.mirrorButtonRect.contains(e.point) -> {
-                            handleScrcpyMirror(deviceInfo)
-                        }
-                        buttonLayout.wifiButtonRect?.contains(e.point) == true -> {
-                            handleWifiConnect(deviceInfo.device)
-                        }
-                    }
-                }
-
-                // Сбрасываем selection после любого клика
-                deviceList.clearSelection()
-            }
-
-            override fun mouseExited(event: MouseEvent?) {
-                if (hoveredCellIndex != -1) {
-                    hoveredCellIndex = -1
-                    hoveredButtonType = null
-                    //  Возвращаем обычный курсор при выходе
-                    deviceList.cursor = Cursor.getDefaultCursor()
-                    deviceList.repaint()
-                }
-            }
-        })
+        setupDeviceList()
+        setupDeviceListInteractions()
 
         val scrollPane = JBScrollPane(deviceList)
         scrollPane.border = BorderFactory.createEmptyBorder()
@@ -157,79 +91,236 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
         return panel
     }
 
-    private fun handleConnectDevice() {
-        val input = Messages.showInputDialog(
-            project,
-            "Enter device IP address and port (example: 192.168.1.100:5555):",
-            "Connect Device via Wi-Fi",
-            Messages.getQuestionIcon(),
-            "192.168.1.100:5555",
-            null
+    private fun setupDeviceList() {
+        deviceList.cellRenderer = DeviceListRenderer(
+            hoveredCellIndex = { hoveredCellIndex },
+            hoveredButtonType = { hoveredButtonType },
+            onMirrorClick = { deviceInfo -> startScreenMirroring(deviceInfo) },
+            onWifiClick = { device -> connectDeviceViaWifi(device) }
         )
 
-        if (input != null && input.isNotBlank()) {
-            val connectionData = ValidationUtils.parseConnectionString(input)
-            if (connectionData == null) {
-                Messages.showErrorDialog(project, "Please enter in format: IP:PORT", "Invalid Format")
-                return
+        deviceList.selectionMode = ListSelectionModel.SINGLE_SELECTION
+        deviceList.emptyText.text = "No devices connected"
+        deviceList.clearSelection()
+        deviceList.selectionModel.clearSelection()
+    }
+
+    private fun setupDeviceListInteractions() {
+        deviceList.addMouseMotionListener(object : MouseMotionAdapter() {
+            override fun mouseMoved(e: MouseEvent) {
+                handleMouseMovement(e)
+            }
+        })
+
+        deviceList.addMouseListener(object : MouseAdapter() {
+            override fun mouseClicked(e: MouseEvent) {
+                handleMouseClick(e)
             }
 
-            val (ip, port) = connectionData
-
-            if (!ValidationUtils.isValidAdbPort(port)) {
-                Messages.showErrorDialog(project, "Port must be between 1024 and 65535", "Invalid Port")
-                return
+            override fun mouseExited(event: MouseEvent?) {
+                resetHoverState()
             }
+        })
+    }
 
-            handleManualWifiConnect(ip, port)
+    private fun createCenteredButton(text: String, action: () -> Unit): JButton {
+        val button = JButton(text)
+        button.alignmentX = CENTER_ALIGNMENT
+        ButtonUtils.addHoverEffect(button)
+        button.addActionListener { action() }
+        return button
+    }
+
+    // ==================== DEVICE MANAGEMENT ====================
+
+    private fun startDevicePolling() {
+        val timer = Timer(5000) { updateDeviceList() }
+        timer.start()
+        updateDeviceList()
+    }
+
+    private fun updateDeviceList() {
+        ApplicationManager.getApplication().executeOnPooledThread {
+            val devices = AdbService.getConnectedDevices(project).filter { it.isOnline }
+            val deviceInfos = devices.map { device -> createDeviceInfo(device) }
+
+            updateDeviceIpCache(deviceInfos)
+
+            ApplicationManager.getApplication().invokeLater {
+                synchronizeDeviceListModel(deviceInfos)
+            }
         }
     }
 
-    // Ручное подключение по Wi-Fi
-    private fun handleManualWifiConnect(ipAddress: String, port: Int) {
-        object : Task.Backgroundable(project, "Connecting to $ipAddress:$port") {
-            override fun run(indicator: ProgressIndicator) {
-                indicator.isIndeterminate = true
-                indicator.text = "Connecting to $ipAddress:$port..."
+    private fun createDeviceInfo(device: IDevice): DeviceInfo {
+        val nameParts = device.name.replace("_", " ").split('-')
+        val manufacturer = nameParts.getOrNull(0)?.replaceFirstChar { it.titlecase(Locale.getDefault()) } ?: ""
+        val model = nameParts.getOrNull(1)?.uppercase(Locale.getDefault()) ?: ""
+        val displayName = "$manufacturer $model".trim()
 
-                try {
-                    val success = AdbService.connectWifi(project, ipAddress, port)
+        val logicalSerial = device.serialNumber
+        val displaySerial = getDisplaySerialNumber(device, logicalSerial)
+        val androidVersion = device.getProperty(IDevice.PROP_BUILD_VERSION) ?: "Unknown"
 
-                    if (success) {
-                        // Ждем немного и проверяем подключение
-                        Thread.sleep(2000)
-                        val devices = AdbService.getConnectedDevices(project)
-                        val connected = devices.any { it.serialNumber.startsWith(ipAddress) }
-
-                        ApplicationManager.getApplication().invokeLater {
-                            if (connected) {
-                                NotificationUtils.showSuccess(project, "Successfully connected to device at $ipAddress:$port")
-                                updateDeviceList() // Обновляем список устройств
-                            } else {
-                                NotificationUtils.showError(project, "Connected to $ipAddress:$port but device not visible. Check device settings.")
-                            }
-                        }
-                    } else {
-                        ApplicationManager.getApplication().invokeLater {
-                            NotificationUtils.showError(project, "Failed to connect to $ipAddress:$port. Make sure device is in TCP/IP mode.")
-                        }
-                    }
-                } catch (e: Exception) {
-                    ApplicationManager.getApplication().invokeLater {
-                        NotificationUtils.showError(project, "Error connecting to device: ${e.message}")
-                    }
-                }
-            }
-        }.queue()
+        return DeviceInfo(
+            device = device,
+            displayName = displayName,
+            displaySerialNumber = displaySerial,
+            logicalSerialNumber = logicalSerial,
+            androidVersion = androidVersion,
+            apiLevel = device.version.apiLevel.toString(),
+            ipAddress = AdbService.getDeviceIpAddress(device)
+        )
     }
 
-    // Класс для хранения информации о кнопках
+    private fun getDisplaySerialNumber(device: IDevice, logicalSerial: String): String {
+        return if (wifiSerialRegex.matches(logicalSerial)) {
+            getDeviceRealSerial(device) ?: logicalSerial
+        } else {
+            logicalSerial
+        }
+    }
+
+    private fun getDeviceRealSerial(device: IDevice): String? {
+        val properties = listOf("ro.serialno", "ro.boot.serialno", "gsm.sn1", "ril.serialnumber")
+
+        for (property in properties) {
+            try {
+                val serial = device.getProperty(property)
+                if (!serial.isNullOrBlank() && serial != "unknown" && serial.length > 3) {
+                    return serial
+                }
+            } catch (_: Exception) {
+                // Игнорируем ошибки и пробуем следующее свойство
+            }
+        }
+        return null
+    }
+
+    private fun updateDeviceIpCache(deviceInfos: List<DeviceInfo>) {
+        deviceInfos.forEach { deviceInfo ->
+            val cachedIp = deviceIpCache[deviceInfo.logicalSerialNumber]
+            if (cachedIp != deviceInfo.ipAddress) {
+                deviceIpCache[deviceInfo.logicalSerialNumber] = deviceInfo.ipAddress
+                if (deviceInfo.ipAddress != null) {
+                    println("ADB_Randomizer: Device ${deviceInfo.displayName} IP: ${deviceInfo.ipAddress}")
+                }
+            }
+        }
+    }
+
+    private fun synchronizeDeviceListModel(deviceInfos: List<DeviceInfo>) {
+        val selectedValue = deviceList.selectedValue
+        val currentSerials = (0 until deviceListModel.size()).map { deviceListModel.getElementAt(it).logicalSerialNumber }.toSet()
+        val newSerials = deviceInfos.map { it.logicalSerialNumber }.toSet()
+
+        // Удаляем исчезнувшие устройства
+        removeDisconnectedDevices(currentSerials, newSerials)
+
+        // Добавляем или обновляем устройства
+        updateConnectedDevices(deviceInfos)
+
+        // Восстанавливаем выделение
+        restoreSelection(selectedValue)
+    }
+
+    private fun removeDisconnectedDevices(currentSerials: Set<String>, newSerials: Set<String>) {
+        (currentSerials - newSerials).forEach { serialToRemove ->
+            val elementToRemove = (0 until deviceListModel.size()).find {
+                deviceListModel.getElementAt(it).logicalSerialNumber == serialToRemove
+            }
+            if (elementToRemove != null) {
+                deviceListModel.removeElementAt(elementToRemove)
+            }
+            deviceIpCache.remove(serialToRemove)
+        }
+    }
+
+    private fun updateConnectedDevices(deviceInfos: List<DeviceInfo>) {
+        deviceInfos.forEach { deviceInfo ->
+            val existingIndex = (0 until deviceListModel.size()).find {
+                deviceListModel.getElementAt(it).logicalSerialNumber == deviceInfo.logicalSerialNumber
+            }
+
+            if (existingIndex != null) {
+                deviceListModel.set(existingIndex, deviceInfo)
+            } else {
+                deviceListModel.addElement(deviceInfo)
+            }
+        }
+    }
+
+    private fun restoreSelection(selectedValue: DeviceInfo?) {
+        if (selectedValue != null && deviceListModel.contains(selectedValue)) {
+            deviceList.setSelectedValue(selectedValue, true)
+        }
+    }
+
+    // ==================== MOUSE INTERACTIONS ====================
+
+    private fun handleMouseMovement(e: MouseEvent) {
+        val index = deviceList.locationToIndex(e.point)
+        var newButtonType: String? = null
+
+        if (index != -1 && index < deviceListModel.size()) {
+            val bounds = deviceList.getCellBounds(index, index)
+            val deviceInfo = deviceListModel.getElementAt(index)
+            val buttonLayout = calculateButtonSizes(bounds, deviceInfo)
+
+            newButtonType = when {
+                buttonLayout.mirrorButtonRect.contains(e.point) -> "MIRROR"
+                buttonLayout.wifiButtonRect?.contains(e.point) == true -> "WIFI"
+                else -> null
+            }
+        }
+
+        updateCursorAndHoverState(index, newButtonType)
+    }
+
+    private fun updateCursorAndHoverState(index: Int, newButtonType: String?) {
+        deviceList.cursor = if (newButtonType != null) {
+            Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+        } else {
+            Cursor.getDefaultCursor()
+        }
+
+        if (index != hoveredCellIndex || newButtonType != hoveredButtonType) {
+            hoveredCellIndex = index
+            hoveredButtonType = newButtonType
+            deviceList.repaint()
+        }
+    }
+
+    private fun handleMouseClick(e: MouseEvent) {
+        val index = deviceList.locationToIndex(e.point)
+        if (index != -1 && index < deviceListModel.size()) {
+            val bounds = deviceList.getCellBounds(index, index)
+            val deviceInfo = deviceListModel.getElementAt(index)
+            val buttonLayout = calculateButtonSizes(bounds, deviceInfo)
+
+            when {
+                buttonLayout.mirrorButtonRect.contains(e.point) -> startScreenMirroring(deviceInfo)
+                buttonLayout.wifiButtonRect?.contains(e.point) == true -> connectDeviceViaWifi(deviceInfo.device)
+            }
+        }
+
+        deviceList.clearSelection()
+    }
+
+    private fun resetHoverState() {
+        if (hoveredCellIndex != -1) {
+            hoveredCellIndex = -1
+            hoveredButtonType = null
+            deviceList.cursor = Cursor.getDefaultCursor()
+            deviceList.repaint()
+        }
+    }
+
     private data class ButtonLayout(
         val mirrorButtonRect: Rectangle,
-        val wifiButtonRect: Rectangle? // null для Wi-Fi устройств
+        val wifiButtonRect: Rectangle?
     )
 
-    // Меняем метод calculateButtonSizes:
     private fun calculateButtonSizes(cellBounds: Rectangle, deviceInfo: DeviceInfo): ButtonLayout {
         val buttonPanelWidth = 115
         val buttonSpacing = 5
@@ -242,7 +333,6 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
         val mirrorButtonX = buttonPanelX + buttonSpacing
         val mirrorButtonRect = Rectangle(mirrorButtonX, buttonY, mirrorButtonWidth, buttonHeight)
 
-        // Используем companion object wifiSerialRegex
         val wifiButtonRect = if (!wifiSerialRegex.matches(deviceInfo.logicalSerialNumber)) {
             val wifiButtonX = mirrorButtonX + mirrorButtonWidth + buttonSpacing
             Rectangle(wifiButtonX, buttonY, wifiButtonWidth, buttonHeight)
@@ -253,187 +343,296 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
         return ButtonLayout(mirrorButtonRect, wifiButtonRect)
     }
 
-    // В AdbControlsPanel.kt - увеличиваем интервал polling
-    private fun startDevicePolling() {
-        val timer = Timer(5000) { updateDeviceList() }  // Было 3000, стало 5000
-        timer.start()
-        updateDeviceList()
-    }
+    // ==================== VALIDATION AND HELPERS ====================
 
-    private fun updateDeviceList() {
-        ApplicationManager.getApplication().executeOnPooledThread {
-            val devices = AdbService.getConnectedDevices(project).filter { it.isOnline }
-            val deviceInfos = devices.map { device ->
-                val nameParts = device.name.replace("_", " ").split('-')
-                val manufacturer = nameParts.getOrNull(0)?.replaceFirstChar { it.titlecase(Locale.getDefault()) } ?: ""
-                val model = nameParts.getOrNull(1)?.uppercase(Locale.getDefault()) ?: ""
-                val displayName = "$manufacturer $model".trim()
-
-                val logicalSerial = device.serialNumber
-                var displaySerial = logicalSerial
-
-                if (wifiSerialRegex.matches(logicalSerial)) {
-                    // Улучшенное получение серийного номера с fallback
-                    val realSerial = getDeviceRealSerial(device)
-                    if (!realSerial.isNullOrBlank()) {
-                        displaySerial = realSerial
-                    }
-                }
-                val androidVersion = device.getProperty(IDevice.PROP_BUILD_VERSION) ?: "Unknown"
-
-                DeviceInfo(
-                    device = device,
-                    displayName = displayName,
-                    displaySerialNumber = displaySerial,
-                    logicalSerialNumber = logicalSerial,
-                    androidVersion = androidVersion,
-                    apiLevel = device.version.apiLevel.toString(),
-                    ipAddress = AdbService.getDeviceIpAddress(device)
-                )
-            }
-
-            // КЭШИРОВАНИЕ IP - логируем только при изменениях
-            deviceInfos.forEach { deviceInfo ->
-                val cachedIp = deviceIpCache[deviceInfo.logicalSerialNumber]
-                if (cachedIp != deviceInfo.ipAddress) {
-                    deviceIpCache[deviceInfo.logicalSerialNumber] = deviceInfo.ipAddress
-                    if (deviceInfo.ipAddress != null) {
-                        println("ADB_Randomizer: Device ${deviceInfo.displayName} IP: ${deviceInfo.ipAddress}")
-                    }
-                }
-            }
-
-            ApplicationManager.getApplication().invokeLater {
-                val selectedValue = deviceList.selectedValue
-                val currentSerials = (0 until deviceListModel.size()).map { deviceListModel.getElementAt(it).logicalSerialNumber }.toSet()
-                val newSerials = deviceInfos.map { it.logicalSerialNumber }.toSet()
-
-                // Удаляем те, что исчезли
-                (currentSerials - newSerials).forEach { serialToRemove ->
-                    val elementToRemove = (0 until deviceListModel.size()).find { deviceListModel.getElementAt(it).logicalSerialNumber == serialToRemove }
-                    if (elementToRemove != null) deviceListModel.removeElementAt(elementToRemove)
-                    // Также удаляем из кэша
-                    deviceIpCache.remove(serialToRemove)
-                }
-
-                // Добавляем или обновляем
-                deviceInfos.forEach { deviceInfo ->
-                    val existingIndex = (0 until deviceListModel.size()).find { deviceListModel.getElementAt(it).logicalSerialNumber == deviceInfo.logicalSerialNumber }
-                    if (existingIndex != null) {
-                        deviceListModel.set(existingIndex, deviceInfo)
-                    } else {
-                        deviceListModel.addElement(deviceInfo)
-                    }
-                }
-
-                if (selectedValue != null && deviceListModel.contains(selectedValue)) {
-                    deviceList.setSelectedValue(selectedValue, true)
-                }
-            }
+    private fun validateDevicesAvailable(): Boolean {
+        val devices = AdbService.getConnectedDevices(project)
+        if (devices.isEmpty()) {
+            NotificationUtils.showInfo(project, "No connected devices found.")
+            return false
         }
+        return true
     }
 
-    // Улучшенное получение реального серийного номера
-    private fun getDeviceRealSerial(device: IDevice): String? {
-        val properties = listOf(
-            "ro.serialno",
-            "ro.boot.serialno",
-            "gsm.sn1",
-            "ril.serialnumber"
-        )
+    private fun validatePresetsAvailable(): Boolean {
+        val presets = SettingsService.getPresets()
+        if (presets.isEmpty()) {
+            NotificationUtils.showInfo(project, "No presets found in settings.")
+            return false
+        }
+        return true
+    }
 
-        for (property in properties) {
-            try {
-                val serial = device.getProperty(property)
-                if (!serial.isNullOrBlank() && serial != "unknown" && serial.length > 3) {
-                    return serial
-                }
-            } catch (_: Exception) {
-                // Игнорируем ошибки и пробуем следующее свойство
+    // ==================== PRESET ACTIONS ====================
+
+    private fun executeRandomAction(setSize: Boolean, setDpi: Boolean) {
+        if (!validateDevicesAvailable()) return
+
+        val randomPreset = selectRandomPreset(setSize, setDpi) ?: return
+        val presetNumber = findPresetNumber(randomPreset)
+
+        applyPresetToDevices(randomPreset, presetNumber, setSize, setDpi)
+    }
+
+    private fun selectRandomPreset(setSize: Boolean, setDpi: Boolean): DevicePreset? {
+        var availablePresets = filterSuitablePresets(setSize, setDpi)
+
+        // Исключаем последний использованный пресет, если есть альтернативы
+        if (availablePresets.size > 1 && lastUsedPreset != null) {
+            availablePresets = availablePresets.filter { it != lastUsedPreset }
+        }
+
+        if (availablePresets.isEmpty()) {
+            val allSuitablePresets = filterSuitablePresets(setSize, setDpi)
+            if (allSuitablePresets.isNotEmpty()) {
+                availablePresets = allSuitablePresets
+            } else {
+                NotificationUtils.showInfo(project, "No suitable presets found in settings.")
+                return null
             }
         }
 
-        return null
+        val randomPreset = availablePresets.random()
+        updateCurrentPresetIndex(randomPreset)
+        return randomPreset
     }
 
-    // Запуск scrcpy из UI Thread
-    private fun handleScrcpyMirror(deviceInfo: DeviceInfo) {
-        object : Task.Backgroundable(project, "Starting screen mirroring") {
-            private var scrcpyPath: String? = null
+    private fun filterSuitablePresets(setSize: Boolean, setDpi: Boolean): List<DevicePreset> {
+        return SettingsService.getPresets().filter { preset ->
+            (!setSize || preset.size.isNotBlank()) && (!setDpi || preset.dpi.isNotBlank())
+        }
+    }
 
+    private fun updateCurrentPresetIndex(preset: DevicePreset) {
+        val allPresets = SettingsService.getPresets()
+        currentPresetIndex = allPresets.indexOf(preset)
+    }
+
+    private fun findPresetNumber(preset: DevicePreset): Int {
+        val allPresets = SettingsService.getPresets()
+        return allPresets.indexOfFirst { it.label == preset.label } + 1
+    }
+
+    private fun navigateToNextPreset() {
+        if (!validatePresetsAvailable()) return
+
+        val presets = SettingsService.getPresets()
+        currentPresetIndex = (currentPresetIndex + 1) % presets.size
+        applyPresetByIndex(currentPresetIndex)
+    }
+
+    private fun navigateToPreviousPreset() {
+        if (!validatePresetsAvailable()) return
+
+        val presets = SettingsService.getPresets()
+        currentPresetIndex = if (currentPresetIndex <= 0) presets.size - 1 else currentPresetIndex - 1
+        applyPresetByIndex(currentPresetIndex)
+    }
+
+    private fun applyPresetByIndex(index: Int) {
+        if (!validateDevicesAvailable()) return
+
+        val presets = SettingsService.getPresets()
+        if (index < 0 || index >= presets.size) {
+            NotificationUtils.showInfo(project, "Invalid preset index.")
+            return
+        }
+
+        applyPresetToDevices(presets[index], index + 1, setSize = true, setDpi = true)
+    }
+
+    private fun applyPresetToDevices(preset: DevicePreset, presetNumber: Int, setSize: Boolean, setDpi: Boolean) {
+        object : Task.Backgroundable(project, "Applying preset") {
             override fun run(indicator: ProgressIndicator) {
-                indicator.isIndeterminate = true
-                indicator.text = "Searching for scrcpy..."
+                lastUsedPreset = preset
 
-                scrcpyPath = ScrcpyService.findScrcpyExecutable()
+                val presetData = validateAndParsePresetData(preset, setSize, setDpi) ?: return
+                val devices = AdbService.getConnectedDevices(project)
 
-                if (scrcpyPath == null) {
-                    indicator.text = "Scrcpy not found."
-                    // Перемещаем UI операцию в UI Thread
-                    ApplicationManager.getApplication().invokeLater {
-                        NotificationUtils.showInfo(project, "scrcpy executable not found in PATH or settings. Please select the file.")
-                        promptForScrcpyInUIThread(deviceInfo)
-                    }
-                    return
-                }
-
-                launchScrcpyProcess(deviceInfo, scrcpyPath!!, indicator)
+                applyPresetToAllDevices(devices, preset, presetData, indicator)
+                showPresetApplicationResult(preset, presetNumber, presetData.appliedSettings)
             }
         }.queue()
     }
 
-    // Новый метод для работы с UI в правильном потоке
-    private fun promptForScrcpyInUIThread(deviceInfo: DeviceInfo) {
-        // Показываем диалог совместимости, если scrcpy не найден
-        val dialog = ScrcpyCompatibilityDialog(
+    private data class PresetData(
+        val width: Int?,
+        val height: Int?,
+        val dpi: Int?,
+        val appliedSettings: List<String>
+    )
+
+    private fun validateAndParsePresetData(preset: DevicePreset, setSize: Boolean, setDpi: Boolean): PresetData? {
+        val appliedSettings = mutableListOf<String>()
+        var width: Int? = null
+        var height: Int? = null
+        var dpi: Int? = null
+
+        if (setSize && preset.size.isNotBlank()) {
+            val sizeData = ValidationUtils.parseSize(preset.size)
+            if (sizeData == null) {
+                NotificationUtils.showError(project, "Invalid size format in preset '${preset.label}': ${preset.size}")
+                return null
+            }
+            width = sizeData.first
+            height = sizeData.second
+            appliedSettings.add("Size: ${preset.size}")
+        }
+
+        if (setDpi && preset.dpi.isNotBlank()) {
+            dpi = ValidationUtils.parseDpi(preset.dpi)
+            if (dpi == null) {
+                NotificationUtils.showError(project, "Invalid DPI format in preset '${preset.label}': ${preset.dpi}")
+                return null
+            }
+            appliedSettings.add("DPI: ${preset.dpi}")
+        }
+
+        if (appliedSettings.isEmpty()) {
+            NotificationUtils.showInfo(project, "No settings to apply for preset '${preset.label}'")
+            return null
+        }
+
+        return PresetData(width, height, dpi, appliedSettings)
+    }
+
+    private fun applyPresetToAllDevices(devices: List<IDevice>, preset: DevicePreset, presetData: PresetData, indicator: ProgressIndicator) {
+        devices.forEach { device ->
+            indicator.text = "Applying '${preset.label}' to ${device.name}..."
+
+            if (presetData.width != null && presetData.height != null) {
+                AdbService.setSize(device, presetData.width, presetData.height)
+            }
+
+            if (presetData.dpi != null) {
+                AdbService.setDpi(device, presetData.dpi)
+            }
+        }
+    }
+
+    private fun showPresetApplicationResult(preset: DevicePreset, presetNumber: Int, appliedSettings: List<String>) {
+        val message = "<html>Preset №${presetNumber}: ${preset.label};<br>${appliedSettings.joinToString(", ")}</html>"
+        NotificationUtils.showSuccess(project, message)
+    }
+
+    // ==================== RESET ACTIONS ====================
+
+    private fun executeResetAction(resetSize: Boolean, resetDpi: Boolean) {
+        if (!validateDevicesAvailable()) return
+
+        val actionDescription = getResetActionDescription(resetSize, resetDpi)
+
+        object : Task.Backgroundable(project, actionDescription) {
+            override fun run(indicator: ProgressIndicator) {
+                val devices = AdbService.getConnectedDevices(project)
+                resetAllDevices(devices, resetSize, resetDpi, indicator)
+                showResetResult(devices.size, resetSize, resetDpi)
+            }
+        }.queue()
+    }
+
+    private fun getResetActionDescription(resetSize: Boolean, resetDpi: Boolean): String {
+        return when {
+            resetSize && resetDpi -> "Resetting screen and DPI"
+            resetSize -> "Resetting screen size"
+            resetDpi -> "Resetting DPI"
+            else -> "No action"
+        }
+    }
+
+    @Suppress("UNUSED_PARAMETER")
+    private fun resetAllDevices(devices: List<IDevice>, resetSize: Boolean, resetDpi: Boolean, indicator: ProgressIndicator) {
+        devices.forEach { device ->
+            indicator.text = "Resetting ${device.name}..."
+            if (resetSize) AdbService.resetSize(device)
+            if (resetDpi) AdbService.resetDpi(device)
+        }
+    }
+
+    private fun showResetResult(deviceCount: Int, resetSize: Boolean, resetDpi: Boolean) {
+        val resetItems = mutableListOf<String>()
+        if (resetSize) resetItems.add("screen size")
+        if (resetDpi) resetItems.add("DPI")
+
+        val resetDescription = resetItems.joinToString(" and ")
+            .replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
+
+        NotificationUtils.showSuccess(project, "$resetDescription reset for $deviceCount device(s).")
+    }
+
+    // ==================== CONNECTION ACTIONS ====================
+
+    private fun promptForManualConnection() {
+        val input = Messages.showInputDialog(
             project,
-            "Not found",
-            deviceInfo.displayName,
-            ScrcpyCompatibilityDialog.ProblemType.NOT_FOUND
-        )
-        dialog.show()
-        if (dialog.exitCode == ScrcpyCompatibilityDialog.RETRY_EXIT_CODE) {
-            // Пользователь выбрал путь к scrcpy, пробуем снова
-            val scrcpyPath = ScrcpyService.findScrcpyExecutable()
-            if (scrcpyPath != null) {
-                object : Task.Backgroundable(project, "Starting screen mirroring") {
-                    override fun run(indicator: ProgressIndicator) {
-                        launchScrcpyProcess(deviceInfo, scrcpyPath, indicator)
+            "Enter device IP address and port (example: 192.168.1.100:5555):",
+            "Connect Device via Wi-Fi",
+            Messages.getQuestionIcon(),
+            "192.168.1.100:5555",
+            null
+        ) ?: return
+
+        val connectionData = ValidationUtils.parseConnectionString(input)
+        if (connectionData == null) {
+            Messages.showErrorDialog(project, "Please enter in format: IP:PORT", "Invalid Format")
+            return
+        }
+
+        val (ip, port) = connectionData
+        if (!ValidationUtils.isValidAdbPort(port)) {
+            Messages.showErrorDialog(project, "Port must be between 1024 and 65535", "Invalid Port")
+            return
+        }
+
+        executeManualWifiConnection(ip, port)
+    }
+
+    private fun executeManualWifiConnection(ipAddress: String, port: Int) {
+        object : Task.Backgroundable(project, "Connecting to $ipAddress:$port") {
+            override fun run(indicator: ProgressIndicator) {
+                indicator.isIndeterminate = true
+                indicator.text = "Connecting to $ipAddress:$port..."
+
+                try {
+                    val success = AdbService.connectWifi(project, ipAddress, port)
+                    handleConnectionResult(success, ipAddress, port, indicator)
+                } catch (e: Exception) {
+                    ApplicationManager.getApplication().invokeLater {
+                        NotificationUtils.showError(project, "Error connecting to device: ${e.message}")
                     }
-                }.queue()
-            } else {
-                NotificationUtils.showError(project, "scrcpy path not provided. Could not start mirroring.")
+                }
             }
-        } else {
-            NotificationUtils.showError(project, "scrcpy not found. Could not start mirroring.")
-        }
+        }.queue()
     }
 
-    private fun launchScrcpyProcess(deviceInfo: DeviceInfo, scrcpyPath: String, indicator: ProgressIndicator) {
-        val serialToUse = deviceInfo.logicalSerialNumber
-        indicator.text = "Running: scrcpy -s $serialToUse"
-
-        // Передаем project в scrcpy для получения правильного ADB
-        val success = ScrcpyService.launchScrcpy(scrcpyPath, serialToUse, project)
+    private fun handleConnectionResult(success: Boolean, ipAddress: String, port: Int, @Suppress("UNUSED_PARAMETER") indicator: ProgressIndicator) {
         if (success) {
+            Thread.sleep(2000)
+            val devices = AdbService.getConnectedDevices(project)
+            val connected = devices.any { it.serialNumber.startsWith(ipAddress) }
+
             ApplicationManager.getApplication().invokeLater {
-                NotificationUtils.showSuccess(project, "Screen mirroring started for ${deviceInfo.displayName}")
+                if (connected) {
+                    NotificationUtils.showSuccess(project, "Successfully connected to device at $ipAddress:$port")
+                    updateDeviceList()
+                } else {
+                    NotificationUtils.showError(project, "Connected to $ipAddress:$port but device not visible. Check device settings.")
+                }
             }
         } else {
             ApplicationManager.getApplication().invokeLater {
-                NotificationUtils.showError(project, "Failed to start screen mirroring for ${deviceInfo.displayName}")
+                NotificationUtils.showError(project, "Failed to connect to $ipAddress:$port. Make sure device is in TCP/IP mode.")
             }
         }
     }
 
-    private fun handleWifiConnect(device: IDevice) {
+    private fun connectDeviceViaWifi(device: IDevice) {
         object : Task.Backgroundable(project, "Connecting to Device via Wi-Fi") {
             override fun run(indicator: ProgressIndicator) {
                 indicator.isIndeterminate = true
                 indicator.text = "Getting IP address for ${device.name}..."
 
                 val ipAddress = AdbService.getDeviceIpAddress(device)
-
                 if (ipAddress.isNullOrBlank()) {
                     NotificationUtils.showError(project, "Cannot find IP address for device ${device.name}. Make sure it's connected to Wi-Fi.")
                     return
@@ -444,192 +643,134 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                     AdbService.enableTcpIp(device)
                     indicator.text = "Connecting to $ipAddress:5555..."
 
-                    // Убираем хардкод задержки и добавляем polling подключения
-                    val success = connectWithRetry(ipAddress, indicator)
-
-                    if (success) {
-                        NotificationUtils.showSuccess(project, "Successfully connected to ${device.name} at $ipAddress.")
-                    } else {
-                        NotificationUtils.showError(project, "Failed to connect to ${device.name} via Wi-Fi. Check device and network.")
-                    }
+                    val success = connectWithRetryAndVerification(ipAddress, indicator)
+                    showWifiConnectionResult(success, device.name, ipAddress)
                 } catch (e: Exception) {
                     NotificationUtils.showError(project, "Error connecting to device: ${e.message}")
                 }
             }
-
-            private fun connectWithRetry(ipAddress: String, indicator: ProgressIndicator): Boolean {
-                // Даем время устройству переключиться в TCP режим
-                Thread.sleep(2000)
-
-                // Пытаемся подключиться
-                val initialSuccess = AdbService.connectWifi(project, ipAddress)
-
-                if (initialSuccess) {
-                    // Проверяем подключение через polling
-                    return waitForDeviceConnection(ipAddress, indicator)
-                }
-
-                return false
-            }
-
-            private fun waitForDeviceConnection(ipAddress: String, indicator: ProgressIndicator): Boolean {
-                val maxAttempts = 10
-                val delayBetweenAttempts = 1000L
-
-                repeat(maxAttempts) { attempt ->
-                    indicator.text = "Verifying connection... (${attempt + 1}/$maxAttempts)"
-
-                    // Обновляем список устройств и проверяем наличие Wi-Fi подключения
-                    val devices = AdbService.getConnectedDevices(project)
-                    val wifiConnected = devices.any { it.serialNumber.startsWith(ipAddress) }
-
-                    if (wifiConnected) {
-                        // Обновляем UI в главном потоке
-                        SwingUtilities.invokeLater { updateDeviceList() }
-                        return true
-                    }
-
-                    if (attempt < maxAttempts - 1) {
-                        Thread.sleep(delayBetweenAttempts)
-                    }
-                }
-
-                // Если не подключились, все равно обновляем UI
-                SwingUtilities.invokeLater { updateDeviceList() }
-                return false
-            }
         }.queue()
     }
 
-    private fun handleNextPreset() {
-        val presets = SettingsService.getPresets()
-        if (presets.isEmpty()) {
-            NotificationUtils.showInfo(project, "No presets found in settings.")
-            return
+    private fun connectWithRetryAndVerification(ipAddress: String, indicator: ProgressIndicator): Boolean {
+        Thread.sleep(2000) // Даем время устройству переключиться в TCP режим
+
+        val initialSuccess = AdbService.connectWifi(project, ipAddress)
+        return if (initialSuccess) {
+            waitForDeviceConnection(ipAddress, indicator)
+        } else {
+            false
         }
-        currentPresetIndex = (currentPresetIndex + 1) % presets.size
-        applyPresetByIndex(currentPresetIndex)
     }
 
-    private fun handlePreviousPreset() {
-        val presets = SettingsService.getPresets()
-        if (presets.isEmpty()) {
-            NotificationUtils.showInfo(project, "No presets found in settings.")
-            return
+    private fun waitForDeviceConnection(ipAddress: String, indicator: ProgressIndicator): Boolean {
+        val maxAttempts = 10
+        val delayBetweenAttempts = 1000L
+
+        repeat(maxAttempts) { attempt ->
+            indicator.text = "Verifying connection... (${attempt + 1}/$maxAttempts)"
+
+            val devices = AdbService.getConnectedDevices(project)
+            val wifiConnected = devices.any { it.serialNumber.startsWith(ipAddress) }
+
+            if (wifiConnected) {
+                SwingUtilities.invokeLater { updateDeviceList() }
+                return true
+            }
+
+            if (attempt < maxAttempts - 1) {
+                Thread.sleep(delayBetweenAttempts)
+            }
         }
-        currentPresetIndex = if (currentPresetIndex <= 0) presets.size - 1 else currentPresetIndex - 1
-        applyPresetByIndex(currentPresetIndex)
+
+        SwingUtilities.invokeLater { updateDeviceList() }
+        return false
     }
 
-    private fun applyPresetByIndex(index: Int) {
-        val devices = AdbService.getConnectedDevices(project)
-        if (devices.isEmpty()) {
-            NotificationUtils.showInfo(project, "No connected devices found.")
-            return
+    private fun showWifiConnectionResult(success: Boolean, deviceName: String, ipAddress: String) {
+        if (success) {
+            NotificationUtils.showSuccess(project, "Successfully connected to $deviceName at $ipAddress.")
+        } else {
+            NotificationUtils.showError(project, "Failed to connect to $deviceName via Wi-Fi. Check device and network.")
         }
-        val presets = SettingsService.getPresets()
-        if (index < 0 || index >= presets.size) {
-            NotificationUtils.showInfo(project, "Invalid preset index.")
-            return
-        }
-        applyPreset(presets[index], index + 1, setSize = true, setDpi = true)
     }
 
-    private fun applyPreset(preset: DevicePreset, presetNumber: Int, setSize: Boolean, setDpi: Boolean) {
-        val devices = AdbService.getConnectedDevices(project)
-        object : Task.Backgroundable(project, "Applying preset") {
+    // ==================== SCREEN MIRRORING ====================
+
+    private fun startScreenMirroring(deviceInfo: DeviceInfo) {
+        object : Task.Backgroundable(project, "Starting screen mirroring") {
+            private var scrcpyPath: String? = null
+
             override fun run(indicator: ProgressIndicator) {
-                lastUsedPreset = preset
-                val appliedSettings = mutableListOf<String>()
-                var width: Int? = null; var height: Int? = null
-                if (setSize && preset.size.isNotBlank()) {
-                    val sizeData = ValidationUtils.parseSize(preset.size)
-                    if (sizeData == null) {
-                        NotificationUtils.showError(project, "Invalid size format in preset '${preset.label}': ${preset.size}")
-                        return
-                    }
-                    width = sizeData.first
-                    height = sizeData.second
-                    appliedSettings.add("Size: ${preset.size}")
-                }
-                var dpi: Int? = null
-                if (setDpi && preset.dpi.isNotBlank()) {
-                    dpi = ValidationUtils.parseDpi(preset.dpi)
-                    if (dpi == null) {
-                        NotificationUtils.showError(project, "Invalid DPI format in preset '${preset.label}': ${preset.dpi}")
-                        return
-                    }
-                    appliedSettings.add("DPI: ${preset.dpi}")
-                }
-                if (appliedSettings.isEmpty()) {
-                    NotificationUtils.showInfo(project, "No settings to apply for preset '${preset.label}'")
+                indicator.isIndeterminate = true
+                indicator.text = "Searching for scrcpy..."
+
+                scrcpyPath = ScrcpyService.findScrcpyExecutable()
+
+                if (scrcpyPath == null) {
+                    handleScrcpyNotFound(deviceInfo)
                     return
                 }
-                devices.forEach { device ->
-                    indicator.text = "Applying '${preset.label}' to ${device.name}..."
-                    if (setSize && width != null && height != null) AdbService.setSize(device, width, height)
-                    if (setDpi && dpi != null) AdbService.setDpi(device, dpi)
-                }
-                val message = "<html>Preset №${presetNumber}: ${preset.label};<br>${appliedSettings.joinToString(", ")}</html>"
-                NotificationUtils.showSuccess(project, message)
+
+                launchScrcpyProcess(deviceInfo, scrcpyPath!!, indicator)
             }
         }.queue()
     }
 
-    private fun handleResetAction(resetSize: Boolean, resetDpi: Boolean) {
-        val devices = AdbService.getConnectedDevices(project)
-        if (devices.isEmpty()) {
-            NotificationUtils.showInfo(project, "No connected devices found.")
-            return
+    private fun handleScrcpyNotFound(deviceInfo: DeviceInfo) {
+        ApplicationManager.getApplication().invokeLater {
+            NotificationUtils.showInfo(project, "scrcpy executable not found in PATH or settings. Please select the file.")
+            showScrcpyCompatibilityDialog(deviceInfo)
         }
-        val actionDescription = when {
-            resetSize && resetDpi -> "Resetting screen and DPI"
-            resetSize -> "Resetting screen size"
-            resetDpi -> "Resetting DPI"
-            else -> "No action"
+    }
+
+    private fun showScrcpyCompatibilityDialog(deviceInfo: DeviceInfo) {
+        val dialog = ScrcpyCompatibilityDialog(
+            project,
+            "Not found",
+            deviceInfo.displayName,
+            ScrcpyCompatibilityDialog.ProblemType.NOT_FOUND
+        )
+        dialog.show()
+
+        if (dialog.exitCode == ScrcpyCompatibilityDialog.RETRY_EXIT_CODE) {
+            retryScreenMirroring(deviceInfo)
+        } else {
+            NotificationUtils.showError(project, "scrcpy not found. Could not start mirroring.")
         }
-        object : Task.Backgroundable(project, actionDescription) {
-            override fun run(indicator: ProgressIndicator) {
-                devices.forEach { device ->
-                    indicator.text = "Resetting ${device.name}..."
-                    if (resetSize) AdbService.resetSize(device)
-                    if (resetDpi) AdbService.resetDpi(device)
+    }
+
+    private fun retryScreenMirroring(deviceInfo: DeviceInfo) {
+        val scrcpyPath = ScrcpyService.findScrcpyExecutable()
+        if (scrcpyPath != null) {
+            object : Task.Backgroundable(project, "Starting screen mirroring") {
+                override fun run(indicator: ProgressIndicator) {
+                    launchScrcpyProcess(deviceInfo, scrcpyPath, indicator)
                 }
-                val resetItems = mutableListOf<String>()
-                if (resetSize) resetItems.add("screen size")
-                if (resetDpi) resetItems.add("DPI")
-                NotificationUtils.showSuccess(project, "${resetItems.joinToString(" and ").replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }} reset for ${devices.size} device(s).")
-            }
-        }.queue()
+            }.queue()
+        } else {
+            NotificationUtils.showError(project, "scrcpy path not provided. Could not start mirroring.")
+        }
     }
 
-    private fun handleRandomAction(setSize: Boolean, setDpi: Boolean) {
-        val devices = AdbService.getConnectedDevices(project)
-        if (devices.isEmpty()) {
-            NotificationUtils.showInfo(project, "No connected devices found.")
-            return
-        }
-        var availablePresets = SettingsService.getPresets().filter { (!setSize || it.size.isNotBlank()) && (!setDpi || it.dpi.isNotBlank()) }
-        if (availablePresets.size > 1 && lastUsedPreset != null) { availablePresets = availablePresets.filter { it != lastUsedPreset } }
-        if (availablePresets.isEmpty()) {
-            val allSuitablePresets = SettingsService.getPresets().filter { (!setSize || it.size.isNotBlank()) && (!setDpi || it.dpi.isNotBlank()) }
-            if (allSuitablePresets.isNotEmpty()) { availablePresets = allSuitablePresets } else {
-                NotificationUtils.showInfo(project, "No suitable presets found in settings.")
-                return
+    private fun launchScrcpyProcess(deviceInfo: DeviceInfo, scrcpyPath: String, indicator: ProgressIndicator) {
+        val serialToUse = deviceInfo.logicalSerialNumber
+        indicator.text = "Running: scrcpy -s $serialToUse"
+
+        val success = ScrcpyService.launchScrcpy(scrcpyPath, serialToUse, project)
+
+        ApplicationManager.getApplication().invokeLater {
+            if (success) {
+                NotificationUtils.showSuccess(project, "Screen mirroring started for ${deviceInfo.displayName}")
+            } else {
+                NotificationUtils.showError(project, "Failed to start screen mirroring for ${deviceInfo.displayName}")
             }
         }
-        val randomPreset = availablePresets.random()
-        val allPresets = SettingsService.getPresets()
-        currentPresetIndex = allPresets.indexOf(randomPreset)
-        val presetNumber = allPresets.indexOfFirst { it.label == randomPreset.label } + 1
-        applyPreset(randomPreset, presetNumber, setSize, setDpi)
     }
 
-    private fun createCenteredButton(text: String, action: () -> Unit): JButton {
-        val button = JButton(text)
-        button.alignmentX = CENTER_ALIGNMENT
-        ButtonUtils.addHoverEffect(button)
-        button.addActionListener { action() }
-        return button
+    // ==================== SETTINGS ====================
+
+    private fun openPresetSettings() {
+        SettingsDialog(project).show()
     }
 }
