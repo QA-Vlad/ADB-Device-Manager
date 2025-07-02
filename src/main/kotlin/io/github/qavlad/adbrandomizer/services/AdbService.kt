@@ -8,6 +8,7 @@ import com.android.ddmlib.IDevice
 import com.android.ddmlib.NullOutputReceiver
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.project.Project
+import io.github.qavlad.adbrandomizer.utils.AdbPathResolver
 import java.io.File
 import java.util.concurrent.TimeUnit
 import java.util.regex.Pattern
@@ -18,55 +19,12 @@ object AdbService {
     private var isInitialized = false
     private var lastDeviceCount = -1
 
-    private fun findAdbExecutable(): String? {
-        val adbName = if (System.getProperty("os.name").startsWith("Windows")) "adb.exe" else "adb"
-
-        // Стандартные пути для разных ОС
-        val standardPaths = when {
-            System.getProperty("os.name").contains("Mac") -> listOf(
-                System.getProperty("user.home") + "/Library/Android/sdk/platform-tools/adb",
-                "/usr/local/bin/adb",
-                "/opt/homebrew/bin/adb"
-            )
-            System.getProperty("os.name").startsWith("Windows") -> listOf(
-                System.getenv("LOCALAPPDATA") + "\\Android\\Sdk\\platform-tools\\adb.exe",
-                System.getenv("USERPROFILE") + "\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe"
-            )
-            else -> listOf( // Linux
-                System.getProperty("user.home") + "/Android/Sdk/platform-tools/adb",
-                "/usr/bin/adb"
-            )
-        }
-
-        // Проверяем стандартные пути
-        for (path in standardPaths) {
-            val file = File(path)
-            if (file.exists() && file.canExecute()) {
-                println("ADB_Randomizer: Found ADB at: $path")
-                return path
-            }
-        }
-
-        // Ищем в PATH
-        val pathDirs = System.getenv("PATH")?.split(File.pathSeparator) ?: emptyList()
-        for (dir in pathDirs) {
-            val file = File(dir, adbName)
-            if (file.exists() && file.canExecute()) {
-                println("ADB_Randomizer: Found ADB in PATH at: ${file.absolutePath}")
-                return file.absolutePath
-            }
-        }
-
-        println("ADB_Randomizer: ADB not found in standard locations or PATH")
-        return null
-    }
-
     private fun getOrCreateDebugBridge(): AndroidDebugBridge? {
         if (customBridge != null && customBridge!!.isConnected) {
             return customBridge
         }
 
-        val adbPath = findAdbExecutable()
+        val adbPath = AdbPathResolver.findAdbExecutable()
         if (adbPath == null) {
             println("ADB_Randomizer: ADB executable not found")
             return null
@@ -260,7 +218,7 @@ object AdbService {
 
     fun connectWifi(project: Project, ipAddress: String, port: Int = 5555): Boolean {
         return try {
-            val adbPath = findAdbExecutable()
+            val adbPath = AdbPathResolver.findAdbExecutable()
             if (adbPath == null) {
                 println("ADB_Randomizer: ADB path not found.")
                 return false

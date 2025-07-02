@@ -5,51 +5,12 @@ package io.github.qavlad.adbrandomizer.services
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.progress.ProcessCanceledException
 import com.intellij.openapi.project.Project
+import io.github.qavlad.adbrandomizer.utils.AdbPathResolver
 import java.io.File
 
 object ScrcpyService {
 
     private val scrcpyName = if (System.getProperty("os.name").startsWith("Windows")) "scrcpy.exe" else "scrcpy"
-
-    private fun findExecutableInSystemPath(name: String): String? {
-        val pathDirs = System.getenv("PATH")?.split(File.pathSeparator) ?: emptyList()
-        for (dir in pathDirs) {
-            val file = File(dir, name)
-            if (file.exists() && file.canExecute()) {
-                return file.absolutePath
-            }
-        }
-        return null
-    }
-
-    private fun findAdbExecutable(): String? {
-        val adbName = if (System.getProperty("os.name").startsWith("Windows")) "adb.exe" else "adb"
-
-        val standardPaths = when {
-            System.getProperty("os.name").contains("Mac") -> listOf(
-                System.getProperty("user.home") + "/Library/Android/sdk/platform-tools/adb",
-                "/usr/local/bin/adb",
-                "/opt/homebrew/bin/adb"
-            )
-            System.getProperty("os.name").startsWith("Windows") -> listOf(
-                System.getenv("LOCALAPPDATA") + "\\Android\\Sdk\\platform-tools\\adb.exe",
-                System.getenv("USERPROFILE") + "\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe"
-            )
-            else -> listOf( // Linux
-                System.getProperty("user.home") + "/Android/Sdk/platform-tools/adb",
-                "/usr/bin/adb"
-            )
-        }
-
-        for (path in standardPaths) {
-            val file = File(path)
-            if (file.exists() && file.canExecute()) {
-                return path
-            }
-        }
-
-        return findExecutableInSystemPath(adbName)
-    }
 
     fun findScrcpyExecutable(): String? {
         val savedPath = SettingsService.getScrcpyPath()
@@ -57,7 +18,7 @@ object ScrcpyService {
             return savedPath
         }
 
-        val pathFromSystem = findExecutableInSystemPath(scrcpyName)
+        val pathFromSystem = AdbPathResolver.findExecutableInSystemPath(scrcpyName)
         if (pathFromSystem != null) {
             SettingsService.saveScrcpyPath(pathFromSystem)
             return pathFromSystem
@@ -81,7 +42,7 @@ object ScrcpyService {
 
             println("ADB_Randomizer: Starting scrcpy for device: $serialNumber")
 
-            val adbPath = findAdbExecutable()
+            val adbPath = AdbPathResolver.findAdbExecutable()
             if (adbPath == null) {
                 println("ADB_Randomizer: Cannot find ADB executable")
                 return false
@@ -257,5 +218,4 @@ object ScrcpyService {
             ""
         }
     }
-
 }
