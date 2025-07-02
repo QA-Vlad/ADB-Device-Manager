@@ -1,3 +1,4 @@
+// Файл: src/main/kotlin/io/github/qavlad/adbrandomizer/utils/ValidationUtils.kt
 package io.github.qavlad.adbrandomizer.utils
 
 object ValidationUtils {
@@ -21,6 +22,19 @@ object ValidationUtils {
                 false
             }
         }
+    }
+
+    /**
+     * Проверяет, является ли IP адрес "полезным" (не localhost и не служебный)
+     * @param ip строка с IP адресом
+     * @return true если IP подходит для использования, false иначе
+     */
+    fun isUsableIpAddress(ip: String?): Boolean {
+        if (ip.isNullOrBlank()) return false
+        if (!isValidIpAddress(ip)) return false
+
+        // Исключаем localhost и служебные адреса
+        return !ip.startsWith("127.") && !ip.startsWith("169.254.")
     }
 
     /**

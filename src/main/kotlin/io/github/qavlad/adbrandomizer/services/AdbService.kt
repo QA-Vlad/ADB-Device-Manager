@@ -19,6 +19,7 @@ object AdbService {
     private var isInitialized = false
     private var lastDeviceCount = -1
 
+    @Suppress("DEPRECATION")
     private fun getOrCreateDebugBridge(): AndroidDebugBridge? {
         if (customBridge != null && customBridge!!.isConnected) {
             return customBridge
@@ -43,7 +44,8 @@ object AdbService {
                 println("ADB_Randomizer: AndroidDebugBridge initialized")
             }
 
-            customBridge = AndroidDebugBridge.createBridge(adbPath, false)
+            // Используем deprecated метод, но подавляем warning
+            customBridge = AndroidDebugBridge.createBridge()
 
             // Увеличиваем время ожидания
             var attempts = 100  // было 50, стало 100
@@ -66,6 +68,7 @@ object AdbService {
         }
     }
 
+    @Suppress("UNUSED_PARAMETER")
     fun getConnectedDevices(project: Project): List<IDevice> {
         var bridge: AndroidDebugBridge? = null
 
@@ -105,34 +108,49 @@ object AdbService {
         val wifiInterfaces = listOf("wlan0", "wlan1", "wlan2", "eth0", "rmnet_data0")
 
         for (interfaceName in wifiInterfaces) {
-            try {
-                val receiver = CollectingOutputReceiver()
-                device.executeShellCommand("ip -f inet addr show $interfaceName", receiver, 5, TimeUnit.SECONDS)
-
-                val output = receiver.output
-                if (output.isNotBlank() && !output.contains("does not exist")) {
-                    val ipPattern = Pattern.compile("""inet (\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})""")
-                    val matcher = ipPattern.matcher(output)
-
-                    if (matcher.find()) {
-                        val ip = matcher.group(1)
-                        // Проверяем, что это не localhost и не служебный адрес
-                        if (ip != null && !ip.startsWith("127.") && !ip.startsWith("169.254.")) {
-                            return ip
-                        }
-                    }
-                }
-            } catch (e: Exception) {
-            }
+            val ip = getIpFromInterface(device, interfaceName)
+            if (ip != null) return ip
         }
 
         // Fallback: пытаемся получить IP через другие методы
         return getIpAddressFallback(device)
     }
 
+    private fun getIpFromInterface(device: IDevice, interfaceName: String): String? {
+        return try {
+            val receiver = CollectingOutputReceiver()
+            device.executeShellCommand("ip -f inet addr show $interfaceName", receiver, 5, TimeUnit.SECONDS)
+
+            val output = receiver.output
+            if (output.isNotBlank() && !output.contains("does not exist")) {
+                val ipPattern = Pattern.compile("""inet (\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})""")
+                val matcher = ipPattern.matcher(output)
+
+                if (matcher.find()) {
+                    val ip = matcher.group(1)
+                    // Используем ValidationUtils для проверки IP
+                    if (ValidationUtils.isUsableIpAddress(ip)) {
+                        return ip
+                    }
+                }
+            }
+            null
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     private fun getIpAddressFallback(device: IDevice): String? {
-        try {
-            // Метод 1: через netcfg (старые устройства)
+        // Метод 1: через netcfg (старые устройства)
+        val netcfgIp = getIpFromNetcfg(device)
+        if (netcfgIp != null) return netcfgIp
+
+        // Метод 2: через ifconfig (если доступен)
+        return getIpFromIfconfig(device)
+    }
+
+    private fun getIpFromNetcfg(device: IDevice): String? {
+        return try {
             val netcfgReceiver = CollectingOutputReceiver()
             device.executeShellCommand("netcfg", netcfgReceiver, 5, TimeUnit.SECONDS)
 
@@ -144,13 +162,20 @@ object AdbService {
 
                 if (matcher.find()) {
                     val ip = matcher.group(1)
-                    if (ip != null && !ip.startsWith("127.") && !ip.startsWith("169.254.")) {
+                    if (ValidationUtils.isUsableIpAddress(ip)) {
                         return ip
                     }
                 }
             }
+            null
+        } catch (e: Exception) {
+            println("ADB_Randomizer: Error in netcfg IP detection: ${e.message}")
+            null
+        }
+    }
 
-            // Метод 2: через ifconfig (если доступен)
+    private fun getIpFromIfconfig(device: IDevice): String? {
+        return try {
             val ifconfigReceiver = CollectingOutputReceiver()
             device.executeShellCommand("ifconfig wlan0", ifconfigReceiver, 5, TimeUnit.SECONDS)
 
@@ -161,17 +186,16 @@ object AdbService {
 
                 if (matcher.find()) {
                     val ip = matcher.group(1)
-                    if (ip != null && !ip.startsWith("127.") && !ip.startsWith("169.254.")) {
+                    if (ValidationUtils.isUsableIpAddress(ip)) {
                         return ip
                     }
                 }
             }
-
+            null
         } catch (e: Exception) {
-            println("ADB_Randomizer: Error in fallback IP detection: ${e.message}")
+            println("ADB_Randomizer: Error in ifconfig IP detection: ${e.message}")
+            null
         }
-
-        return null
     }
 
     fun resetSize(device: IDevice) {
@@ -216,6 +240,7 @@ object AdbService {
         }
     }
 
+    @Suppress("UNUSED_PARAMETER")
     fun connectWifi(project: Project, ipAddress: String, port: Int = 5555): Boolean {
         return try {
             val adbPath = AdbPathResolver.findAdbExecutable()
