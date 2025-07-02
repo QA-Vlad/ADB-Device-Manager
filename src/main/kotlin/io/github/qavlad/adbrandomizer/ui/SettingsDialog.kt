@@ -13,6 +13,7 @@ import com.intellij.util.ui.JBUI
 import io.github.qavlad.adbrandomizer.services.DevicePreset
 import io.github.qavlad.adbrandomizer.services.SettingsService
 import io.github.qavlad.adbrandomizer.utils.ButtonUtils
+import io.github.qavlad.adbrandomizer.utils.ValidationUtils
 import java.awt.BorderLayout
 import java.awt.Component
 import java.awt.Dimension
@@ -26,9 +27,6 @@ import javax.swing.table.TableCellRenderer
 class SettingsDialog(project: Project?) : DialogWrapper(project) {
     private lateinit var table: JBTable
     private lateinit var tableModel: DevicePresetTableModel
-
-    private val sizeRegex = Regex("""^\d+\s*[xхXХ]\s*\d+$""")
-    private val dpiRegex = Regex("""^\d+$""")
 
     init {
         title = "ADB Randomizer Settings"
@@ -206,8 +204,8 @@ class SettingsDialog(project: Project?) : DialogWrapper(project) {
         for (i in 0 until tableModel.rowCount) {
             val size = tableModel.getValueAt(i, 3) as? String ?: "" // Теперь Size в колонке 3
             val dpi = tableModel.getValueAt(i, 4) as? String ?: ""  // Теперь DPI в колонке 4
-            if (size.isNotBlank() && !sizeRegex.matches(size)) allValid = false
-            if (dpi.isNotBlank() && !dpiRegex.matches(dpi)) allValid = false
+            if (size.isNotBlank() && !ValidationUtils.isValidSizeFormat(size)) allValid = false
+            if (dpi.isNotBlank() && !ValidationUtils.isValidDpi(dpi)) allValid = false
         }
         isOKActionEnabled = allValid
         table.repaint()
@@ -240,6 +238,7 @@ class SettingsDialog(project: Project?) : DialogWrapper(project) {
         SettingsService.savePresets(tableModel.getPresets())
         super.doOKAction()
     }
+
     inner class ValidationRenderer : DefaultTableCellRenderer() {
         override fun getTableCellRendererComponent(table: JTable, value: Any?, isSelected: Boolean, hasFocus: Boolean, row: Int, column: Int): Component {
             super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column)
@@ -261,8 +260,8 @@ class SettingsDialog(project: Project?) : DialogWrapper(project) {
                     // Для колонок Size и DPI - с валидацией
                     val text = value as? String ?: ""
                     val isValid = if (text.isBlank()) true else when (column) {
-                        3 -> sizeRegex.matches(text) // Size теперь в колонке 3
-                        4 -> dpiRegex.matches(text)  // DPI теперь в колонке 4
+                        3 -> ValidationUtils.isValidSizeFormat(text) // Size теперь в колонке 3
+                        4 -> ValidationUtils.isValidDpi(text)         // DPI теперь в колонке 4
                         else -> true
                     }
 

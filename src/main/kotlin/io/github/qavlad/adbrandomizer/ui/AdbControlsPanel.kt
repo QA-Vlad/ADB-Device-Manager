@@ -13,6 +13,7 @@ import com.intellij.ui.components.JBScrollPane
 import io.github.qavlad.adbrandomizer.services.*
 import io.github.qavlad.adbrandomizer.utils.ButtonUtils
 import io.github.qavlad.adbrandomizer.utils.NotificationUtils
+import io.github.qavlad.adbrandomizer.utils.ValidationUtils
 import java.awt.*
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
@@ -167,29 +168,16 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
         )
 
         if (input != null && input.isNotBlank()) {
-            val parts = input.trim().split(":")
-            if (parts.size != 2) {
+            val connectionData = ValidationUtils.parseConnectionString(input)
+            if (connectionData == null) {
                 Messages.showErrorDialog(project, "Please enter in format: IP:PORT", "Invalid Format")
                 return
             }
 
-            val ip = parts[0].trim()
-            val portText = parts[1].trim()
+            val (ip, port) = connectionData
 
-            val port = try {
-                portText.toInt()
-            } catch (_: NumberFormatException) {
-                Messages.showErrorDialog(project, "Port must be a number", "Invalid Input")
-                return
-            }
-
-            if (port < 1 || port > 65535) {
-                Messages.showErrorDialog(project, "Port must be between 1 and 65535", "Invalid Input")
-                return
-            }
-
-            if (!AdbService.isValidIpAddress(ip)) {
-                Messages.showErrorDialog(project, "Please enter valid IP address", "Invalid Input")
+            if (!ValidationUtils.isValidAdbPort(port)) {
+                Messages.showErrorDialog(project, "Port must be between 1024 and 65535", "Invalid Port")
                 return
             }
 
@@ -555,17 +543,18 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                 val appliedSettings = mutableListOf<String>()
                 var width: Int? = null; var height: Int? = null
                 if (setSize && preset.size.isNotBlank()) {
-                    val parts = preset.size.split('x', 'X', 'х', 'Х').map { it.trim() }
-                    width = parts.getOrNull(0)?.toIntOrNull(); height = parts.getOrNull(1)?.toIntOrNull()
-                    if (width == null || height == null) {
+                    val sizeData = ValidationUtils.parseSize(preset.size)
+                    if (sizeData == null) {
                         NotificationUtils.showError(project, "Invalid size format in preset '${preset.label}': ${preset.size}")
                         return
                     }
+                    width = sizeData.first
+                    height = sizeData.second
                     appliedSettings.add("Size: ${preset.size}")
                 }
                 var dpi: Int? = null
                 if (setDpi && preset.dpi.isNotBlank()) {
-                    dpi = preset.dpi.trim().toIntOrNull()
+                    dpi = ValidationUtils.parseDpi(preset.dpi)
                     if (dpi == null) {
                         NotificationUtils.showError(project, "Invalid DPI format in preset '${preset.label}': ${preset.dpi}")
                         return

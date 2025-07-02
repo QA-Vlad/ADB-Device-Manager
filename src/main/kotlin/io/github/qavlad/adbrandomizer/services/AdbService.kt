@@ -9,7 +9,7 @@ import com.android.ddmlib.NullOutputReceiver
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.project.Project
 import io.github.qavlad.adbrandomizer.utils.AdbPathResolver
-import java.io.File
+import io.github.qavlad.adbrandomizer.utils.ValidationUtils
 import java.util.concurrent.TimeUnit
 import java.util.regex.Pattern
 
@@ -194,7 +194,7 @@ object AdbService {
 
     fun enableTcpIp(device: IDevice, port: Int = 5555) {
         // Валидация порта
-        if (port < 1024 || port > 65535) {
+        if (!ValidationUtils.isValidAdbPort(port)) {
             throw IllegalArgumentException("Port must be between 1024 and 65535, got: $port")
         }
 
@@ -224,7 +224,7 @@ object AdbService {
                 return false
             }
 
-            if (!isValidIpAddress(ipAddress)) {
+            if (!ValidationUtils.isValidIpAddress(ipAddress)) {
                 println("ADB_Randomizer: Invalid IP address: $ipAddress")
                 return false
             }
@@ -265,21 +265,6 @@ object AdbService {
         } catch (e: Exception) {
             println("ADB_Randomizer: Connect error: ${e.message}")
             false
-        }
-    }
-
-    // Валидация IP адреса
-    fun isValidIpAddress(ip: String): Boolean {
-        val parts = ip.split(".")
-        if (parts.size != 4) return false
-
-        return parts.all { part ->
-            try {
-                val num = part.toInt()
-                num in 0..255
-            } catch (_: NumberFormatException) {
-                false
-            }
         }
     }
 }
