@@ -19,7 +19,7 @@ object AdbService {
     private var isInitialized = false
     private var lastDeviceCount = -1
 
-    @Suppress("DEPRECATION")
+    @Suppress("DEPRECATION") // AndroidDebugBridge API deprecated but no modern replacement available
     private fun getOrCreateDebugBridge(): AndroidDebugBridge? {
         if (customBridge != null && customBridge!!.isConnected) {
             return customBridge
@@ -38,14 +38,17 @@ object AdbService {
             val process = startServerCmd.start()
             process.waitFor(5, TimeUnit.SECONDS)
 
+            // Используем современный API где возможно
             if (!isInitialized) {
-                AndroidDebugBridge.init(false)
+                AndroidDebugBridge.initIfNeeded(false)  // Менее deprecated чем init()
                 isInitialized = true
                 println("ADB_Randomizer: AndroidDebugBridge initialized")
             }
 
-            // Используем deprecated метод, но подавляем warning
-            customBridge = AndroidDebugBridge.createBridge()
+            // Используем createBridge с путем к adb
+            // Подавляем deprecation warning так как нет современной альтернативы
+            @Suppress("DEPRECATION")
+            customBridge = AndroidDebugBridge.createBridge(adbPath, false)
 
             // Увеличиваем время ожидания
             var attempts = 100  // было 50, стало 100
