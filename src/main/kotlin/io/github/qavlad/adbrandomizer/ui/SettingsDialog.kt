@@ -11,12 +11,15 @@ import com.intellij.ui.table.JBTable
 import com.intellij.util.ui.AbstractTableCellEditor
 import com.intellij.util.ui.JBUI
 import io.github.qavlad.adbrandomizer.services.DevicePreset
+import io.github.qavlad.adbrandomizer.services.PresetApplicationService
 import io.github.qavlad.adbrandomizer.services.SettingsService
 import io.github.qavlad.adbrandomizer.utils.ButtonUtils
 import io.github.qavlad.adbrandomizer.utils.ValidationUtils
 import java.awt.BorderLayout
 import java.awt.Component
 import java.awt.Dimension
+import java.awt.event.MouseAdapter
+import java.awt.event.MouseEvent
 import java.util.*
 import javax.swing.*
 import javax.swing.table.DefaultTableCellRenderer
@@ -24,7 +27,7 @@ import javax.swing.table.DefaultTableModel
 import javax.swing.table.TableCellEditor
 import javax.swing.table.TableCellRenderer
 
-class SettingsDialog(project: Project?) : DialogWrapper(project) {
+class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
     private lateinit var table: JBTable
     private lateinit var tableModel: DevicePresetTableModel
 
@@ -150,6 +153,21 @@ class SettingsDialog(project: Project?) : DialogWrapper(project) {
                 cellEditor = ButtonEditor(table)
             }
             setDefaultRenderer(Object::class.java, ValidationRenderer())
+            
+            // Добавляем контекстное меню
+            addMouseListener(object : MouseAdapter() {
+                override fun mousePressed(e: MouseEvent) {
+                    if (e.isPopupTrigger) {
+                        showContextMenu(e)
+                    }
+                }
+                
+                override fun mouseReleased(e: MouseEvent) {
+                    if (e.isPopupTrigger) {
+                        showContextMenu(e)
+                    }
+                }
+            })
         }
     }
 
@@ -197,6 +215,61 @@ class SettingsDialog(project: Project?) : DialogWrapper(project) {
         panel.add(importButton)
 
         return panel
+    }
+    
+    private fun showContextMenu(e: MouseEvent) {
+        val row = table.rowAtPoint(e.point)
+        if (row == -1) return
+        
+        table.setRowSelectionInterval(row, row)
+        val preset = getPresetAtRow(row)
+        
+        val popupMenu = JPopupMenu()
+        
+        // Проверяем, есть ли DPI в пресете
+        if (preset.dpi.isNotBlank()) {
+            val applyDpiItem = JMenuItem("Apply DPI only (${preset.dpi})")
+            applyDpiItem.addActionListener {
+                applyPresetToDevices(preset, setSize = false, setDpi = true)
+            }
+            popupMenu.add(applyDpiItem)
+        }
+        
+        // Проверяем, есть ли Size в пресете
+        if (preset.size.isNotBlank()) {
+            val applySizeItem = JMenuItem("Apply Size only (${preset.size})")
+            applySizeItem.addActionListener {
+                applyPresetToDevices(preset, setSize = true, setDpi = false)
+            }
+            popupMenu.add(applySizeItem)
+        }
+        
+        // Добавляем "Apply Both" только если есть и DPI и Size
+        if (preset.dpi.isNotBlank() && preset.size.isNotBlank()) {
+            val applyBothItem = JMenuItem("Apply Both")
+            applyBothItem.addActionListener {
+                applyPresetToDevices(preset, setSize = true, setDpi = true)
+            }
+            popupMenu.add(applyBothItem)
+        }
+        
+        if (popupMenu.componentCount > 0) {
+            popupMenu.show(e.component, e.x, e.y)
+        }
+    }
+    
+    private fun getPresetAtRow(row: Int): DevicePreset {
+        return DevicePreset(
+            label = tableModel.getValueAt(row, 2) as? String ?: "",
+            size = tableModel.getValueAt(row, 3) as? String ?: "",
+            dpi = tableModel.getValueAt(row, 4) as? String ?: ""
+        )
+    }
+    
+    private fun applyPresetToDevices(preset: DevicePreset, setSize: Boolean, setDpi: Boolean) {
+        if (project != null) {
+            PresetApplicationService.applyPreset(project, preset, setSize, setDpi)
+        }
     }
 
     private fun validateFields() {

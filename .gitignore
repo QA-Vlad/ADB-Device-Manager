@@ -43,3 +43,5 @@ Thumbs.db
 gradle-local.properties
 sandbox-persistent/
 /.cursor/rules/standart.mdc
+/CLAUDE.md
+/.claude/

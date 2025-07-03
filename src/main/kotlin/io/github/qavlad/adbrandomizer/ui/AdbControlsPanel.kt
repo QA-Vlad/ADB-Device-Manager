@@ -354,9 +354,7 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
         if (!validateDevicesAvailable()) return
 
         val randomPreset = selectRandomPreset(setSize, setDpi) ?: return
-        val presetNumber = findPresetNumber(randomPreset)
-
-        applyPresetToDevices(randomPreset, presetNumber, setSize, setDpi)
+        applyPresetToDevices(randomPreset, setSize, setDpi)
     }
 
     private fun selectRandomPreset(setSize: Boolean, setDpi: Boolean): DevicePreset? {
@@ -393,10 +391,6 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
         currentPresetIndex = allPresets.indexOf(preset)
     }
 
-    private fun findPresetNumber(preset: DevicePreset): Int {
-        val allPresets = SettingsService.getPresets()
-        return allPresets.indexOfFirst { it.label == preset.label } + 1
-    }
 
     private fun navigateToNextPreset() {
         if (!validatePresetsAvailable()) return
@@ -423,82 +417,16 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
             return
         }
 
-        applyPresetToDevices(presets[index], index + 1, setSize = true, setDpi = true)
+        applyPresetToDevices(presets[index], setSize = true, setDpi = true)
     }
 
-    private fun applyPresetToDevices(preset: DevicePreset, presetNumber: Int, setSize: Boolean, setDpi: Boolean) {
-        object : Task.Backgroundable(project, "Applying preset") {
-            override fun run(indicator: ProgressIndicator) {
-                lastUsedPreset = preset
-
-                val presetData = validateAndParsePresetData(preset, setSize, setDpi) ?: return
-                val devices = AdbService.getConnectedDevices(project)
-
-                applyPresetToAllDevices(devices, preset, presetData, indicator)
-                showPresetApplicationResult(preset, presetNumber, presetData.appliedSettings)
-            }
-        }.queue()
+    private fun applyPresetToDevices(preset: DevicePreset, setSize: Boolean, setDpi: Boolean) {
+        lastUsedPreset = preset
+        
+        // Используем PresetApplicationService для применения пресета
+        PresetApplicationService.applyPreset(project, preset, setSize, setDpi)
     }
 
-    private data class PresetData(
-        val width: Int?,
-        val height: Int?,
-        val dpi: Int?,
-        val appliedSettings: List<String>
-    )
-
-    private fun validateAndParsePresetData(preset: DevicePreset, setSize: Boolean, setDpi: Boolean): PresetData? {
-        val appliedSettings = mutableListOf<String>()
-        var width: Int? = null
-        var height: Int? = null
-        var dpi: Int? = null
-
-        if (setSize && preset.size.isNotBlank()) {
-            val sizeData = ValidationUtils.parseSize(preset.size)
-            if (sizeData == null) {
-                NotificationUtils.showError(project, "Invalid size format in preset '${preset.label}': ${preset.size}")
-                return null
-            }
-            width = sizeData.first
-            height = sizeData.second
-            appliedSettings.add("Size: ${preset.size}")
-        }
-
-        if (setDpi && preset.dpi.isNotBlank()) {
-            dpi = ValidationUtils.parseDpi(preset.dpi)
-            if (dpi == null) {
-                NotificationUtils.showError(project, "Invalid DPI format in preset '${preset.label}': ${preset.dpi}")
-                return null
-            }
-            appliedSettings.add("DPI: ${preset.dpi}")
-        }
-
-        if (appliedSettings.isEmpty()) {
-            NotificationUtils.showInfo(project, "No settings to apply for preset '${preset.label}'")
-            return null
-        }
-
-        return PresetData(width, height, dpi, appliedSettings)
-    }
-
-    private fun applyPresetToAllDevices(devices: List<IDevice>, preset: DevicePreset, presetData: PresetData, indicator: ProgressIndicator) {
-        devices.forEach { device ->
-            indicator.text = "Applying '${preset.label}' to ${device.name}..."
-
-            if (presetData.width != null && presetData.height != null) {
-                AdbService.setSize(device, presetData.width, presetData.height)
-            }
-
-            if (presetData.dpi != null) {
-                AdbService.setDpi(device, presetData.dpi)
-            }
-        }
-    }
-
-    private fun showPresetApplicationResult(preset: DevicePreset, presetNumber: Int, appliedSettings: List<String>) {
-        val message = "<html>Preset №${presetNumber}: ${preset.label};<br>${appliedSettings.joinToString(", ")}</html>"
-        NotificationUtils.showSuccess(project, message)
-    }
 
     // ==================== RESET ACTIONS ====================
 
