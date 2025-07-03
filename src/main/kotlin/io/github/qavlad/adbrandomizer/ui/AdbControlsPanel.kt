@@ -12,6 +12,7 @@ import com.intellij.ui.components.JBList
 import com.intellij.ui.components.JBScrollPane
 import io.github.qavlad.adbrandomizer.services.*
 import io.github.qavlad.adbrandomizer.utils.ButtonUtils
+import io.github.qavlad.adbrandomizer.utils.DeviceConnectionUtils
 import io.github.qavlad.adbrandomizer.utils.NotificationUtils
 import io.github.qavlad.adbrandomizer.utils.ValidationUtils
 import java.awt.*
@@ -29,13 +30,8 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
     private val deviceList = JBList(deviceListModel)
     private val deviceIpCache = mutableMapOf<String, String?>()
 
-    // Переменные для отслеживания hover-эффекта на кнопках в списке
-    private var hoveredCellIndex: Int = -1
-    private var hoveredButtonType: String? = null // "MIRROR" или "WIFI"
-
-    companion object {
-        private val wifiSerialRegex = Regex("""^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}:\d+$""")
-    }
+    // Состояние hover эффектов
+    private var currentHoverState = HoverState.noHover()
 
     init {
         setupUI()
@@ -93,8 +89,8 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
 
     private fun setupDeviceList() {
         deviceList.cellRenderer = DeviceListRenderer(
-            hoveredCellIndex = { hoveredCellIndex },
-            hoveredButtonType = { hoveredButtonType },
+            getHoverState = { currentHoverState },
+            getAllDevices = { getAllDevicesFromModel() },
             onMirrorClick = { deviceInfo -> startScreenMirroring(deviceInfo) },
             onWifiClick = { device -> connectDeviceViaWifi(device) }
         )
@@ -174,7 +170,7 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
     }
 
     private fun getDisplaySerialNumber(device: IDevice, logicalSerial: String): String {
-        return if (wifiSerialRegex.matches(logicalSerial)) {
+        return if (DeviceConnectionUtils.isWifiConnection(logicalSerial)) {
             getDeviceRealSerial(device) ?: logicalSerial
         } else {
             logicalSerial
@@ -256,6 +252,12 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
         }
     }
 
+    private fun getAllDevicesFromModel(): List<DeviceInfo> {
+        return (0 until deviceListModel.size()).map {
+            deviceListModel.getElementAt(it)
+        }
+    }
+
     // ==================== MOUSE INTERACTIONS ====================
 
     private fun handleMouseMovement(e: MouseEvent) {
@@ -265,11 +267,14 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
         if (index != -1 && index < deviceListModel.size()) {
             val bounds = deviceList.getCellBounds(index, index)
             val deviceInfo = deviceListModel.getElementAt(index)
-            val buttonLayout = calculateButtonSizes(bounds, deviceInfo)
+            val buttonLayout = DeviceConnectionUtils.calculateButtonLayout(
+                bounds,
+                DeviceConnectionUtils.isWifiConnection(deviceInfo.logicalSerialNumber)
+            )
 
             newButtonType = when {
-                buttonLayout.mirrorButtonRect.contains(e.point) -> "MIRROR"
-                buttonLayout.wifiButtonRect?.contains(e.point) == true -> "WIFI"
+                buttonLayout.mirrorButtonRect.contains(e.point) -> HoverState.BUTTON_TYPE_MIRROR
+                buttonLayout.wifiButtonRect?.contains(e.point) == true -> HoverState.BUTTON_TYPE_WIFI
                 else -> null
             }
         }
@@ -284,9 +289,14 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
             Cursor.getDefaultCursor()
         }
 
-        if (index != hoveredCellIndex || newButtonType != hoveredButtonType) {
-            hoveredCellIndex = index
-            hoveredButtonType = newButtonType
+        val newHoverState = if (index != -1 && newButtonType != null) {
+            HoverState.hovering(index, newButtonType)
+        } else {
+            HoverState.noHover()
+        }
+
+        if (currentHoverState != newHoverState) {
+            currentHoverState = newHoverState
             deviceList.repaint()
         }
     }
@@ -296,7 +306,10 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
         if (index != -1 && index < deviceListModel.size()) {
             val bounds = deviceList.getCellBounds(index, index)
             val deviceInfo = deviceListModel.getElementAt(index)
-            val buttonLayout = calculateButtonSizes(bounds, deviceInfo)
+            val buttonLayout = DeviceConnectionUtils.calculateButtonLayout(
+                bounds,
+                DeviceConnectionUtils.isWifiConnection(deviceInfo.logicalSerialNumber)
+            )
 
             when {
                 buttonLayout.mirrorButtonRect.contains(e.point) -> startScreenMirroring(deviceInfo)
@@ -308,39 +321,11 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
     }
 
     private fun resetHoverState() {
-        if (hoveredCellIndex != -1) {
-            hoveredCellIndex = -1
-            hoveredButtonType = null
+        if (currentHoverState.hasActiveHover()) {
+            currentHoverState = HoverState.noHover()
             deviceList.cursor = Cursor.getDefaultCursor()
             deviceList.repaint()
         }
-    }
-
-    private data class ButtonLayout(
-        val mirrorButtonRect: Rectangle,
-        val wifiButtonRect: Rectangle?
-    )
-
-    private fun calculateButtonSizes(cellBounds: Rectangle, deviceInfo: DeviceInfo): ButtonLayout {
-        val buttonPanelWidth = 115
-        val buttonSpacing = 5
-        val mirrorButtonWidth = 35
-        val wifiButtonWidth = 70
-        val buttonHeight = 25
-
-        val buttonY = cellBounds.y + (cellBounds.height - buttonHeight) / 2
-        val buttonPanelX = cellBounds.x + cellBounds.width - buttonPanelWidth
-        val mirrorButtonX = buttonPanelX + buttonSpacing
-        val mirrorButtonRect = Rectangle(mirrorButtonX, buttonY, mirrorButtonWidth, buttonHeight)
-
-        val wifiButtonRect = if (!wifiSerialRegex.matches(deviceInfo.logicalSerialNumber)) {
-            val wifiButtonX = mirrorButtonX + mirrorButtonWidth + buttonSpacing
-            Rectangle(wifiButtonX, buttonY, wifiButtonWidth, buttonHeight)
-        } else {
-            null
-        }
-
-        return ButtonLayout(mirrorButtonRect, wifiButtonRect)
     }
 
     // ==================== VALIDATION AND HELPERS ====================
@@ -540,7 +525,6 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
         }
     }
 
-    @Suppress("UNUSED_PARAMETER")
     private fun resetAllDevices(devices: List<IDevice>, resetSize: Boolean, resetDpi: Boolean, indicator: ProgressIndicator) {
         devices.forEach { device ->
             indicator.text = "Resetting ${device.name}..."
