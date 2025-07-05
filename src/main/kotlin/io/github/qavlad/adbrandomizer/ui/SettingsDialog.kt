@@ -11,17 +11,24 @@ import com.intellij.ui.table.JBTable
 import com.intellij.util.ui.AbstractTableCellEditor
 import com.intellij.util.ui.JBUI
 import io.github.qavlad.adbrandomizer.services.DevicePreset
+import io.github.qavlad.adbrandomizer.services.DeviceStateService
 import io.github.qavlad.adbrandomizer.services.PresetApplicationService
+import io.github.qavlad.adbrandomizer.services.SettingsDialogUpdateNotifier
 import io.github.qavlad.adbrandomizer.services.SettingsService
 import io.github.qavlad.adbrandomizer.utils.ButtonUtils
 import io.github.qavlad.adbrandomizer.utils.ValidationUtils
 import java.awt.BorderLayout
 import java.awt.Component
 import java.awt.Dimension
+import java.awt.Graphics
+import java.awt.Graphics2D
+import java.awt.Insets
+import java.awt.RenderingHints
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import java.util.*
 import javax.swing.*
+import javax.swing.border.Border
 import javax.swing.table.DefaultTableCellRenderer
 import javax.swing.table.DefaultTableModel
 import javax.swing.table.TableCellEditor
@@ -30,6 +37,7 @@ import javax.swing.table.TableCellRenderer
 class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
     private lateinit var table: JBTable
     private lateinit var tableModel: DevicePresetTableModel
+    private var updateListener: (() -> Unit)? = null
 
     init {
         title = "ADB Randomizer Settings"
@@ -40,6 +48,26 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
         SwingUtilities.invokeLater {
             addHoverEffectToDialogButtons()
         }
+        
+        // Обновляем состояние устройств при открытии диалога только если нет активных пресетов
+        if (project != null) {
+            val activePresets = DeviceStateService.getCurrentActivePresets()
+            if (activePresets.activeSizePreset == null && activePresets.activeDpiPreset == null) {
+                DeviceStateService.refreshDeviceStates(project)
+            }
+            // Небольшая задержка для загрузки состояния устройств
+            SwingUtilities.invokeLater {
+                table.repaint()
+            }
+        }
+        
+        // Подписываемся на уведомления об обновлениях
+        updateListener = {
+            SwingUtilities.invokeLater {
+                table.repaint()
+            }
+        }
+        updateListener?.let { SettingsDialogUpdateNotifier.addListener(it) }
     }
 
     private fun addHoverEffectToDialogButtons() {
@@ -76,7 +104,13 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
         }
 
         tableModel = DevicePresetTableModel(dataVector, columnNames)
-        tableModel.addTableModelListener { validateFields() }
+        tableModel.addTableModelListener { 
+            validateFields()
+            // Обновляем индикаторы при изменении данных
+            SwingUtilities.invokeLater {
+                table.repaint()
+            }
+        }
 
         table = JBTable(tableModel)
 
@@ -104,6 +138,11 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
             dragEnabled = true
             dropMode = DropMode.INSERT_ROWS
             transferHandler = PresetTransferHandler()
+            
+            // Убираем синее выделение строк
+            selectionModel.clearSelection()
+            setRowSelectionAllowed(false)
+            setCellSelectionEnabled(false)
 
             // Настраиваем быстрое появление tooltip
             val toolTipManager = ToolTipManager.sharedInstance()
@@ -221,7 +260,6 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
         val row = table.rowAtPoint(e.point)
         if (row == -1) return
         
-        table.setRowSelectionInterval(row, row)
         val preset = getPresetAtRow(row)
         
         val popupMenu = JPopupMenu()
@@ -230,7 +268,7 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
         if (preset.dpi.isNotBlank()) {
             val applyDpiItem = JMenuItem("Apply DPI only (${preset.dpi})")
             applyDpiItem.addActionListener {
-                applyPresetToDevices(preset, setSize = false, setDpi = true)
+                applyPresetFromRow(row, setSize = false, setDpi = true)
             }
             popupMenu.add(applyDpiItem)
         }
@@ -239,16 +277,16 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
         if (preset.size.isNotBlank()) {
             val applySizeItem = JMenuItem("Apply Size only (${preset.size})")
             applySizeItem.addActionListener {
-                applyPresetToDevices(preset, setSize = true, setDpi = false)
+                applyPresetFromRow(row, setSize = true, setDpi = false)
             }
             popupMenu.add(applySizeItem)
         }
         
-        // Добавляем "Apply Both" только если есть и DPI и Size
+        // Добавляем "Apply Size and DPI" только если есть и DPI и Size
         if (preset.dpi.isNotBlank() && preset.size.isNotBlank()) {
-            val applyBothItem = JMenuItem("Apply Both")
+            val applyBothItem = JMenuItem("Apply Size and DPI")
             applyBothItem.addActionListener {
-                applyPresetToDevices(preset, setSize = true, setDpi = true)
+                applyPresetFromRow(row, setSize = true, setDpi = true)
             }
             popupMenu.add(applyBothItem)
         }
@@ -266,11 +304,21 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
         )
     }
     
-    private fun applyPresetToDevices(preset: DevicePreset, setSize: Boolean, setDpi: Boolean) {
+    private fun applyPresetFromRow(row: Int, setSize: Boolean, setDpi: Boolean) {
         if (project != null) {
-            PresetApplicationService.applyPreset(project, preset, setSize, setDpi)
+            // Берем текущее состояние пресета из таблицы (может быть отредактированным)
+            val currentPreset = getPresetAtRow(row)
+            
+            PresetApplicationService.applyPreset(project, currentPreset, setSize, setDpi)
+            
+            // Обновляем таблицу после применения пресета
+            SwingUtilities.invokeLater {
+                table.repaint()
+            }
         }
     }
+    
+
 
     private fun validateFields() {
         var allValid = true
@@ -309,28 +357,85 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
 
         // Сохраняем только непустые пресеты
         SettingsService.savePresets(tableModel.getPresets())
+        
+        // Отписываемся от уведомлений
+        updateListener?.let { SettingsDialogUpdateNotifier.removeListener(it) }
+        
         super.doOKAction()
+    }
+    
+    override fun doCancelAction() {
+        // Отписываемся от уведомлений
+        updateListener?.let { SettingsDialogUpdateNotifier.removeListener(it) }
+        super.doCancelAction()
+    }
+
+    enum class IndicatorType {
+        NONE, GREEN, YELLOW, GRAY
     }
 
     inner class ValidationRenderer : DefaultTableCellRenderer() {
+        
         override fun getTableCellRendererComponent(table: JTable, value: Any?, isSelected: Boolean, hasFocus: Boolean, row: Int, column: Int): Component {
             super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column)
 
             isOpaque = true
+            
+            // Убираем любое выделение
+            background = table.background
+            foreground = table.foreground
 
             when (column) {
                 0, 1, 5 -> {
                     // Для колонок с иконками, номерами и кнопками - стандартное поведение
-                    background = if (isSelected) table.selectionBackground else table.background
-                    foreground = if (isSelected) table.selectionForeground else table.foreground
+                    border = null
                 }
                 2 -> {
-                    // Для колонки Label - стандартное поведение без валидации
-                    background = if (isSelected) table.selectionBackground else table.background
-                    foreground = if (isSelected) table.selectionForeground else table.foreground
+                    // Для колонки Label - с индикатором если активен весь пресет
+                    val preset = getPresetAtRow(row)
+                    val activePresets = DeviceStateService.getCurrentActivePresets()
+                    
+                    val sizeIndicator = getIndicatorType(preset, activePresets, isSize = true)
+                    val dpiIndicator = getIndicatorType(preset, activePresets, isSize = false)
+                    
+                    val text = value as? String ?: ""
+                    
+                    // Добавляем галочку только если активны ОБА параметра (Size И DPI)
+                    if (sizeIndicator != IndicatorType.NONE && dpiIndicator != IndicatorType.NONE && text.isNotBlank()) {
+                        // Для серого индикатора не добавляем никаких символов
+                        if (sizeIndicator == IndicatorType.GRAY || dpiIndicator == IndicatorType.GRAY) {
+                            println("ADB_DEBUG: Рендерим СЕРУЮ рамку для ${preset.label} (sizeIndicator=$sizeIndicator, dpiIndicator=$dpiIndicator)")
+                            this.text = text
+                            foreground = table.foreground
+                            border = GrayParameterBorder()
+                        } else {
+                            val indicator = if (sizeIndicator == IndicatorType.YELLOW || dpiIndicator == IndicatorType.YELLOW) {
+                                "✓ " // Желтая галка для измененных
+                            } else {
+                                "✓ " // Зеленая галка для точно совпадающих
+                            }
+                            this.text = indicator + text
+                            foreground = if (sizeIndicator == IndicatorType.YELLOW || dpiIndicator == IndicatorType.YELLOW) {
+                                JBColor.ORANGE
+                            } else {
+                                JBColor.GREEN.darker()
+                            }
+                            
+                            // Добавляем обводку для Label если активен полный пресет
+                            border = if (sizeIndicator == IndicatorType.YELLOW || dpiIndicator == IndicatorType.YELLOW) {
+                                YellowParameterBorder()
+                            } else {
+                                ActiveParameterBorder()
+                            }
+                        }
+                    } else {
+                        this.text = text
+                        foreground = table.foreground
+                        border = null
+                    }
                 }
                 3, 4 -> {
-                    // Для колонок Size и DPI - с валидацией
+                    // Для колонок Size и DPI - с валидацией и индикаторами активности
                     val text = value as? String ?: ""
                     val isValid = if (text.isBlank()) true else when (column) {
                         3 -> ValidationUtils.isValidSizeFormat(text) // Size теперь в колонке 3
@@ -338,18 +443,186 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
                         else -> true
                     }
 
+                    val preset = getPresetAtRow(row)
+                    val activePresets = DeviceStateService.getCurrentActivePresets()
+                    
+                    val isSize = column == 3
+                    val indicatorType = getIndicatorType(preset, activePresets, isSize = isSize)
+
                     if (!isValid) {
                         background = JBColor.PINK
                         foreground = JBColor.BLACK
+                        border = null
+                        this.text = text
                     } else {
-                        background = if (isSelected) table.selectionBackground else table.background
-                        foreground = if (isSelected) table.selectionForeground else table.foreground
+                        // Добавляем обводку для активных параметров
+                        border = when (indicatorType) {
+                            IndicatorType.GRAY -> GrayParameterBorder()
+                            IndicatorType.YELLOW -> YellowParameterBorder()
+                            IndicatorType.GREEN -> ActiveParameterBorder()
+                            else -> null
+                        }
+                        
+                        // Добавляем индикатор к тексту для активных параметров
+                        if (indicatorType != IndicatorType.NONE && text.isNotBlank()) {
+                            if (indicatorType == IndicatorType.GRAY) {
+                                // Для серого индикатора - просто текст без символов
+                                println("ADB_DEBUG: Рендерим серую рамку в колонке ${if (isSize) "SIZE" else "DPI"} для пресета с текстом '$text'")
+                                this.text = text
+                                foreground = table.foreground
+                            } else {
+                                // Для остальных - галочка
+                                val indicator = "✓ "
+                                this.text = indicator + text
+                                foreground = when (indicatorType) {
+                                    IndicatorType.YELLOW -> JBColor.ORANGE
+                                    else -> JBColor.GREEN.darker()
+                                }
+                            }
+                        } else {
+                            this.text = text
+                            foreground = table.foreground
+                        }
                     }
                 }
             }
 
             return this
         }
+        
+        private fun getIndicatorType(preset: DevicePreset, activePresets: DeviceStateService.ActivePresetInfo, isSize: Boolean): IndicatorType {
+            return if (isSize) {
+                getSizeIndicatorType(preset, activePresets)
+            } else {
+                getDpiIndicatorType(preset, activePresets)
+            }
+        }
+        
+        private fun getSizeIndicatorType(preset: DevicePreset, activePresets: DeviceStateService.ActivePresetInfo): IndicatorType {
+            return getPresetIndicatorType(
+                presetValue = preset.size,
+                preset = preset,
+                resetPreset = activePresets.resetSizePreset,
+                activeValue = activePresets.activeSizePreset?.size,
+                originalPreset = activePresets.originalSizePreset,
+                originalValue = activePresets.originalSizePreset?.size
+            )
+        }
+        
+        private fun getDpiIndicatorType(preset: DevicePreset, activePresets: DeviceStateService.ActivePresetInfo): IndicatorType {
+            return getPresetIndicatorType(
+                presetValue = preset.dpi,
+                preset = preset,
+                resetPreset = activePresets.resetDpiPreset,
+                activeValue = activePresets.activeDpiPreset?.dpi,
+                originalPreset = activePresets.originalDpiPreset,
+                originalValue = activePresets.originalDpiPreset?.dpi
+            )
+        }
+        
+        private fun getPresetIndicatorType(
+            presetValue: String,
+            preset: DevicePreset,
+            resetPreset: DevicePreset?,
+            activeValue: String?,
+            originalPreset: DevicePreset?,
+            originalValue: String?
+        ): IndicatorType {
+            if (presetValue.isBlank()) return IndicatorType.NONE
+            
+            // Проверяем, был ли этот пресет сброшен (приоритет)
+            if (resetPreset?.label == preset.label) {
+                return IndicatorType.GRAY
+            }
+            
+            return getParameterIndicatorType(
+                preset = preset,
+                presetValue = presetValue,
+                activeValue = activeValue,
+                originalPreset = originalPreset,
+                originalValue = originalValue
+            )
+        }
+        
+        private fun getParameterIndicatorType(
+            preset: DevicePreset,
+            presetValue: String,
+            activeValue: String?,
+            originalPreset: DevicePreset?,
+            originalValue: String?
+        ): IndicatorType {
+            // Проверяем точное совпадение с текущим состоянием устройств
+            val isCurrentlyActive = activeValue == presetValue
+            
+            if (isCurrentlyActive) {
+                // Проверяем, был ли этот параметр из этого пресета применен изначально
+                val wasFromThisPreset = originalPreset?.label == preset.label
+                
+                if (wasFromThisPreset) {
+                    // Проверяем, изменился ли параметр в этом пресете с момента применения
+                    val isModified = presetValue != originalValue
+                    return if (isModified) IndicatorType.YELLOW else IndicatorType.GREEN
+                } else {
+                    // Параметр совпадает, но был применен из другого пресета - желтый
+                    return IndicatorType.YELLOW
+                }
+            }
+            
+            // Проверяем, не изменился ли активный пресет (для желтой галки без активного совпадения)
+            val isFromOriginalPreset = originalPreset?.label == preset.label
+            
+            if (isFromOriginalPreset) {
+                val isModified = presetValue != originalValue
+                return if (isModified) IndicatorType.YELLOW else IndicatorType.GREEN
+            }
+            
+            return IndicatorType.NONE
+        }
+    }
+    
+    // Кастомная обводка для активных параметров
+    inner class ActiveParameterBorder : Border {
+        override fun paintBorder(c: Component?, g: Graphics?, x: Int, y: Int, width: Int, height: Int) {
+            g?.let { graphics ->
+                val g2d = graphics as Graphics2D
+                g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+                g2d.color = JBColor.GREEN
+                g2d.drawRect(x, y, width - 1, height - 1)
+            }
+        }
+
+        override fun getBorderInsets(c: Component?): Insets = JBUI.insets(1)
+        override fun isBorderOpaque(): Boolean = false
+    }
+    
+    // Кастомная обводка для измененных активных параметров
+    inner class YellowParameterBorder : Border {
+        override fun paintBorder(c: Component?, g: Graphics?, x: Int, y: Int, width: Int, height: Int) {
+            g?.let { graphics ->
+                val g2d = graphics as Graphics2D
+                g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+                g2d.color = JBColor.ORANGE
+                g2d.drawRect(x, y, width - 1, height - 1)
+            }
+        }
+
+        override fun getBorderInsets(c: Component?): Insets = JBUI.insets(1)
+        override fun isBorderOpaque(): Boolean = false
+    }
+    
+    // Кастомная обводка для сброшенных параметров
+    inner class GrayParameterBorder : Border {
+        override fun paintBorder(c: Component?, g: Graphics?, x: Int, y: Int, width: Int, height: Int) {
+            g?.let { graphics ->
+                val g2d = graphics as Graphics2D
+                g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+                g2d.color = JBColor.GRAY
+                g2d.drawRect(x, y, width - 1, height - 1)
+            }
+        }
+
+        override fun getBorderInsets(c: Component?): Insets = JBUI.insets(1)
+        override fun isBorderOpaque(): Boolean = false
     }
 }
 

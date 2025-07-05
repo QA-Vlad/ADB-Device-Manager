@@ -25,9 +25,25 @@ object PresetApplicationService {
                 
                 applyPresetToAllDevices(devices, preset, presetData, indicator)
                 
+                // Обновляем состояние устройств после применения пресета
+                updateDeviceStatesAfterPresetApplication(devices, presetData)
+                
+                // Отслеживаем какой пресет был применен (сохраняем полную копию текущего состояния пресета)
+                val appliedSizePreset = if (setSize) preset.copy() else null
+                val appliedDpiPreset = if (setDpi) preset.copy() else null
+                
+                DeviceStateService.setLastAppliedPresets(appliedSizePreset, appliedDpiPreset)
+                
                 ApplicationManager.getApplication().invokeLater {
-                    val presetNumber = SettingsService.getPresets().indexOf(preset) + 1
+                    // Ищем пресет по label, а не по точному совпадению
+                    val savedPresets = SettingsService.getPresets()
+                    val presetIndex = savedPresets.indexOfFirst { it.label == preset.label }
+                    val presetNumber = if (presetIndex >= 0) presetIndex + 1 else 1
+                    
                     showPresetApplicationResult(project, preset, presetNumber, presetData.appliedSettings)
+                    
+                    // Уведомляем все открытые диалоги настроек об обновлении
+                    SettingsDialogUpdateNotifier.notifyUpdate()
                 }
             }
         }.queue()
@@ -83,6 +99,24 @@ object PresetApplicationService {
             if (presetData.dpi != null) {
                 AdbService.setDpi(device, presetData.dpi)
             }
+        }
+    }
+    
+    private fun updateDeviceStatesAfterPresetApplication(devices: List<IDevice>, presetData: PresetData) {
+        devices.forEach { device ->
+            // Получаем текущее состояние и обновляем только те параметры, которые были изменены
+            val currentState = DeviceStateService.getDeviceState(device.serialNumber)
+            
+            val newWidth = presetData.width ?: currentState?.width
+            val newHeight = presetData.height ?: currentState?.height 
+            val newDpi = presetData.dpi ?: currentState?.dpi
+            
+            DeviceStateService.updateDeviceState(
+                device.serialNumber,
+                newWidth,
+                newHeight,
+                newDpi
+            )
         }
     }
     

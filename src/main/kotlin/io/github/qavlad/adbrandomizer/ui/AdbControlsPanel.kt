@@ -439,7 +439,16 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
             override fun run(indicator: ProgressIndicator) {
                 val devices = AdbService.getConnectedDevices(project)
                 resetAllDevices(devices, resetSize, resetDpi, indicator)
-                showResetResult(devices.size, resetSize, resetDpi)
+                
+                // Обновляем состояние в DeviceStateService для показа серых индикаторов
+                DeviceStateService.handleReset(resetSize, resetDpi)
+                
+                ApplicationManager.getApplication().invokeLater {
+                    showResetResult(devices.size, resetSize, resetDpi)
+                    
+                    // Уведомляем все открытые диалоги настроек об обновлении
+                    SettingsDialogUpdateNotifier.notifyUpdate()
+                }
             }
         }.queue()
     }

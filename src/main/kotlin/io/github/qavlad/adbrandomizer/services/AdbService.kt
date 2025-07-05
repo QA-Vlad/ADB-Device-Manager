@@ -218,6 +218,46 @@ object AdbService {
         val command = "wm density $dpi"
         device.executeShellCommand(command, NullOutputReceiver(), 15, TimeUnit.SECONDS)
     }
+    
+    fun getCurrentSize(device: IDevice): Pair<Int, Int>? {
+        return try {
+            val receiver = CollectingOutputReceiver()
+            device.executeShellCommand("wm size", receiver, 10, TimeUnit.SECONDS)
+            
+            val output = receiver.output.trim()
+            // Формат вывода: "Physical size: 1080x1920" или "Override size: 1080x1920"
+            val sizePattern = Pattern.compile("""(?:Physical|Override) size: (\d+)x(\d+)""")
+            val matcher = sizePattern.matcher(output)
+            
+            if (matcher.find()) {
+                val width = matcher.group(1).toInt()
+                val height = matcher.group(2).toInt()
+                return Pair(width, height)
+            }
+            null
+        } catch (_: Exception) {
+            null
+        }
+    }
+    
+    fun getCurrentDpi(device: IDevice): Int? {
+        return try {
+            val receiver = CollectingOutputReceiver()
+            device.executeShellCommand("wm density", receiver, 10, TimeUnit.SECONDS)
+            
+            val output = receiver.output.trim()
+            // Формат вывода: "Physical density: 480" или "Override density: 480"
+            val dpiPattern = Pattern.compile("""(?:Physical|Override) density: (\d+)""")
+            val matcher = dpiPattern.matcher(output)
+            
+            if (matcher.find()) {
+                return matcher.group(1).toInt()
+            }
+            null
+        } catch (_: Exception) {
+            null
+        }
+    }
 
     fun enableTcpIp(device: IDevice, port: Int = 5555) {
         // Валидация порта
