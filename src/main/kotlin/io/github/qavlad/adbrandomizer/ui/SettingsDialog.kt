@@ -53,8 +53,7 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
     
     // Для отмены операций - история изменений
     private data class HistoryEntry(
-        val row: Int,
-        val column: Int,
+        val cellId: CellIdentity,
         val oldValue: String,
         val newValue: String
     )
@@ -69,6 +68,34 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
     private var editingCellOldValue: String? = null
     private var editingCellRow: Int = -1
     private var editingCellColumn: Int = -1
+    
+    // Система ID ячеек: Map(row, column) -> CellIdentity
+    private val cellIdMap = mutableMapOf<Pair<Int, Int>, CellIdentity>()
+    
+    // Обработчик перемещения строк для обновления cellIdMap
+    private fun onRowMoved(fromIndex: Int, toIndex: Int) {
+        println("ADB_DEBUG: Row moved from $fromIndex to $toIndex - updating cellIdMap")
+        
+        // Создаем новую карту с обновленными координатами
+        val newCellIdMap = mutableMapOf<Pair<Int, Int>, CellIdentity>()
+        
+        // Для всех ячеек пересчитываем координаты
+        for ((coords, cellId) in cellIdMap) {
+            val (row, column) = coords
+            val newRow = when {
+                row == fromIndex -> toIndex
+                fromIndex < toIndex && row in (fromIndex + 1)..toIndex -> row - 1
+                fromIndex > toIndex && row in toIndex until fromIndex -> row + 1
+                else -> row
+            }
+            newCellIdMap[Pair(newRow, column)] = cellId
+        }
+        
+        cellIdMap.clear()
+        cellIdMap.putAll(newCellIdMap)
+        
+        println("ADB_DEBUG: cellIdMap updated after row move")
+    }
 
     init {
         title = "ADB Randomizer Settings"
@@ -319,7 +346,9 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
             rowHeight = JBUI.scale(35)
             dragEnabled = true
             dropMode = DropMode.INSERT_ROWS
-            transferHandler = PresetTransferHandler()
+            transferHandler = PresetTransferHandler { fromIndex, toIndex ->
+                onRowMoved(fromIndex, toIndex)
+            }
             
             // Убираем синее выделение строк
             selectionModel.clearSelection()
@@ -575,16 +604,32 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
         }
     }
     
+    private fun getCellId(row: Int, column: Int): CellIdentity {
+        val key = Pair(row, column)
+        return cellIdMap.getOrPut(key) { CellIdentity.generate() }
+    }
+    
+    private fun findCellByIdInternal(cellId: CellIdentity): Pair<Int, Int>? {
+        return cellIdMap.entries.find { it.value == cellId }?.key
+    }
+    
+    private fun findCellById(cellId: CellIdentity): Pair<Int, Int>? {
+        val coords = findCellByIdInternal(cellId)
+        println("ADB_DEBUG: Finding cell by ID ${cellId.id.substring(0, 8)}... -> $coords")
+        return coords
+    }
+    
     private fun addToHistory(row: Int, column: Int, oldValue: String, newValue: String) {
         if (oldValue != newValue) {
-            historyStack.add(HistoryEntry(row, column, oldValue, newValue))
+            val cellId = getCellId(row, column)
+            historyStack.add(HistoryEntry(cellId, oldValue, newValue))
             
             // Ограничиваем размер истории
             if (historyStack.size > maxHistorySize) {
                 historyStack.removeAt(0)
             }
             
-            println("ADB_DEBUG: Добавлена запись в историю: ($row, $column) '$oldValue' -> '$newValue'")
+            println("ADB_DEBUG: Добавлена запись в историю: ($row, $column) [${cellId.id.substring(0, 8)}...] '$oldValue' -> '$newValue'")
         }
     }
     
@@ -594,8 +639,15 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
         if (historyStack.isNotEmpty()) {
             val lastEntry = historyStack.removeAt(historyStack.size - 1)
             
-            tableModel.setValueAt(lastEntry.oldValue, lastEntry.row, lastEntry.column)
-            println("ADB_DEBUG: Отмена операции: восстановлено '${lastEntry.oldValue}' в ячейку (${lastEntry.row}, ${lastEntry.column})")
+            // Находим ячейку по ID
+            val coords = findCellById(lastEntry.cellId)
+            if (coords != null) {
+                val (row, column) = coords
+                tableModel.setValueAt(lastEntry.oldValue, row, column)
+                println("ADB_DEBUG: Отмена операции: восстановлено '${lastEntry.oldValue}' в ячейку ($row, $column) [${lastEntry.cellId.id.substring(0, 8)}...]")
+            } else {
+                println("ADB_DEBUG: ОШИБКА: Ячейка с ID ${lastEntry.cellId.id.substring(0, 8)}... не найдена!")
+            }
             
             // Обновляем валидацию
             validateFields()

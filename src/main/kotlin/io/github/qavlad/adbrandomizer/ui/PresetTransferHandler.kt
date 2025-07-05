@@ -9,7 +9,7 @@ import javax.swing.JTable
 import javax.swing.TransferHandler
 import javax.swing.table.DefaultTableModel
 
-class PresetTransferHandler : TransferHandler() {
+class PresetTransferHandler(private val onRowMoved: ((Int, Int) -> Unit)? = null) : TransferHandler() {
     override fun getSourceActions(c: JComponent?) = MOVE
 
     override fun createTransferable(c: JComponent?): Transferable? {
@@ -54,6 +54,10 @@ class PresetTransferHandler : TransferHandler() {
             if (fromIndex != -1 && fromIndex != toIndex && toIndex >= 0 && toIndex < model.rowCount) {
                 model.moveRow(fromIndex, fromIndex, toIndex)
                 table.setRowSelectionInterval(toIndex, toIndex)
+                
+                // Уведомляем о перемещении строки
+                onRowMoved?.invoke(fromIndex, toIndex)
+                
                 return true
             }
         } catch (e: Exception) {
