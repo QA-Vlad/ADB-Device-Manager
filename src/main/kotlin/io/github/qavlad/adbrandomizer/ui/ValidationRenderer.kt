@@ -127,43 +127,50 @@ class ValidationRenderer(
             getDpiIndicatorType(preset, activePresets)
         }
     }
-    
+
     private fun getSizeIndicatorType(preset: DevicePreset, activePresets: DeviceStateService.ActivePresetInfo): IndicatorType {
         return getPresetIndicatorType(
             presetValue = preset.size,
             preset = preset,
             resetPreset = activePresets.resetSizePreset,
+            resetValue = activePresets.resetSizeValue,
             activeValue = activePresets.activeSizePreset?.size,
             originalPreset = activePresets.originalSizePreset,
             originalValue = activePresets.originalSizePreset?.size
         )
     }
-    
+
     private fun getDpiIndicatorType(preset: DevicePreset, activePresets: DeviceStateService.ActivePresetInfo): IndicatorType {
         return getPresetIndicatorType(
             presetValue = preset.dpi,
             preset = preset,
             resetPreset = activePresets.resetDpiPreset,
+            resetValue = activePresets.resetDpiValue,
             activeValue = activePresets.activeDpiPreset?.dpi,
             originalPreset = activePresets.originalDpiPreset,
             originalValue = activePresets.originalDpiPreset?.dpi
         )
     }
-    
+
     private fun getPresetIndicatorType(
         presetValue: String,
         preset: DevicePreset,
         resetPreset: DevicePreset?,
+        resetValue: String?, // <-- Новое поле в сигнатуре
         activeValue: String?,
         originalPreset: DevicePreset?,
         originalValue: String?
     ): IndicatorType {
         if (presetValue.isBlank()) return IndicatorType.NONE
-        
-        if (resetPreset?.label == preset.label) {
+
+        // 1. Сначала проверяем состояние "сброшено"
+        // Если есть сброшенное значение и оно совпадает с текущим значением в ячейке,
+        // а также label пресета совпадает с тем, который был сброшен, то рисуем серую рамку.
+        if (resetValue != null && presetValue == resetValue && resetPreset?.label == preset.label) {
             return IndicatorType.GRAY
         }
-        
+
+        // 2. Если не сброшено, продолжаем с логикой для активных/измененных пресетов
         return getParameterIndicatorType(
             preset = preset,
             presetValue = presetValue,

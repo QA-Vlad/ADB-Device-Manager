@@ -10,14 +10,16 @@ object DeviceStateService {
         val height: Int?,
         val dpi: Int?
     )
-    
+
     data class ActivePresetInfo(
         val activeSizePreset: DevicePreset?,
         val activeDpiPreset: DevicePreset?,
         val originalSizePreset: DevicePreset?,
         val originalDpiPreset: DevicePreset?,
         val resetSizePreset: DevicePreset?,
-        val resetDpiPreset: DevicePreset?
+        val resetDpiPreset: DevicePreset?,
+        val resetSizeValue: String?,
+        val resetDpiValue: String?
     )
     
     private val deviceStates = mutableMapOf<String, DeviceDisplayState>()
@@ -25,47 +27,38 @@ object DeviceStateService {
     private var lastAppliedDpiPreset: DevicePreset? = null
     private var lastResetSizePreset: DevicePreset? = null
     private var lastResetDpiPreset: DevicePreset? = null
+    private var lastResetSizeValue: String? = null
+    private var lastResetDpiValue: String? = null
     
     fun updateDeviceState(deviceId: String, width: Int?, height: Int?, dpi: Int?) {
         deviceStates[deviceId] = DeviceDisplayState(width, height, dpi)
     }
-    
+
     fun setLastAppliedPresets(sizePreset: DevicePreset?, dpiPreset: DevicePreset?) {
-        // Обновляем только те пресеты, которые действительно применялись
         if (sizePreset != null) {
             lastAppliedSizePreset = sizePreset.copy()
-            // Очищаем сброшенный пресет, так как применен новый
             lastResetSizePreset = null
+            lastResetSizeValue = null // Сбрасываем значение
         }
         if (dpiPreset != null) {
             lastAppliedDpiPreset = dpiPreset.copy()
-            // Очищаем сброшенный пресет, так как применен новый
             lastResetDpiPreset = null
+            lastResetDpiValue = null // Сбрасываем значение
         }
-        // НЕ сбрасываем существующие значения, если параметр не передан
     }
-    
+
     fun handleReset(resetSize: Boolean, resetDpi: Boolean) {
-        println("ADB_DEBUG: handleReset вызван: resetSize=$resetSize, resetDpi=$resetDpi")
-        println("ADB_DEBUG: До сброса - lastAppliedSizePreset=${lastAppliedSizePreset?.let { "${it.label}(${it.size})" }}")
-        println("ADB_DEBUG: До сброса - lastAppliedDpiPreset=${lastAppliedDpiPreset?.let { "${it.label}(${it.dpi})" }}")
-        
-        // Сохраняем информацию о том, что было сброшено
         if (resetSize && lastAppliedSizePreset != null) {
             lastResetSizePreset = lastAppliedSizePreset?.copy()
-            println("ADB_DEBUG: Сохранили lastResetSizePreset=${lastResetSizePreset?.let { "${it.label}(${it.size})" }}")
+            lastResetSizeValue = lastAppliedSizePreset?.size
             lastAppliedSizePreset = null
         }
         if (resetDpi && lastAppliedDpiPreset != null) {
             lastResetDpiPreset = lastAppliedDpiPreset?.copy()
-            println("ADB_DEBUG: Сохранили lastResetDpiPreset=${lastResetDpiPreset?.let { "${it.label}(${it.dpi})" }}")
+            lastResetDpiValue = lastAppliedDpiPreset?.dpi
             lastAppliedDpiPreset = null
         }
-        
-        println("ADB_DEBUG: После сброса - lastAppliedSizePreset=$lastAppliedSizePreset")
-        println("ADB_DEBUG: После сброса - lastAppliedDpiPreset=$lastAppliedDpiPreset")
     }
-    
     fun getDeviceState(deviceId: String): DeviceDisplayState? {
         return deviceStates[deviceId]
     }
@@ -73,9 +66,9 @@ object DeviceStateService {
     fun getCurrentActivePresets(): ActivePresetInfo {
         val allPresets = SettingsService.getPresets()
         val connectedDevices = getConnectedDeviceStates()
-        
+
         if (connectedDevices.isEmpty()) {
-            return ActivePresetInfo(null, null, lastAppliedSizePreset, lastAppliedDpiPreset, lastResetSizePreset, lastResetDpiPreset)
+            return ActivePresetInfo(null, null, lastAppliedSizePreset, lastAppliedDpiPreset, lastResetSizePreset, lastResetDpiPreset, lastResetSizeValue, lastResetDpiValue)
         }
         
         // Берем состояние первого устройства как референс
@@ -83,8 +76,8 @@ object DeviceStateService {
         
         val activeSizePreset = findMatchingPresetBySize(allPresets, referenceState)
         val activeDpiPreset = findMatchingPresetByDpi(allPresets, referenceState)
-        
-        return ActivePresetInfo(activeSizePreset, activeDpiPreset, lastAppliedSizePreset, lastAppliedDpiPreset, lastResetSizePreset, lastResetDpiPreset)
+
+        return ActivePresetInfo(activeSizePreset, activeDpiPreset, lastAppliedSizePreset, lastAppliedDpiPreset, lastResetSizePreset, lastResetDpiPreset, lastResetSizeValue, lastResetDpiValue)
     }
     
     private fun getConnectedDeviceStates(): Map<String, DeviceDisplayState> {
