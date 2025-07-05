@@ -74,7 +74,7 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
     
     // Обработчик перемещения строк для обновления cellIdMap
     private fun onRowMoved(fromIndex: Int, toIndex: Int) {
-        println("ADB_DEBUG: Row moved from $fromIndex to $toIndex - updating cellIdMap")
+        println("ADB_DEBUG: Row moved from $fromIndex to $toIndex - updating cellIdMap and selection")
         
         // Создаем новую карту с обновленными координатами
         val newCellIdMap = mutableMapOf<Pair<Int, Int>, CellIdentity>()
@@ -93,6 +93,29 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
         
         cellIdMap.clear()
         cellIdMap.putAll(newCellIdMap)
+        
+        // Обновляем выделение ячейки если она была на перемещенной строке
+        if (hoverState.selectedTableRow == fromIndex) {
+            hoverState = hoverState.withTableSelection(toIndex, hoverState.selectedTableColumn)
+            println("ADB_DEBUG: Selection moved from ($fromIndex, ${hoverState.selectedTableColumn}) to ($toIndex, ${hoverState.selectedTableColumn})")
+        } else if (hoverState.selectedTableRow != -1) {
+            // Обновляем выделение для других строк которые сдвинулись
+            val selectedRow = hoverState.selectedTableRow
+            val newSelectedRow = when {
+                fromIndex < toIndex && selectedRow in (fromIndex + 1)..toIndex -> selectedRow - 1
+                fromIndex > toIndex && selectedRow in toIndex until fromIndex -> selectedRow + 1
+                else -> selectedRow
+            }
+            if (newSelectedRow != selectedRow) {
+                hoverState = hoverState.withTableSelection(newSelectedRow, hoverState.selectedTableColumn)
+                println("ADB_DEBUG: Selection adjusted from ($selectedRow, ${hoverState.selectedTableColumn}) to ($newSelectedRow, ${hoverState.selectedTableColumn})")
+            }
+        }
+        
+        // Принудительно перерисовываем таблицу чтобы обновить визуальное выделение
+        SwingUtilities.invokeLater {
+            table.repaint()
+        }
         
         println("ADB_DEBUG: cellIdMap updated after row move")
     }
@@ -173,8 +196,15 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
                     }
                     e.keyCode == KeyEvent.VK_Z && e.isControlDown -> {
                         println("ADB_DEBUG: Ctrl+Z pressed, история содержит ${historyStack.size} записей")
-                        undoLastPaste()
-                        return@KeyEventDispatcher true // Событие обработано
+                        
+                        // Проверяем, находится ли таблица в режиме редактирования
+                        if (table.isEditing) {
+                            println("ADB_DEBUG: Table is in editing mode - ignoring global undo")
+                            return@KeyEventDispatcher false // Передаем событие дальше (к редактору ячейки)
+                        } else {
+                            undoLastPaste()
+                            return@KeyEventDispatcher true // Событие обработано
+                        }
                     }
                 }
             }
@@ -252,22 +282,42 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
                     val isHovered = hoverState.isTableCellHovered(row, column)
                     val isSelectedCell = hoverState.isTableCellSelected(row, column)
                     
-                    // Устанавливаем фон только для нашего hover эффекта
-                    if (isSelectedCell) {
-                        // Выделенная ячейка имеет приоритет над hover, но чуть темнее
-                        component.background = JBColor(java.awt.Color(230, 230, 250), java.awt.Color(80, 80, 100))
-                        component.isOpaque = true
-                    } else if (isHovered) {
-                        component.background = JBColor(java.awt.Color(240, 240, 240), java.awt.Color(70, 70, 70))
-                        component.isOpaque = true
-                    } else {
-                        component.background = UIManager.getColor("Table.background") ?: java.awt.Color.WHITE
-                        component.isOpaque = true
+                    // Сначала проверяем валидацию для колонок 3 и 4 (Size и DPI)
+                    var isInvalidCell = false
+                    if (column in 3..4) {
+                        val value = tableModel.getValueAt(row, column)
+                        val text = value as? String ?: ""
+                        val isValid = if (text.isBlank()) true else when (column) {
+                            3 -> ValidationUtils.isValidSizeFormat(text) // Size в колонке 3
+                            4 -> ValidationUtils.isValidDpi(text)         // DPI в колонке 4
+                            else -> true
+                        }
+                        if (!isValid) {
+                            isInvalidCell = true
+                            component.background = JBColor.PINK
+                            component.foreground = JBColor.BLACK
+                            component.isOpaque = true
+                        }
+                    }
+                    
+                    // Применяем hover/selection эффекты только если ячейка валидна
+                    if (!isInvalidCell) {
+                        if (isSelectedCell) {
+                            // Выделенная ячейка имеет приоритет над hover, но чуть темнее
+                            component.background = JBColor(java.awt.Color(230, 230, 250), java.awt.Color(80, 80, 100))
+                            component.isOpaque = true
+                        } else if (isHovered) {
+                            component.background = JBColor(java.awt.Color(240, 240, 240), java.awt.Color(70, 70, 70))
+                            component.isOpaque = true
+                        } else {
+                            component.background = UIManager.getColor("Table.background") ?: java.awt.Color.WHITE
+                            component.isOpaque = true
+                        }
                     }
                     
                     // Логируем только интересные состояния
-                    if (isHovered || isSelectedCell) {
-                        println("ADB_DEBUG: prepareRenderer row=$row, column=$column, isHovered=$isHovered, isSelected=$isSelectedCell")
+                    if (isHovered || isSelectedCell || isInvalidCell) {
+                        println("ADB_DEBUG: prepareRenderer row=$row, column=$column, isHovered=$isHovered, isSelected=$isSelectedCell, isInvalid=$isInvalidCell")
                     }
                 }
                 
@@ -494,8 +544,13 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
                                 e.consume()
                             }
                             e.keyCode == KeyEvent.VK_Z && e.isControlDown -> {
-                                undoLastPaste()
-                                e.consume()
+                                // Проверяем, находится ли таблица в режиме редактирования
+                                if (!isEditing) {
+                                    undoLastPaste()
+                                    e.consume()
+                                } else {
+                                    println("ADB_DEBUG: Table is editing - local KeyListener ignoring undo")
+                                }
                             }
                             // Отслеживаем начало редактирования по обычным клавишам
                             !e.isControlDown && !e.isAltDown -> {
@@ -856,7 +911,7 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
             var cellBackground = UIManager.getColor("Table.background") ?: java.awt.Color.WHITE
             var cellForeground = UIManager.getColor("Table.foreground") ?: java.awt.Color.BLACK
             
-            // Применяем hover эффект (только для одной ячейки)
+            // Применяем hover эффект
             if (isHovered) {
                 cellBackground = JBColor(java.awt.Color(240, 240, 240), java.awt.Color(70, 70, 70))
             }
@@ -925,13 +980,8 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
                     }
                 }
                 3, 4 -> {
-                    // Для колонок Size и DPI - с валидацией и индикаторами активности
+                    // Для колонок Size и DPI - с индикаторами активности
                     val text = value as? String ?: ""
-                    val isValid = if (text.isBlank()) true else when (column) {
-                        3 -> ValidationUtils.isValidSizeFormat(text) // Size теперь в колонке 3
-                        4 -> ValidationUtils.isValidDpi(text)         // DPI теперь в колонке 4
-                        else -> true
-                    }
 
                     val preset = getPresetAtRow(row)
                     val activePresets = DeviceStateService.getCurrentActivePresets()
@@ -939,40 +989,33 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
                     val isSize = column == 3
                     val indicatorType = getIndicatorType(preset, activePresets, isSize = isSize)
 
-                    if (!isValid) {
-                        background = JBColor.PINK
-                        foreground = JBColor.BLACK
-                        border = null
-                        this.text = text
-                    } else {
-                        // Добавляем обводку для активных параметров
-                        border = when (indicatorType) {
-                            IndicatorType.GRAY -> GrayParameterBorder()
-                            IndicatorType.YELLOW -> YellowParameterBorder()
-                            IndicatorType.GREEN -> ActiveParameterBorder()
-                            else -> null
-                        }
-                        
-                        // Добавляем индикатор к тексту для активных параметров
-                        if (indicatorType != IndicatorType.NONE && text.isNotBlank()) {
-                            if (indicatorType == IndicatorType.GRAY) {
-                                // Для серого индикатора - просто текст без символов
-                                println("ADB_DEBUG: Рендерим серую рамку в колонке ${if (isSize) "SIZE" else "DPI"} для пресета с текстом '$text'")
-                                this.text = text
-                                foreground = cellForeground
-                            } else {
-                                // Для остальных - галочка
-                                val indicator = "✓ "
-                                this.text = indicator + text
-                                foreground = when (indicatorType) {
-                                    IndicatorType.YELLOW -> JBColor.ORANGE
-                                    else -> JBColor.GREEN.darker()
-                                }
-                            }
-                        } else {
+                    // Добавляем обводку для активных параметров
+                    border = when (indicatorType) {
+                        IndicatorType.GRAY -> GrayParameterBorder()
+                        IndicatorType.YELLOW -> YellowParameterBorder()
+                        IndicatorType.GREEN -> ActiveParameterBorder()
+                        else -> null
+                    }
+                    
+                    // Добавляем индикатор к тексту для активных параметров
+                    if (indicatorType != IndicatorType.NONE && text.isNotBlank()) {
+                        if (indicatorType == IndicatorType.GRAY) {
+                            // Для серого индикатора - просто текст без символов
+                            println("ADB_DEBUG: Рендерим серую рамку в колонке ${if (isSize) "SIZE" else "DPI"} для пресета с текстом '$text'")
                             this.text = text
                             foreground = cellForeground
+                        } else {
+                            // Для остальных - галочка
+                            val indicator = "✓ "
+                            this.text = indicator + text
+                            foreground = when (indicatorType) {
+                                IndicatorType.YELLOW -> JBColor.ORANGE
+                                else -> JBColor.GREEN.darker()
+                            }
                         }
+                    } else {
+                        this.text = text
+                        foreground = cellForeground
                     }
                 }
             }
