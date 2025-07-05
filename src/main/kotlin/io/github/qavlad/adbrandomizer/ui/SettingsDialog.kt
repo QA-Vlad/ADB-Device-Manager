@@ -24,8 +24,17 @@ import java.awt.Graphics
 import java.awt.Graphics2D
 import java.awt.Insets
 import java.awt.RenderingHints
+import java.awt.Toolkit
+import java.awt.datatransfer.DataFlavor
+import java.awt.datatransfer.StringSelection
+import java.awt.event.KeyEvent
+import java.awt.event.KeyListener
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
+import java.awt.KeyboardFocusManager
+import java.awt.KeyEventDispatcher
+import javax.swing.event.CellEditorListener
+import javax.swing.event.ChangeEvent
 import java.util.*
 import javax.swing.*
 import javax.swing.border.Border
@@ -38,6 +47,26 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
     private lateinit var table: JBTable
     private lateinit var tableModel: DevicePresetTableModel
     private var updateListener: (() -> Unit)? = null
+    
+    // Универсальное состояние hover эффектов
+    private var hoverState = HoverState.noHover()
+    
+    // Для отмены операций - история изменений
+    private data class HistoryEntry(
+        val row: Int,
+        val column: Int,
+        val oldValue: String,
+        val newValue: String
+    )
+    
+    private val historyStack = mutableListOf<HistoryEntry>()
+    private val maxHistorySize = 50
+    
+    // Глобальный обработчик клавиатуры
+    private var keyEventDispatcher: KeyEventDispatcher? = null
+    
+    // Для отслеживания изменений при редактировании
+    private var editingCellOldValue: String? = null
 
     init {
         title = "ADB Randomizer Settings"
@@ -48,6 +77,9 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
         SwingUtilities.invokeLater {
             addHoverEffectToDialogButtons()
         }
+        
+        // Добавляем глобальный обработчик клавиатуры для отмены операций
+        addGlobalKeyListener()
         
         // Обновляем состояние устройств при открытии диалога только если нет активных пресетов
         if (project != null) {
@@ -87,6 +119,43 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
 
         processButtons(contentPane)
     }
+    
+    private fun addGlobalKeyListener() {
+        println("ADB_DEBUG: Adding global key listener using KeyboardFocusManager")
+        
+        // Создаем глобальный обработчик клавиатуры
+        keyEventDispatcher = KeyEventDispatcher { e ->
+            if (e.id == KeyEvent.KEY_PRESSED) {
+                println("ADB_DEBUG: Global key pressed: ${e.keyCode}, isControlDown=${e.isControlDown}")
+                when {
+                    e.keyCode == KeyEvent.VK_C && e.isControlDown -> {
+                        println("ADB_DEBUG: Ctrl+C pressed, selectedRow=${hoverState.selectedTableRow}, selectedColumn=${hoverState.selectedTableColumn}")
+                        if (hoverState.selectedTableRow >= 0 && hoverState.selectedTableColumn >= 0) {
+                            copyCellToClipboard()
+                            return@KeyEventDispatcher true // Событие обработано
+                        }
+                    }
+                    e.keyCode == KeyEvent.VK_V && e.isControlDown -> {
+                        println("ADB_DEBUG: Ctrl+V pressed, selectedRow=${hoverState.selectedTableRow}, selectedColumn=${hoverState.selectedTableColumn}")
+                        if (hoverState.selectedTableRow >= 0 && hoverState.selectedTableColumn >= 0) {
+                            pasteCellFromClipboard()
+                            return@KeyEventDispatcher true // Событие обработано
+                        }
+                    }
+                    e.keyCode == KeyEvent.VK_Z && e.isControlDown -> {
+                        println("ADB_DEBUG: Ctrl+Z pressed, история содержит ${historyStack.size} записей")
+                        undoLastPaste()
+                        return@KeyEventDispatcher true // Событие обработано
+                    }
+                }
+            }
+            false // Событие не обработано, передаем дальше
+        }
+        
+        // Добавляем в глобальный менеджер фокуса
+        KeyboardFocusManager.getCurrentKeyboardFocusManager().addKeyEventDispatcher(keyEventDispatcher)
+        println("ADB_DEBUG: KeyEventDispatcher added to KeyboardFocusManager")
+    }
 
     override fun createCenterPanel(): JComponent {
         val columnNames = Vector(listOf(" ", "№", "Label", "Size (e.g., 1080x1920)", "DPI (e.g., 480)", "  "))
@@ -104,15 +173,136 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
         }
 
         tableModel = DevicePresetTableModel(dataVector, columnNames)
-        tableModel.addTableModelListener { 
+        tableModel.addTableModelListener { event ->
             validateFields()
+            
+            // Если это изменение значения в ячейке и есть выделенная ячейка
+            if (event.type == javax.swing.event.TableModelEvent.UPDATE && 
+                event.firstRow >= 0 && event.column >= 0 &&
+                hoverState.selectedTableRow >= 0 && hoverState.selectedTableColumn >= 0) {
+                
+                // Добавляем в историю только если была реальная вставка/изменение
+                val currentValue = tableModel.getValueAt(event.firstRow, event.column) as? String ?: ""
+                println("ADB_DEBUG: Table model updated - row=${event.firstRow}, column=${event.column}, value='$currentValue'")
+            }
+            
             // Обновляем индикаторы при изменении данных
             SwingUtilities.invokeLater {
                 table.repaint()
             }
         }
 
-        table = JBTable(tableModel)
+        table = object : JBTable(tableModel) {
+            override fun prepareRenderer(renderer: TableCellRenderer, row: Int, column: Int): Component {
+                val component = super.prepareRenderer(renderer, row, column)
+                
+                // Принудительно убираем любые встроенные hover эффекты
+                if (component is JComponent) {
+                    val isHovered = hoverState.isTableCellHovered(row, column)
+                    val isSelectedCell = hoverState.isTableCellSelected(row, column)
+                    
+                    // Устанавливаем фон только для нашего hover эффекта
+                    if (isSelectedCell) {
+                        // Выделенная ячейка имеет приоритет над hover, но чуть темнее
+                        component.background = JBColor(java.awt.Color(230, 230, 250), java.awt.Color(80, 80, 100))
+                        component.isOpaque = true
+                    } else if (isHovered) {
+                        component.background = JBColor(java.awt.Color(240, 240, 240), java.awt.Color(70, 70, 70))
+                        component.isOpaque = true
+                    } else {
+                        component.background = UIManager.getColor("Table.background") ?: java.awt.Color.WHITE
+                        component.isOpaque = true
+                    }
+                    
+                    // Логируем только интересные состояния
+                    if (isHovered || isSelectedCell) {
+                        println("ADB_DEBUG: prepareRenderer row=$row, column=$column, isHovered=$isHovered, isSelected=$isSelectedCell")
+                    }
+                }
+                
+                return component
+            }
+            
+            override fun editCellAt(row: Int, column: Int): Boolean {
+                println("ADB_DEBUG: EDIT CELL AT called - row=$row, column=$column")
+                
+                // Сохраняем старое значение перед началом редактирования
+                if (row >= 0 && column >= 0) {
+                    editingCellOldValue = tableModel.getValueAt(row, column) as? String ?: ""
+                    println("ADB_DEBUG: EDITING WILL START - row=$row, column=$column, oldValue='$editingCellOldValue'")
+                }
+                
+                val result = super.editCellAt(row, column)
+                
+                // Добавляем слушатель к редактору
+                if (result && cellEditor != null) {
+                    cellEditor.addCellEditorListener(object : CellEditorListener {
+                        override fun editingStopped(e: ChangeEvent?) {
+                            println("ADB_DEBUG: EDITING STOPPED via CellEditorListener")
+                            
+                            SwingUtilities.invokeLater {
+                                if (editingCellOldValue != null) {
+                                    val newValue = tableModel.getValueAt(row, column) as? String ?: ""
+                                    
+                                    if (editingCellOldValue != newValue) {
+                                        addToHistory(row, column, editingCellOldValue!!, newValue)
+                                        println("ADB_DEBUG: EDITING STOPPED - added to history: '$editingCellOldValue' -> '$newValue' (история: ${historyStack.size})")
+                                    } else {
+                                        println("ADB_DEBUG: EDITING STOPPED - no changes: '$editingCellOldValue'")
+                                    }
+                                    
+                                    editingCellOldValue = null
+                                }
+                            }
+                            
+                            // Убираем слушатель после использования
+                            cellEditor?.removeCellEditorListener(this)
+                        }
+                        
+                        override fun editingCanceled(e: ChangeEvent?) {
+                            println("ADB_DEBUG: EDITING CANCELED")
+                            editingCellOldValue = null
+                            cellEditor?.removeCellEditorListener(this)
+                        }
+                    })
+                }
+                
+                return result
+            }
+        }
+        
+        // Добавляем отслеживание изменений через CellEditor
+        table.addPropertyChangeListener("tableCellEditor") { event ->
+            if (event.oldValue == null && event.newValue != null) {
+                // Редактирование началось - сохраняем старое значение
+                val editingRow = table.editingRow
+                val editingColumn = table.editingColumn
+                
+                if (editingRow >= 0 && editingColumn >= 0) {
+                    editingCellOldValue = tableModel.getValueAt(editingRow, editingColumn) as? String ?: ""
+                    println("ADB_DEBUG: EDITING STARTED - row=$editingRow, column=$editingColumn, oldValue='$editingCellOldValue'")
+                }
+            } else if (event.oldValue != null && event.newValue == null) {
+                // Редактирование завершено
+                val editingRow = table.editingRow
+                val editingColumn = table.editingColumn
+                
+                if (editingRow >= 0 && editingColumn >= 0 && editingCellOldValue != null) {
+                    SwingUtilities.invokeLater {
+                        val newValue = tableModel.getValueAt(editingRow, editingColumn) as? String ?: ""
+                        
+                        if (editingCellOldValue != newValue) {
+                            addToHistory(editingRow, editingColumn, editingCellOldValue!!, newValue)
+                            println("ADB_DEBUG: EDITING COMPLETED - added to history: '$editingCellOldValue' -> '$newValue' (история: ${historyStack.size})")
+                        } else {
+                            println("ADB_DEBUG: EDITING COMPLETED - no changes: '$editingCellOldValue'")
+                        }
+                        
+                        editingCellOldValue = null
+                    }
+                }
+            }
+        }
 
         setupTable()
         validateFields()
@@ -150,9 +340,139 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
             toolTipManager.dismissDelay = 5000
             toolTipManager.reshowDelay = 50
 
-            // Отключаем hover эффекты, которые могут влиять на цвет
+            // Отключаем все встроенные hover эффекты
             putClientProperty("JTable.stripedBackground", false)
             putClientProperty("Table.isFileList", false)
+            putClientProperty("Table.paintOutsideAlternateRows", false)
+            putClientProperty("JTable.alternateRowColor", table.background)
+            putClientProperty("Table.highlightSelection", false)
+            putClientProperty("Table.focusSelectedCell", false)
+            putClientProperty("Table.rowHeight", JBUI.scale(35))
+            putClientProperty("Table.hoverBackground", null)
+            putClientProperty("Table.selectionBackground", background)
+            
+            // Отключаем стандартное выделение строк
+            setShowHorizontalLines(false)
+            setShowVerticalLines(false)
+            intercellSpacing = Dimension(0, 0)
+            
+            // Добавляем обработчики для UX улучшений
+            addMouseMotionListener(object : MouseAdapter() {
+                override fun mouseMoved(e: MouseEvent) {
+                    val row = rowAtPoint(e.point)
+                    val column = columnAtPoint(e.point)
+                    
+                    if (!hoverState.isTableCellHovered(row, column)) {
+                        println("ADB_DEBUG: Updating hover state to row=$row, column=$column")
+                        
+                        val oldHoverState = hoverState
+                        hoverState = hoverState.withTableHover(row, column)
+                        
+                        // Перерисовываем только затронутые ячейки
+                        if (oldHoverState.hoveredTableRow >= 0 && oldHoverState.hoveredTableColumn >= 0) {
+                            // Перерисовываем старую ячейку
+                            val oldRect = getCellRect(oldHoverState.hoveredTableRow, oldHoverState.hoveredTableColumn, false)
+                            repaint(oldRect)
+                        }
+                        
+                        if (row >= 0 && column >= 0) {
+                            // Перерисовываем новую ячейку
+                            val newRect = getCellRect(row, column, false)
+                            repaint(newRect)
+                        }
+                    }
+                }
+            })
+            
+            addMouseListener(object : MouseAdapter() {
+                override fun mouseClicked(e: MouseEvent) {
+                    val row = rowAtPoint(e.point)
+                    val column = columnAtPoint(e.point)
+                    
+                    // Обработка кликов по ячейкам
+                    if (row >= 0 && column >= 0 && column in 2..4) { // Только для Label, Size, DPI
+                        val oldSelectedRow = hoverState.selectedTableRow
+                        val oldSelectedColumn = hoverState.selectedTableColumn
+                        
+                        hoverState = hoverState.withTableSelection(row, column)
+                        
+                        // Перерисовываем старую выделенную ячейку
+                        if (oldSelectedRow >= 0 && oldSelectedColumn >= 0) {
+                            val oldRect = getCellRect(oldSelectedRow, oldSelectedColumn, false)
+                            repaint(oldRect)
+                        }
+                        
+                        // Перерисовываем новую выделенную ячейку
+                        val newRect = getCellRect(row, column, false)
+                        repaint(newRect)
+                        
+                        requestFocus() // Чтобы могли обрабатывать клавиатуру
+                        println("ADB_DEBUG: Cell selected ($row, $column)")
+                    } else {
+                        val oldSelectedRow = hoverState.selectedTableRow
+                        val oldSelectedColumn = hoverState.selectedTableColumn
+                        
+                        hoverState = hoverState.clearTableSelection()
+                        
+                        // Перерисовываем старую выделенную ячейку
+                        if (oldSelectedRow >= 0 && oldSelectedColumn >= 0) {
+                            val oldRect = getCellRect(oldSelectedRow, oldSelectedColumn, false)
+                            repaint(oldRect)
+                        }
+                    }
+                }
+                
+                override fun mousePressed(e: MouseEvent) {
+                    if (e.isPopupTrigger) {
+                        showContextMenu(e)
+                    }
+                }
+                
+                override fun mouseReleased(e: MouseEvent) {
+                    if (e.isPopupTrigger) {
+                        showContextMenu(e)
+                    }
+                }
+                
+                override fun mouseExited(e: MouseEvent) {
+                    val oldHoverState = hoverState
+                    hoverState = hoverState.clearTableHover()
+                    
+                    // Перерисовываем только последнюю hover ячейку
+                    if (oldHoverState.hoveredTableRow >= 0 && oldHoverState.hoveredTableColumn >= 0) {
+                        val oldRect = getCellRect(oldHoverState.hoveredTableRow, oldHoverState.hoveredTableColumn, false)
+                        repaint(oldRect)
+                    }
+                }
+            })
+            
+            // Добавляем обработчик клавиатуры для Ctrl+C/Ctrl+V
+            addKeyListener(object : KeyListener {
+                override fun keyPressed(e: KeyEvent) {
+                    if (hoverState.selectedTableRow >= 0 && hoverState.selectedTableColumn >= 0) {
+                        when {
+                            e.keyCode == KeyEvent.VK_C && e.isControlDown -> {
+                                copyCellToClipboard()
+                                e.consume()
+                            }
+                            e.keyCode == KeyEvent.VK_V && e.isControlDown -> {
+                                pasteCellFromClipboard()
+                                e.consume()
+                            }
+                            e.keyCode == KeyEvent.VK_Z && e.isControlDown -> {
+                                undoLastPaste()
+                                e.consume()
+                            }
+                        }
+                    }
+                }
+                
+                override fun keyReleased(e: KeyEvent) {}
+                override fun keyTyped(e: KeyEvent) {}
+            })
+            
+            // Чтобы таблица могла получать фокус
+            isFocusable = true
 
             // Колонка 0: Drag handle
             columnModel.getColumn(0).apply {
@@ -192,21 +512,71 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
                 cellEditor = ButtonEditor(table)
             }
             setDefaultRenderer(Object::class.java, ValidationRenderer())
-            
-            // Добавляем контекстное меню
-            addMouseListener(object : MouseAdapter() {
-                override fun mousePressed(e: MouseEvent) {
-                    if (e.isPopupTrigger) {
-                        showContextMenu(e)
-                    }
-                }
+        }
+    }
+    
+    private fun copyCellToClipboard() {
+        if (hoverState.selectedTableRow >= 0 && hoverState.selectedTableColumn >= 0) {
+            val value = tableModel.getValueAt(hoverState.selectedTableRow, hoverState.selectedTableColumn) as? String ?: ""
+            val clipboard = Toolkit.getDefaultToolkit().systemClipboard
+            clipboard.setContents(StringSelection(value), null)
+            println("ADB_DEBUG: Скопировано в буфер: '$value'")
+        }
+    }
+    
+    private fun pasteCellFromClipboard() {
+        if (hoverState.selectedTableRow >= 0 && hoverState.selectedTableColumn >= 0) {
+            try {
+                val clipboard = Toolkit.getDefaultToolkit().systemClipboard
+                val data = clipboard.getContents(null)
                 
-                override fun mouseReleased(e: MouseEvent) {
-                    if (e.isPopupTrigger) {
-                        showContextMenu(e)
-                    }
+                if (data != null && data.isDataFlavorSupported(DataFlavor.stringFlavor)) {
+                    val oldValue = tableModel.getValueAt(hoverState.selectedTableRow, hoverState.selectedTableColumn) as? String ?: ""
+                    val newValue = (data.getTransferData(DataFlavor.stringFlavor) as String).trim()
+                    
+                    // Добавляем в историю
+                    addToHistory(hoverState.selectedTableRow, hoverState.selectedTableColumn, oldValue, newValue)
+                    
+                    tableModel.setValueAt(newValue, hoverState.selectedTableRow, hoverState.selectedTableColumn)
+                    println("ADB_DEBUG: Вставлено из буфера: '$newValue' (история: ${historyStack.size})")
+                    
+                    // Обновляем валидацию
+                    validateFields()
+                    repaint()
                 }
-            })
+            } catch (e: Exception) {
+                println("ADB_DEBUG: Ошибка при вставке: ${e.message}")
+            }
+        }
+    }
+    
+    private fun addToHistory(row: Int, column: Int, oldValue: String, newValue: String) {
+        if (oldValue != newValue) {
+            historyStack.add(HistoryEntry(row, column, oldValue, newValue))
+            
+            // Ограничиваем размер истории
+            if (historyStack.size > maxHistorySize) {
+                historyStack.removeAt(0)
+            }
+            
+            println("ADB_DEBUG: Добавлена запись в историю: ($row, $column) '$oldValue' -> '$newValue'")
+        }
+    }
+    
+    private fun undoLastPaste() {
+        println("ADB_DEBUG: undoLastPaste called - история содержит ${historyStack.size} записей")
+        
+        if (historyStack.isNotEmpty()) {
+            val lastEntry = historyStack.removeAt(historyStack.size - 1)
+            
+            tableModel.setValueAt(lastEntry.oldValue, lastEntry.row, lastEntry.column)
+            println("ADB_DEBUG: Отмена операции: восстановлено '${lastEntry.oldValue}' в ячейку (${lastEntry.row}, ${lastEntry.column})")
+            
+            // Обновляем валидацию
+            validateFields()
+            repaint()
+        } else {
+            println("ADB_DEBUG: История пуста - нет операций для отмены")
         }
     }
 
@@ -219,16 +589,20 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
                 val newRowIndex = tableModel.rowCount
                 tableModel.addRow(Vector(listOf("☰", newRowIndex + 1, "", "", "", "Delete")))
 
-                // Выделяем новую строку, прокручиваем к ней и начинаем редактирование колонки Label
+                // Выделяем новую ячейку, прокручиваем к ней и начинаем редактирование колонки Label
                 SwingUtilities.invokeLater {
-                    table.setRowSelectionInterval(newRowIndex, newRowIndex)
-
+                    // Устанавливаем выделение ячейки в нашей системе
+                    hoverState = hoverState.withTableSelection(newRowIndex, 2)
+                    
                     // Прокручиваем таблицу к новой строке
-                    table.scrollRectToVisible(table.getCellRect(newRowIndex, 2, true)) // Теперь Label в колонке 2
+                    table.scrollRectToVisible(table.getCellRect(newRowIndex, 2, true))
 
                     // Начинаем редактирование колонки Label (индекс 2)
                     table.editCellAt(newRowIndex, 2)
                     table.editorComponent?.requestFocus()
+                    
+                    println("ADB_DEBUG: New preset created - selected cell ($newRowIndex, 2)")
+                    table.repaint()
                 }
             }
         }
@@ -361,12 +735,25 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
         // Отписываемся от уведомлений
         updateListener?.let { SettingsDialogUpdateNotifier.removeListener(it) }
         
+        // Убираем глобальный обработчик клавиатуры
+        keyEventDispatcher?.let { 
+            KeyboardFocusManager.getCurrentKeyboardFocusManager().removeKeyEventDispatcher(it)
+            println("ADB_DEBUG: KeyEventDispatcher removed from KeyboardFocusManager")
+        }
+        
         super.doOKAction()
     }
     
     override fun doCancelAction() {
         // Отписываемся от уведомлений
         updateListener?.let { SettingsDialogUpdateNotifier.removeListener(it) }
+        
+        // Убираем глобальный обработчик клавиатуры
+        keyEventDispatcher?.let { 
+            KeyboardFocusManager.getCurrentKeyboardFocusManager().removeKeyEventDispatcher(it)
+            println("ADB_DEBUG: KeyEventDispatcher removed from KeyboardFocusManager")
+        }
+        
         super.doCancelAction()
     }
 
@@ -377,13 +764,39 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
     inner class ValidationRenderer : DefaultTableCellRenderer() {
         
         override fun getTableCellRendererComponent(table: JTable, value: Any?, isSelected: Boolean, hasFocus: Boolean, row: Int, column: Int): Component {
-            super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column)
-
-            isOpaque = true
+            // НЕ вызываем super - полностью переопределяем поведение
             
-            // Убираем любое выделение
-            background = table.background
-            foreground = table.foreground
+            // Определяем состояние ячейки
+            val isHovered = hoverState.isTableCellHovered(row, column)
+            val isSelectedCell = hoverState.isTableCellSelected(row, column)
+            
+            // Логируем только изменения hover состояния
+            if (isHovered || isSelectedCell) {
+                println("ADB_DEBUG: Rendering ACTIVE cell row=$row, column=$column, isHovered=$isHovered, isSelectedCell=$isSelectedCell")
+            }
+            
+            // Базовые цвета - стандартные цвета таблицы
+            var cellBackground = UIManager.getColor("Table.background") ?: java.awt.Color.WHITE
+            var cellForeground = UIManager.getColor("Table.foreground") ?: java.awt.Color.BLACK
+            
+            // Применяем hover эффект (только для одной ячейки)
+            if (isHovered) {
+                cellBackground = JBColor(java.awt.Color(240, 240, 240), java.awt.Color(70, 70, 70))
+            }
+            
+            // Применяем выделение (чуть ярче hover)
+            if (isSelectedCell) {
+                cellBackground = JBColor(java.awt.Color(230, 230, 250), java.awt.Color(80, 80, 100))
+                // Оставляем тот же цвет текста
+            }
+            
+            // Настраиваем компонент
+            isOpaque = true
+            background = cellBackground
+            foreground = cellForeground
+            text = value?.toString() ?: ""
+            horizontalAlignment = SwingConstants.LEFT
+            border = null
 
             when (column) {
                 0, 1, 5 -> {
@@ -429,9 +842,9 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
                             }
                         }
                     } else {
-                        this.text = text
-                        foreground = table.foreground
-                        border = null
+                    this.text = text
+                    foreground = cellForeground
+                    border = null
                     }
                 }
                 3, 4 -> {
@@ -469,7 +882,7 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
                                 // Для серого индикатора - просто текст без символов
                                 println("ADB_DEBUG: Рендерим серую рамку в колонке ${if (isSize) "SIZE" else "DPI"} для пресета с текстом '$text'")
                                 this.text = text
-                                foreground = table.foreground
+                                foreground = cellForeground
                             } else {
                                 // Для остальных - галочка
                                 val indicator = "✓ "
@@ -481,7 +894,7 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
                             }
                         } else {
                             this.text = text
-                            foreground = table.foreground
+                            foreground = cellForeground
                         }
                     }
                 }

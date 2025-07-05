@@ -2,25 +2,74 @@
 package io.github.qavlad.adbrandomizer.ui
 
 /**
- * Состояние hover эффектов для элементов списка устройств
+ * Универсальное состояние hover эффектов для всех UI компонентов
  */
 data class HoverState(
-    val hoveredIndex: Int = -1,
-    val hoveredButtonType: String? = null
+    // Для списка устройств
+    val hoveredDeviceIndex: Int = -1,
+    val hoveredButtonType: String? = null,
+    
+    // Для таблицы пресетов
+    val hoveredTableRow: Int = -1,
+    val hoveredTableColumn: Int = -1,
+    val selectedTableRow: Int = -1,
+    val selectedTableColumn: Int = -1
 ) {
 
     /**
-     * Проверяет, находится ли указанная кнопка в состоянии hover
+     * Проверяет, находится ли указанная кнопка устройства в состоянии hover
      */
-    fun isButtonHovered(index: Int, buttonType: String): Boolean {
-        return hoveredIndex == index && hoveredButtonType == buttonType
+    fun isDeviceButtonHovered(index: Int, buttonType: String): Boolean {
+        return hoveredDeviceIndex == index && hoveredButtonType == buttonType
     }
 
     /**
-     * Проверяет, есть ли активный hover на любой кнопке
+     * Проверяет, есть ли активный hover на любой кнопке устройства
      */
-    fun hasActiveHover(): Boolean {
-        return hoveredIndex != -1 && hoveredButtonType != null
+    fun hasActiveDeviceHover(): Boolean {
+        return hoveredDeviceIndex != -1 && hoveredButtonType != null
+    }
+    
+    /**
+     * Проверяет, находится ли указанная ячейка таблицы в состоянии hover
+     */
+    fun isTableCellHovered(row: Int, column: Int): Boolean {
+        return hoveredTableRow == row && hoveredTableColumn == column
+    }
+    
+    /**
+     * Проверяет, выделена ли указанная ячейка таблицы
+     */
+    fun isTableCellSelected(row: Int, column: Int): Boolean {
+        return selectedTableRow == row && selectedTableColumn == column
+    }
+    
+    /**
+     * Создает новое состояние с hover ячейки таблицы
+     */
+    fun withTableHover(row: Int, column: Int): HoverState {
+        return copy(hoveredTableRow = row, hoveredTableColumn = column)
+    }
+    
+    /**
+     * Создает новое состояние с выделенной ячейкой таблицы
+     */
+    fun withTableSelection(row: Int, column: Int): HoverState {
+        return copy(selectedTableRow = row, selectedTableColumn = column)
+    }
+    
+    /**
+     * Очищает hover таблицы
+     */
+    fun clearTableHover(): HoverState {
+        return copy(hoveredTableRow = -1, hoveredTableColumn = -1)
+    }
+    
+    /**
+     * Очищает выделение таблицы
+     */
+    fun clearTableSelection(): HoverState {
+        return copy(selectedTableRow = -1, selectedTableColumn = -1)
     }
 
     companion object {
@@ -33,10 +82,17 @@ data class HoverState(
         fun noHover(): HoverState = HoverState()
 
         /**
-         * Создает состояние с hover на указанной кнопке
+         * Создает состояние с hover на указанной кнопке устройства
          */
-        fun hovering(index: Int, buttonType: String): HoverState {
-            return HoverState(index, buttonType)
+        fun deviceHovering(index: Int, buttonType: String): HoverState {
+            return HoverState(hoveredDeviceIndex = index, hoveredButtonType = buttonType)
+        }
+        
+        /**
+         * Создает состояние с hover ячейки таблицы
+         */
+        fun tableHovering(row: Int, column: Int): HoverState {
+            return HoverState(hoveredTableRow = row, hoveredTableColumn = column)
         }
     }
 }

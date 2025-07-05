@@ -290,7 +290,7 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
         }
 
         val newHoverState = if (index != -1 && newButtonType != null) {
-            HoverState.hovering(index, newButtonType)
+            HoverState.deviceHovering(index, newButtonType)
         } else {
             HoverState.noHover()
         }
@@ -321,7 +321,7 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
     }
 
     private fun resetHoverState() {
-        if (currentHoverState.hasActiveHover()) {
+        if (currentHoverState.hasActiveDeviceHover()) {
             currentHoverState = HoverState.noHover()
             deviceList.cursor = Cursor.getDefaultCursor()
             deviceList.repaint()

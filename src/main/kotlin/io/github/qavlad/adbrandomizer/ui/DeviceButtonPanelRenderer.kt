@@ -107,7 +107,7 @@ class DeviceButtonPanelRenderer {
         buttonType: String,
         hoverState: HoverState
     ) {
-        val isHovered = hoverState.isButtonHovered(index, buttonType)
+        val isHovered = hoverState.isDeviceButtonHovered(index, buttonType)
 
         button.isContentAreaFilled = isHovered
         button.background = if (isHovered) {
