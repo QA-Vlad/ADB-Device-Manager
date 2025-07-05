@@ -18,6 +18,7 @@ data class CellIdentity(
         /**
          * Создает ID ячейки из существующей строки
          */
+        @Suppress("unused")
         fun fromString(id: String): CellIdentity = CellIdentity(id)
     }
     

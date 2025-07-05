@@ -5,6 +5,7 @@ package io.github.qavlad.adbrandomizer.ui
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.DialogWrapper
+import com.intellij.ui.Gray
 import com.intellij.ui.JBColor
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.table.JBTable
@@ -18,6 +19,7 @@ import io.github.qavlad.adbrandomizer.services.SettingsService
 import io.github.qavlad.adbrandomizer.utils.ButtonUtils
 import io.github.qavlad.adbrandomizer.utils.ValidationUtils
 import java.awt.BorderLayout
+import java.awt.Color
 import java.awt.Component
 import java.awt.Dimension
 import java.awt.Graphics
@@ -33,8 +35,6 @@ import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import java.awt.KeyboardFocusManager
 import java.awt.KeyEventDispatcher
-import javax.swing.event.CellEditorListener
-import javax.swing.event.ChangeEvent
 import java.util.*
 import javax.swing.*
 import javax.swing.border.Border
@@ -112,7 +112,7 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
             }
         }
         
-        // Принудительно перерисовываем таблицу чтобы обновить визуальное выделение
+        // Принудительно перерисовываем таблицу, чтобы обновить визуальное выделение
         SwingUtilities.invokeLater {
             table.repaint()
         }
@@ -274,46 +274,47 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
         }
 
         table = object : JBTable(tableModel) {
+            @Suppress("DEPRECATION")
             override fun prepareRenderer(renderer: TableCellRenderer, row: Int, column: Int): Component {
                 val component = super.prepareRenderer(renderer, row, column)
                 
                 // Принудительно убираем любые встроенные hover эффекты
                 if (component is JComponent) {
-                    val isHovered = hoverState.isTableCellHovered(row, column)
-                    val isSelectedCell = hoverState.isTableCellSelected(row, column)
-                    
-                    // Сначала проверяем валидацию для колонок 3 и 4 (Size и DPI)
-                    var isInvalidCell = false
-                    if (column in 3..4) {
-                        val value = tableModel.getValueAt(row, column)
-                        val text = value as? String ?: ""
-                        val isValid = if (text.isBlank()) true else when (column) {
-                            3 -> ValidationUtils.isValidSizeFormat(text) // Size в колонке 3
-                            4 -> ValidationUtils.isValidDpi(text)         // DPI в колонке 4
-                            else -> true
-                        }
-                        if (!isValid) {
-                            isInvalidCell = true
-                            component.background = JBColor.PINK
-                            component.foreground = JBColor.BLACK
-                            component.isOpaque = true
-                        }
-                    }
-                    
-                    // Применяем hover/selection эффекты только если ячейка валидна
-                    if (!isInvalidCell) {
-                        if (isSelectedCell) {
-                            // Выделенная ячейка имеет приоритет над hover, но чуть темнее
-                            component.background = JBColor(java.awt.Color(230, 230, 250), java.awt.Color(80, 80, 100))
-                            component.isOpaque = true
-                        } else if (isHovered) {
-                            component.background = JBColor(java.awt.Color(240, 240, 240), java.awt.Color(70, 70, 70))
-                            component.isOpaque = true
-                        } else {
-                            component.background = UIManager.getColor("Table.background") ?: java.awt.Color.WHITE
-                            component.isOpaque = true
-                        }
-                    }
+                val isHovered = hoverState.isTableCellHovered(row, column)
+                val isSelectedCell = hoverState.isTableCellSelected(row, column)
+                
+                // Сначала проверяем валидацию для колонок 3 и 4 (Size и DPI)
+                var isInvalidCell = false
+                if (column in 3..4) {
+                val value = tableModel.getValueAt(row, column)
+                val text = value as? String ?: ""
+                val isValid = if (text.isBlank()) true else when (column) {
+                3 -> ValidationUtils.isValidSizeFormat(text) // Size в колонке 3
+                4 -> ValidationUtils.isValidDpi(text)         // DPI в колонке 4
+                else -> true
+                }
+                if (!isValid) {
+                isInvalidCell = true
+                component.background = JBColor.PINK
+                component.foreground = JBColor.BLACK
+                component.isOpaque = true
+                }
+                }
+                
+                // Применяем hover/selection эффекты только если ячейка валидна
+                if (!isInvalidCell) {
+                if (isSelectedCell) {
+                // Выделенная ячейка имеет приоритет над hover, но чуть темнее
+                component.background = JBColor(Color(230, 230, 250), Color(80, 80, 100))
+                component.isOpaque = true
+                } else if (isHovered) {
+                component.background = JBColor(Gray._240, Gray._70)
+                component.isOpaque = true
+                } else {
+                component.background = UIManager.getColor("Table.background") ?: JBColor.WHITE
+                component.isOpaque = true
+                }
+                }
                     
                     // Логируем только интересные состояния
                     if (isHovered || isSelectedCell || isInvalidCell) {
@@ -893,6 +894,7 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
         NONE, GREEN, YELLOW, GRAY
     }
 
+    @Suppress("DEPRECATION")
     inner class ValidationRenderer : DefaultTableCellRenderer() {
         
         override fun getTableCellRendererComponent(table: JTable, value: Any?, isSelected: Boolean, hasFocus: Boolean, row: Int, column: Int): Component {
@@ -907,27 +909,20 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
                 println("ADB_DEBUG: Rendering ACTIVE cell row=$row, column=$column, isHovered=$isHovered, isSelectedCell=$isSelectedCell")
             }
             
-            // Базовые цвета - стандартные цвета таблицы
-            var cellBackground = UIManager.getColor("Table.background") ?: java.awt.Color.WHITE
-            var cellForeground = UIManager.getColor("Table.foreground") ?: java.awt.Color.BLACK
-            
-            // Применяем hover эффект
-            if (isHovered) {
-                cellBackground = JBColor(java.awt.Color(240, 240, 240), java.awt.Color(70, 70, 70))
+            // Определяем цвета ячейки на основе состояния
+            val cellBackground = when {
+                isSelectedCell -> JBColor(Color(230, 230, 250), Color(80, 80, 100))
+                isHovered -> JBColor(Gray._240, Gray._70)
+                else -> UIManager.getColor("Table.background") ?: JBColor.WHITE
             }
-            
-            // Применяем выделение (чуть ярче hover)
-            if (isSelectedCell) {
-                cellBackground = JBColor(java.awt.Color(230, 230, 250), java.awt.Color(80, 80, 100))
-                // Оставляем тот же цвет текста
-            }
+            val cellForeground = UIManager.getColor("Table.foreground") ?: JBColor.BLACK
             
             // Настраиваем компонент
             isOpaque = true
             background = cellBackground
             foreground = cellForeground
             text = value?.toString() ?: ""
-            horizontalAlignment = SwingConstants.LEFT
+            horizontalAlignment = LEFT
             border = null
 
             when (column) {
