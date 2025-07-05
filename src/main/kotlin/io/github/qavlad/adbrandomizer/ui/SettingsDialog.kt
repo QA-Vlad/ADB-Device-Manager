@@ -255,27 +255,33 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
     }
 
     private fun handleCellClick(row: Int, column: Int, clickCount: Int) {
-        if (row >= 0 && column >= 0 && column in 2..4) {
+        if (row >= 0 && column >= 0) {
             val oldSelectedRow = hoverState.selectedTableRow
             val oldSelectedColumn = hoverState.selectedTableColumn
 
-            hoverState = hoverState.withTableSelection(row, column)
+            // Всегда выделяем строку. Колонку выделяем, только если она редактируемая.
+            val newSelectedColumn = if (column in 2..4) column else -1
+            hoverState = hoverState.withTableSelection(row, newSelectedColumn)
 
+            // Перерисовываем старую выделенную ячейку, если она была
             if (oldSelectedRow >= 0 && oldSelectedColumn >= 0) {
                 val oldRect = table.getCellRect(oldSelectedRow, oldSelectedColumn, false)
                 table.repaint(oldRect)
             }
 
+            // Перерисовываем новую ячейку/строку
             val newRect = table.getCellRect(row, column, false)
             table.repaint(newRect)
 
             table.requestFocus()
 
-            if (clickCount == 2) {
+            // Двойной клик для редактирования работает только на разрешенных колонках
+            if (clickCount == 2 && column in 2..4) {
                 table.editCellAt(row, column)
                 table.editorComponent?.requestFocus()
             }
         } else {
+            // Эта часть для сброса выделения при клике мимо таблицы, она работает верно
             val oldSelectedRow = hoverState.selectedTableRow
             val oldSelectedColumn = hoverState.selectedTableColumn
 

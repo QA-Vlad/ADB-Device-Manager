@@ -87,6 +87,11 @@ class DevicePresetTableModel(
         updateRowNumbers()
     }
 
+    override fun insertRow(row: Int, rowData: Vector<*>?) {
+        super.insertRow(row, rowData)
+        updateRowNumbers()
+    }
+
     override fun removeRow(row: Int) {
         super.removeRow(row)
         updateRowNumbers()
