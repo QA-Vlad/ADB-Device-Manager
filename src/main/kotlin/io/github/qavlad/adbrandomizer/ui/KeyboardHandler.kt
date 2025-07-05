@@ -18,10 +18,10 @@ class KeyboardHandler(
     private val setEditingCellData: (String?, Int, Int) -> Unit
 ) {
     private var keyEventDispatcher: KeyEventDispatcher? = null
-    
+
     fun addGlobalKeyListener() {
         println("ADB_DEBUG: Adding global key listener using KeyboardFocusManager")
-        
+
         keyEventDispatcher = KeyEventDispatcher { e ->
             if (e.id == KeyEvent.KEY_PRESSED) {
                 println("ADB_DEBUG: Global key pressed: ${e.keyCode}, isControlDown=${e.isControlDown}")
@@ -42,7 +42,7 @@ class KeyboardHandler(
                     }
                     e.keyCode == KeyEvent.VK_Z && e.isControlDown -> {
                         println("ADB_DEBUG: Ctrl+Z pressed, история содержит ${historyManager.size()} записей")
-                        
+
                         if (table.isEditing) {
                             println("ADB_DEBUG: Table is in editing mode - ignoring global undo")
                             return@KeyEventDispatcher false
@@ -55,23 +55,23 @@ class KeyboardHandler(
             }
             false
         }
-        
+
         KeyboardFocusManager.getCurrentKeyboardFocusManager().addKeyEventDispatcher(keyEventDispatcher)
         println("ADB_DEBUG: KeyEventDispatcher added to KeyboardFocusManager")
     }
-    
+
     fun removeGlobalKeyListener() {
-        keyEventDispatcher?.let { 
+        keyEventDispatcher?.let {
             KeyboardFocusManager.getCurrentKeyboardFocusManager().removeKeyEventDispatcher(it)
             println("ADB_DEBUG: KeyEventDispatcher removed from KeyboardFocusManager")
         }
     }
-    
+
     fun createTableKeyListener(): KeyListener {
         return object : KeyListener {
             override fun keyPressed(e: KeyEvent) {
                 println("ADB_DEBUG: Key pressed: ${e.keyCode}, isControlDown=${e.isControlDown}, selectedRow=${hoverState().selectedTableRow}, selectedColumn=${hoverState().selectedTableColumn}")
-                
+
                 if (hoverState().selectedTableRow >= 0 && hoverState().selectedTableColumn >= 0) {
                     when {
                         e.keyCode == KeyEvent.VK_C && e.isControlDown -> {
@@ -80,6 +80,10 @@ class KeyboardHandler(
                         }
                         e.keyCode == KeyEvent.VK_V && e.isControlDown -> {
                             pasteCellFromClipboard()
+                            e.consume()
+                        }
+                        e.keyCode == KeyEvent.VK_DELETE -> {
+                            clearSelectedCell()
                             e.consume()
                         }
                         e.keyCode == KeyEvent.VK_Z && e.isControlDown -> {
@@ -108,12 +112,12 @@ class KeyboardHandler(
                     }
                 }
             }
-            
+
             override fun keyReleased(e: KeyEvent) {}
             override fun keyTyped(e: KeyEvent) {}
         }
     }
-    
+
     private fun copyCellToClipboard() {
         if (hoverState().selectedTableRow >= 0 && hoverState().selectedTableColumn >= 0) {
             val value = tableModel.getValueAt(hoverState().selectedTableRow, hoverState().selectedTableColumn) as? String ?: ""
@@ -122,22 +126,22 @@ class KeyboardHandler(
             println("ADB_DEBUG: Скопировано в буфер: '$value'")
         }
     }
-    
+
     private fun pasteCellFromClipboard() {
         if (hoverState().selectedTableRow >= 0 && hoverState().selectedTableColumn >= 0) {
             try {
                 val clipboard = Toolkit.getDefaultToolkit().systemClipboard
                 val data = clipboard.getContents(null)
-                
+
                 if (data != null && data.isDataFlavorSupported(DataFlavor.stringFlavor)) {
                     val oldValue = tableModel.getValueAt(hoverState().selectedTableRow, hoverState().selectedTableColumn) as? String ?: ""
                     val newValue = (data.getTransferData(DataFlavor.stringFlavor) as String).trim()
-                    
+
                     setEditingCellData(oldValue, hoverState().selectedTableRow, hoverState().selectedTableColumn)
-                    
+
                     tableModel.setValueAt(newValue, hoverState().selectedTableRow, hoverState().selectedTableColumn)
                     println("ADB_DEBUG: Вставлено из буфера: '$newValue' (история: ${historyManager.size()})")
-                    
+
                     validateFields()
                     table.repaint()
                 }
@@ -152,11 +156,34 @@ class KeyboardHandler(
         if (entry != null) {
             val coords = historyManager.findCellCoordinates(entry.cellId)
             if (coords != null) {
-                // Используем новый метод, который не создает запись в истории
                 (table.model as? DevicePresetTableModel)?.undoValueAt(entry.oldValue, coords.first, coords.second)
                 validateFields()
                 table.repaint()
             }
+        }
+    }
+
+    private fun clearSelectedCell() {
+        val selectedRow = hoverState().selectedTableRow
+        val selectedColumn = hoverState().selectedTableColumn
+
+        // Проверяем, что ячейка выбрана и она редактируемая
+        if (selectedRow >= 0 && selectedColumn in 2..4) {
+            val oldValue = tableModel.getValueAt(selectedRow, selectedColumn) as? String ?: ""
+
+            // Если ячейка уже пуста, ничего не делаем
+            if (oldValue.isBlank()) {
+                return
+            }
+
+            // Устанавливаем пустое значение
+            tableModel.setValueAt("", selectedRow, selectedColumn)
+
+            // Обновляем UI
+            validateFields()
+            table.repaint()
+
+            println("ADB_DEBUG: Очищена ячейка ($selectedRow, $selectedColumn). Старое значение: '$oldValue'")
         }
     }
 }
