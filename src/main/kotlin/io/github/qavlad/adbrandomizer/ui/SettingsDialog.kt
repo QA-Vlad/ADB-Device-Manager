@@ -3,16 +3,13 @@ package io.github.qavlad.adbrandomizer.ui
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.DialogWrapper
+import com.intellij.openapi.util.SystemInfo
 import com.intellij.ui.Gray
 import com.intellij.ui.JBColor
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.table.JBTable
 import com.intellij.util.ui.JBUI
-import io.github.qavlad.adbrandomizer.services.DevicePreset
-import io.github.qavlad.adbrandomizer.services.DeviceStateService
-import io.github.qavlad.adbrandomizer.services.PresetApplicationService
-import io.github.qavlad.adbrandomizer.services.SettingsDialogUpdateNotifier
-import io.github.qavlad.adbrandomizer.services.SettingsService
+import io.github.qavlad.adbrandomizer.services.*
 import io.github.qavlad.adbrandomizer.utils.ButtonUtils
 import io.github.qavlad.adbrandomizer.utils.ValidationUtils
 import java.awt.BorderLayout
@@ -28,20 +25,20 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
     private lateinit var table: JBTable
     private lateinit var tableModel: DevicePresetTableModel
     private var updateListener: (() -> Unit)? = null
-    
+
     private var hoverState = HoverState.noHover()
     private val historyManager = HistoryManager()
     private lateinit var keyboardHandler: KeyboardHandler
     private lateinit var tableConfigurator: TableConfigurator
     private lateinit var validationRenderer: ValidationRenderer
-    
+
     private var editingCellOldValue: String? = null
     private var editingCellRow: Int = -1
     private var editingCellColumn: Int = -1
 
     private fun onRowMoved(fromIndex: Int, toIndex: Int) {
         historyManager.onRowMoved(fromIndex, toIndex)
-        
+
         if (hoverState.selectedTableRow == fromIndex) {
             hoverState = hoverState.withTableSelection(toIndex, hoverState.selectedTableColumn)
         } else if (hoverState.selectedTableRow != -1) {
@@ -55,7 +52,7 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
                 hoverState = hoverState.withTableSelection(newSelectedRow, hoverState.selectedTableColumn)
             }
         }
-        
+
         SwingUtilities.invokeLater {
             table.repaint()
         }
@@ -69,7 +66,7 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
         SwingUtilities.invokeLater {
             addHoverEffectToDialogButtons()
         }
-        
+
         if (project != null) {
             val activePresets = DeviceStateService.getCurrentActivePresets()
             if (activePresets.activeSizePreset == null && activePresets.activeDpiPreset == null) {
@@ -79,7 +76,7 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
                 table.repaint()
             }
         }
-        
+
         updateListener = {
             SwingUtilities.invokeLater {
                 table.repaint()
@@ -132,11 +129,11 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
             @Suppress("DEPRECATION")
             override fun prepareRenderer(renderer: TableCellRenderer, row: Int, column: Int): Component {
                 val component = super.prepareRenderer(renderer, row, column)
-                
+
                 if (component is JComponent) {
                     val isHovered = hoverState.isTableCellHovered(row, column)
                     val isSelectedCell = hoverState.isTableCellSelected(row, column)
-                    
+
                     var isInvalidCell = false
                     if (column in 3..4) {
                         val value = tableModel.getValueAt(row, column)
@@ -153,7 +150,7 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
                             component.isOpaque = true
                         }
                     }
-                    
+
                     if (!isInvalidCell) {
                         if (isSelectedCell) {
                             component.background = JBColor(Color(230, 230, 250), Color(80, 80, 100))
@@ -167,20 +164,20 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
                         }
                     }
                 }
-                
+
                 return component
             }
-            
+
             override fun editCellAt(row: Int, column: Int): Boolean {
                 if (row >= 0 && column >= 0) {
                     editingCellOldValue = tableModel.getValueAt(row, column) as? String ?: ""
                     editingCellRow = row
                     editingCellColumn = column
                 }
-                
+
                 return super.editCellAt(row, column)
             }
-            
+
             override fun removeEditor() {
                 if (editingCellOldValue != null) {
                     editingCellOldValue = null
@@ -189,19 +186,19 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
                 }
                 super.removeEditor()
             }
-            
+
             override fun changeSelection(rowIndex: Int, columnIndex: Int, toggle: Boolean, extend: Boolean) {
                 if (rowIndex >= 0 && columnIndex >= 0 && columnIndex in 2..4) {
                     val oldRow = selectionModel.leadSelectionIndex
                     val oldColumn = columnModel.selectionModel.leadSelectionIndex
-                    
+
                     if (oldRow != rowIndex || oldColumn != columnIndex) {
                         editingCellOldValue = tableModel.getValueAt(rowIndex, columnIndex) as? String ?: ""
                         editingCellRow = rowIndex
                         editingCellColumn = columnIndex
                     }
                 }
-                
+
                 super.changeSelection(rowIndex, columnIndex, toggle, extend)
             }
         }
@@ -223,9 +220,10 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
                 editingCellOldValue = oldValue
                 editingCellRow = row
                 editingCellColumn = column
-            }
+            },
+            onDuplicate = ::duplicatePreset
         )
-        
+
         tableConfigurator = TableConfigurator(
             table = table,
             hoverState = { hoverState },
@@ -255,24 +253,24 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
             add(buttonPanel, BorderLayout.SOUTH)
         }
     }
-    
+
     private fun handleCellClick(row: Int, column: Int, clickCount: Int) {
         if (row >= 0 && column >= 0 && column in 2..4) {
             val oldSelectedRow = hoverState.selectedTableRow
             val oldSelectedColumn = hoverState.selectedTableColumn
-            
+
             hoverState = hoverState.withTableSelection(row, column)
-            
+
             if (oldSelectedRow >= 0 && oldSelectedColumn >= 0) {
                 val oldRect = table.getCellRect(oldSelectedRow, oldSelectedColumn, false)
                 table.repaint(oldRect)
             }
-            
+
             val newRect = table.getCellRect(row, column, false)
             table.repaint(newRect)
-            
+
             table.requestFocus()
-            
+
             if (clickCount == 2) {
                 table.editCellAt(row, column)
                 table.editorComponent?.requestFocus()
@@ -280,20 +278,20 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
         } else {
             val oldSelectedRow = hoverState.selectedTableRow
             val oldSelectedColumn = hoverState.selectedTableColumn
-            
+
             hoverState = hoverState.clearTableSelection()
-            
+
             if (oldSelectedRow >= 0 && oldSelectedColumn >= 0) {
                 val oldRect = table.getCellRect(oldSelectedRow, oldSelectedColumn, false)
                 table.repaint(oldRect)
             }
         }
     }
-    
+
     private fun handleTableExit() {
         val oldHoverState = hoverState
         hoverState = hoverState.clearTableHover()
-        
+
         if (oldHoverState.hoveredTableRow >= 0 && oldHoverState.hoveredTableColumn >= 0) {
             val oldRect = table.getCellRect(oldHoverState.hoveredTableRow, oldHoverState.hoveredTableColumn, false)
             table.repaint(oldRect)
@@ -340,7 +338,7 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
 
         return panel
     }
-    
+
     private fun getPresetAtRow(row: Int): DevicePreset {
         return DevicePreset(
             label = tableModel.getValueAt(row, 2) as? String ?: "",
@@ -381,28 +379,35 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
         }
 
         SettingsService.savePresets(tableModel.getPresets())
-        
+
         updateListener?.let { SettingsDialogUpdateNotifier.removeListener(it) }
         keyboardHandler.removeGlobalKeyListener()
-        
+
         super.doOKAction()
     }
-    
+
     override fun doCancelAction() {
         updateListener?.let { SettingsDialogUpdateNotifier.removeListener(it) }
         keyboardHandler.removeGlobalKeyListener()
-        
+
         super.doCancelAction()
     }
-    
+
     private fun showContextMenu(e: MouseEvent) {
         val row = table.rowAtPoint(e.point)
         if (row == -1) return
-        
+
         val preset = getPresetAtRow(row)
-        
         val popupMenu = JPopupMenu()
-        
+
+        val shortcut = if (SystemInfo.isMac) "Cmd+D" else "Ctrl+D"
+        val duplicateItem = JMenuItem("Duplicate ($shortcut)")
+        duplicateItem.addActionListener {
+            duplicatePreset(row)
+        }
+        popupMenu.add(duplicateItem)
+        popupMenu.addSeparator()
+
         if (preset.dpi.isNotBlank()) {
             val applyDpiItem = JMenuItem("Apply DPI only (${preset.dpi})")
             applyDpiItem.addActionListener {
@@ -410,7 +415,7 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
             }
             popupMenu.add(applyDpiItem)
         }
-        
+
         if (preset.size.isNotBlank()) {
             val applySizeItem = JMenuItem("Apply Size only (${preset.size})")
             applySizeItem.addActionListener {
@@ -418,7 +423,7 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
             }
             popupMenu.add(applySizeItem)
         }
-        
+
         if (preset.dpi.isNotBlank() && preset.size.isNotBlank()) {
             val applyBothItem = JMenuItem("Apply Size and DPI")
             applyBothItem.addActionListener {
@@ -426,21 +431,51 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
             }
             popupMenu.add(applyBothItem)
         }
-        
-        if (popupMenu.componentCount > 0) {
+
+        if (popupMenu.componentCount > 2) { // Проверяем, есть ли что-то кроме дубликата и разделителя
+            popupMenu.show(e.component, e.x, e.y)
+        } else if (popupMenu.componentCount > 0 && popupMenu.getComponent(0) == duplicateItem) {
             popupMenu.show(e.component, e.x, e.y)
         }
     }
-    
+
     private fun applyPresetFromRow(row: Int, setSize: Boolean, setDpi: Boolean) {
         if (project != null) {
             val currentPreset = getPresetAtRow(row)
-            
+
             PresetApplicationService.applyPreset(project, currentPreset, setSize, setDpi)
-            
+
             SwingUtilities.invokeLater {
                 table.repaint()
             }
+        }
+    }
+
+    private fun duplicatePreset(row: Int) {
+        if (row < 0 || row >= tableModel.rowCount) return
+
+        val originalPreset = getPresetAtRow(row)
+        val newPreset = originalPreset.copy(label = "${originalPreset.label} (copy)")
+
+        // Конвертируем DevicePreset обратно в Vector для вставки
+        val newRowVector = Vector<Any>()
+        newRowVector.add("☰")
+        newRowVector.add(0) // Номер будет обновлен автоматически
+        newRowVector.add(newPreset.label)
+        newRowVector.add(newPreset.size)
+        newRowVector.add(newPreset.dpi)
+        newRowVector.add("Delete")
+
+        val insertIndex = row + 1
+        (table.model as DevicePresetTableModel).insertRow(insertIndex, newRowVector)
+
+        // Выделяем новую строку и начинаем редактирование
+        SwingUtilities.invokeLater {
+            table.scrollRectToVisible(table.getCellRect(insertIndex, 0, true))
+            hoverState = hoverState.withTableSelection(insertIndex, 2)
+            table.editCellAt(insertIndex, 2)
+            table.editorComponent?.requestFocusInWindow()
+            table.repaint()
         }
     }
 }

@@ -15,7 +15,8 @@ class KeyboardHandler(
     private val hoverState: () -> HoverState,
     private val historyManager: HistoryManager,
     private val validateFields: () -> Unit,
-    private val setEditingCellData: (String?, Int, Int) -> Unit
+    private val setEditingCellData: (String?, Int, Int) -> Unit,
+    private val onDuplicate: (Int) -> Unit
 ) {
     private var keyEventDispatcher: KeyEventDispatcher? = null
 
