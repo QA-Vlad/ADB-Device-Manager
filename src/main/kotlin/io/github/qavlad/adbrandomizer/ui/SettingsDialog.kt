@@ -1063,7 +1063,7 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
         ): IndicatorType {
             if (presetValue.isBlank()) return IndicatorType.NONE
             
-            // Проверяем, был ли этот пресет сброшен (приоритет)
+            // Проверяем, был ли этот конкретный пресет сброшен (по label)
             if (resetPreset?.label == preset.label) {
                 return IndicatorType.GRAY
             }
@@ -1095,10 +1095,8 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
                     // Проверяем, изменился ли параметр в этом пресете с момента применения
                     val isModified = presetValue != originalValue
                     return if (isModified) IndicatorType.YELLOW else IndicatorType.GREEN
-                } else {
-                    // Параметр совпадает, но был применен из другого пресета - желтый
-                    return IndicatorType.YELLOW
                 }
+                // Если значение совпадает, но пресет не был применен изначально - не показываем индикатор
             }
             
             // Проверяем, не изменился ли активный пресет (для желтой галки без активного совпадения)
