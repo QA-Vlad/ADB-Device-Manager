@@ -8,6 +8,7 @@ import java.awt.datatransfer.StringSelection
 import java.awt.event.KeyEvent
 import java.awt.event.KeyListener
 import javax.swing.JTable
+import com.intellij.openapi.util.SystemInfo
 
 class KeyboardHandler(
     private val table: JTable,
@@ -74,7 +75,14 @@ class KeyboardHandler(
                 println("ADB_DEBUG: Key pressed: ${e.keyCode}, isControlDown=${e.isControlDown}, selectedRow=${hoverState().selectedTableRow}, selectedColumn=${hoverState().selectedTableColumn}")
 
                 if (hoverState().selectedTableRow >= 0 && hoverState().selectedTableColumn >= 0) {
+                    val isDuplicateShortcut = e.keyCode == KeyEvent.VK_D &&
+                            (if (SystemInfo.isMac) e.isMetaDown else e.isControlDown)
+
                     when {
+                        isDuplicateShortcut -> {
+                            onDuplicate(hoverState().selectedTableRow)
+                            e.consume()
+                        }
                         e.keyCode == KeyEvent.VK_C && e.isControlDown -> {
                             copyCellToClipboard()
                             e.consume()
