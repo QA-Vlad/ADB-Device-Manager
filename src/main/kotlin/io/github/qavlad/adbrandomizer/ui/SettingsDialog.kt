@@ -120,29 +120,9 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
             dataVector.add(row)
         }
 
-        tableModel = DevicePresetTableModel(dataVector, columnNames)
-        tableModel.addTableModelListener { event ->
+        tableModel = DevicePresetTableModel(dataVector, columnNames, historyManager)
+        tableModel.addTableModelListener {
             validateFields()
-            
-            if (event.type == javax.swing.event.TableModelEvent.UPDATE && 
-                event.firstRow >= 0 && event.column >= 0) {
-                
-                val currentValue = tableModel.getValueAt(event.firstRow, event.column) as? String ?: ""
-                
-                if (editingCellOldValue != null && 
-                    editingCellRow == event.firstRow && 
-                    editingCellColumn == event.column) {
-                    
-                    if (editingCellOldValue != currentValue) {
-                        historyManager.addToHistory(event.firstRow, event.column, editingCellOldValue!!, currentValue)
-                    }
-                    
-                    editingCellOldValue = null
-                    editingCellRow = -1
-                    editingCellColumn = -1
-                }
-            }
-            
             SwingUtilities.invokeLater {
                 table.repaint()
             }

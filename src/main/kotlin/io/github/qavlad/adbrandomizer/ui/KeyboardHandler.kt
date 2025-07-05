@@ -146,13 +146,14 @@ class KeyboardHandler(
             }
         }
     }
-    
+
     private fun undoLastPaste() {
         val entry = historyManager.undoLast()
         if (entry != null) {
             val coords = historyManager.findCellCoordinates(entry.cellId)
             if (coords != null) {
-                tableModel.setValueAt(entry.oldValue, coords.first, coords.second)
+                // Используем новый метод, который не создает запись в истории
+                (table.model as? DevicePresetTableModel)?.undoValueAt(entry.oldValue, coords.first, coords.second)
                 validateFields()
                 table.repaint()
             }
