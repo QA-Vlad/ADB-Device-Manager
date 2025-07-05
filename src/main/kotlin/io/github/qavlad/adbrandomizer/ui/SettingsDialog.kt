@@ -67,6 +67,8 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
     
     // Для отслеживания изменений при редактировании
     private var editingCellOldValue: String? = null
+    private var editingCellRow: Int = -1
+    private var editingCellColumn: Int = -1
 
     init {
         title = "ADB Randomizer Settings"
@@ -176,14 +178,36 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
         tableModel.addTableModelListener { event ->
             validateFields()
             
-            // Если это изменение значения в ячейке и есть выделенная ячейка
+            // Если это изменение значения в ячейке
             if (event.type == javax.swing.event.TableModelEvent.UPDATE && 
-                event.firstRow >= 0 && event.column >= 0 &&
-                hoverState.selectedTableRow >= 0 && hoverState.selectedTableColumn >= 0) {
+                event.firstRow >= 0 && event.column >= 0) {
                 
-                // Добавляем в историю только если была реальная вставка/изменение
                 val currentValue = tableModel.getValueAt(event.firstRow, event.column) as? String ?: ""
                 println("ADB_DEBUG: Table model updated - row=${event.firstRow}, column=${event.column}, value='$currentValue'")
+                
+                // Подробное логирование состояния
+                println("ADB_DEBUG: TableModelListener check - editingCellOldValue='$editingCellOldValue', editingCellRow=$editingCellRow, editingCellColumn=$editingCellColumn")
+                println("ADB_DEBUG: TableModelListener check - event.firstRow=${event.firstRow}, event.column=${event.column}")
+                
+                // Проверяем если есть сохраненное старое значение для этой ячейки
+                if (editingCellOldValue != null && 
+                    editingCellRow == event.firstRow && 
+                    editingCellColumn == event.column) {
+                    
+                    if (editingCellOldValue != currentValue) {
+                        addToHistory(event.firstRow, event.column, editingCellOldValue!!, currentValue)
+                        println("ADB_DEBUG: EDIT COMPLETED via TableModelListener - added to history: '$editingCellOldValue' -> '$currentValue' (история: ${historyStack.size})")
+                    } else {
+                        println("ADB_DEBUG: EDIT COMPLETED via TableModelListener - no changes: '$editingCellOldValue'")
+                    }
+                    
+                    // Сбрасываем данные о редактировании
+                    editingCellOldValue = null
+                    editingCellRow = -1
+                    editingCellColumn = -1
+                } else {
+                    println("ADB_DEBUG: TableModelListener check FAILED - conditions not met")
+                }
             }
             
             // Обновляем индикаторы при изменении данных
@@ -226,83 +250,51 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
             override fun editCellAt(row: Int, column: Int): Boolean {
                 println("ADB_DEBUG: EDIT CELL AT called - row=$row, column=$column")
                 
-                // Сохраняем старое значение перед началом редактирования
+                // Сохраняем старое значение и координаты перед началом редактирования
                 if (row >= 0 && column >= 0) {
                     editingCellOldValue = tableModel.getValueAt(row, column) as? String ?: ""
+                    editingCellRow = row
+                    editingCellColumn = column
                     println("ADB_DEBUG: EDITING WILL START - row=$row, column=$column, oldValue='$editingCellOldValue'")
                 }
                 
-                val result = super.editCellAt(row, column)
+                return super.editCellAt(row, column)
+            }
+            
+            override fun removeEditor() {
+                // Если редактирование было отменено (например, нажат Escape), сбрасываем данные
+                if (editingCellOldValue != null) {
+                    println("ADB_DEBUG: EDITING CANCELED via removeEditor - clearing old value")
+                    editingCellOldValue = null
+                    editingCellRow = -1
+                    editingCellColumn = -1
+                }
+                super.removeEditor()
+            }
+            
+            override fun changeSelection(rowIndex: Int, columnIndex: Int, toggle: Boolean, extend: Boolean) {
+                // Отслеживаем начало редактирования при смене выделения с нажатием клавиши
+                println("ADB_DEBUG: changeSelection called - row=$rowIndex, column=$columnIndex, toggle=$toggle, extend=$extend")
                 
-                // Добавляем слушатель к редактору
-                if (result && cellEditor != null) {
-                    cellEditor.addCellEditorListener(object : CellEditorListener {
-                        override fun editingStopped(e: ChangeEvent?) {
-                            println("ADB_DEBUG: EDITING STOPPED via CellEditorListener")
-                            
-                            SwingUtilities.invokeLater {
-                                if (editingCellOldValue != null) {
-                                    val newValue = tableModel.getValueAt(row, column) as? String ?: ""
-                                    
-                                    if (editingCellOldValue != newValue) {
-                                        addToHistory(row, column, editingCellOldValue!!, newValue)
-                                        println("ADB_DEBUG: EDITING STOPPED - added to history: '$editingCellOldValue' -> '$newValue' (история: ${historyStack.size})")
-                                    } else {
-                                        println("ADB_DEBUG: EDITING STOPPED - no changes: '$editingCellOldValue'")
-                                    }
-                                    
-                                    editingCellOldValue = null
-                                }
-                            }
-                            
-                            // Убираем слушатель после использования
-                            cellEditor?.removeCellEditorListener(this)
-                        }
-                        
-                        override fun editingCanceled(e: ChangeEvent?) {
-                            println("ADB_DEBUG: EDITING CANCELED")
-                            editingCellOldValue = null
-                            cellEditor?.removeCellEditorListener(this)
-                        }
-                    })
+                // Если это новая ячейка и не просто навигация, сохраняем старое значение
+                if (rowIndex >= 0 && columnIndex >= 0 && columnIndex in 2..4) {
+                    val oldRow = selectionModel.leadSelectionIndex
+                    val oldColumn = columnModel.selectionModel.leadSelectionIndex
+                    
+                    if (oldRow != rowIndex || oldColumn != columnIndex) {
+                        println("ADB_DEBUG: Selection changed to new cell - prepare for possible editing")
+                        // Подготавливаемся к возможному редактированию
+                        editingCellOldValue = tableModel.getValueAt(rowIndex, columnIndex) as? String ?: ""
+                        editingCellRow = rowIndex
+                        editingCellColumn = columnIndex
+                        println("ADB_DEBUG: PREPARED for editing - row=$rowIndex, column=$columnIndex, oldValue='$editingCellOldValue'")
+                    }
                 }
                 
-                return result
+                super.changeSelection(rowIndex, columnIndex, toggle, extend)
             }
         }
         
-        // Добавляем отслеживание изменений через CellEditor
-        table.addPropertyChangeListener("tableCellEditor") { event ->
-            if (event.oldValue == null && event.newValue != null) {
-                // Редактирование началось - сохраняем старое значение
-                val editingRow = table.editingRow
-                val editingColumn = table.editingColumn
-                
-                if (editingRow >= 0 && editingColumn >= 0) {
-                    editingCellOldValue = tableModel.getValueAt(editingRow, editingColumn) as? String ?: ""
-                    println("ADB_DEBUG: EDITING STARTED - row=$editingRow, column=$editingColumn, oldValue='$editingCellOldValue'")
-                }
-            } else if (event.oldValue != null && event.newValue == null) {
-                // Редактирование завершено
-                val editingRow = table.editingRow
-                val editingColumn = table.editingColumn
-                
-                if (editingRow >= 0 && editingColumn >= 0 && editingCellOldValue != null) {
-                    SwingUtilities.invokeLater {
-                        val newValue = tableModel.getValueAt(editingRow, editingColumn) as? String ?: ""
-                        
-                        if (editingCellOldValue != newValue) {
-                            addToHistory(editingRow, editingColumn, editingCellOldValue!!, newValue)
-                            println("ADB_DEBUG: EDITING COMPLETED - added to history: '$editingCellOldValue' -> '$newValue' (история: ${historyStack.size})")
-                        } else {
-                            println("ADB_DEBUG: EDITING COMPLETED - no changes: '$editingCellOldValue'")
-                        }
-                        
-                        editingCellOldValue = null
-                    }
-                }
-            }
-        }
 
         setupTable()
         validateFields()
@@ -389,6 +381,8 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
                     val row = rowAtPoint(e.point)
                     val column = columnAtPoint(e.point)
                     
+                    println("ADB_DEBUG: Mouse clicked at row=$row, column=$column, clickCount=${e.clickCount}")
+                    
                     // Обработка кликов по ячейкам
                     if (row >= 0 && column >= 0 && column in 2..4) { // Только для Label, Size, DPI
                         val oldSelectedRow = hoverState.selectedTableRow
@@ -408,6 +402,15 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
                         
                         requestFocus() // Чтобы могли обрабатывать клавиатуру
                         println("ADB_DEBUG: Cell selected ($row, $column)")
+                        
+                        // Если двойной клик, начинаем редактирование
+                        if (e.clickCount == 2) {
+                            println("ADB_DEBUG: Double click detected - starting edit at ($row, $column)")
+                            editCellAt(row, column)
+                            if (editorComponent != null) {
+                                editorComponent!!.requestFocus()
+                            }
+                        }
                     } else {
                         val oldSelectedRow = hoverState.selectedTableRow
                         val oldSelectedColumn = hoverState.selectedTableColumn
@@ -446,9 +449,11 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
                 }
             })
             
-            // Добавляем обработчик клавиатуры для Ctrl+C/Ctrl+V
+            // Добавляем обработчик клавиатуры для Ctrl+C/Ctrl+V и отслеживания начала редактирования
             addKeyListener(object : KeyListener {
                 override fun keyPressed(e: KeyEvent) {
+                    println("ADB_DEBUG: Key pressed: ${e.keyCode}, isControlDown=${e.isControlDown}, selectedRow=${hoverState.selectedTableRow}, selectedColumn=${hoverState.selectedTableColumn}")
+                    
                     if (hoverState.selectedTableRow >= 0 && hoverState.selectedTableColumn >= 0) {
                         when {
                             e.keyCode == KeyEvent.VK_C && e.isControlDown -> {
@@ -462,6 +467,24 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
                             e.keyCode == KeyEvent.VK_Z && e.isControlDown -> {
                                 undoLastPaste()
                                 e.consume()
+                            }
+                            // Отслеживаем начало редактирования по обычным клавишам
+                            !e.isControlDown && !e.isAltDown -> {
+                                println("ADB_DEBUG: Checking if key should start editing: keyCode=${e.keyCode}, range check=${e.keyCode in 32..126}, F2 check=${e.keyCode == KeyEvent.VK_F2}")
+                                if (e.keyCode in 32..126 || e.keyCode == KeyEvent.VK_F2) {
+                                    println("ADB_DEBUG: Starting edit due to key press")
+                                    // Сохраняем старое значение перед началом редактирования
+                                    val row = hoverState.selectedTableRow
+                                    val column = hoverState.selectedTableColumn
+                                    if (row >= 0 && column >= 0) {
+                                        editingCellOldValue = tableModel.getValueAt(row, column) as? String ?: ""
+                                        editingCellRow = row
+                                        editingCellColumn = column
+                                        println("ADB_DEBUG: EDITING WILL START via keyPress - row=$row, column=$column, oldValue='$editingCellOldValue'")
+                                    }
+                                } else {
+                                    println("ADB_DEBUG: Key ${e.keyCode} will not start editing")
+                                }
                             }
                         }
                     }
@@ -534,8 +557,10 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
                     val oldValue = tableModel.getValueAt(hoverState.selectedTableRow, hoverState.selectedTableColumn) as? String ?: ""
                     val newValue = (data.getTransferData(DataFlavor.stringFlavor) as String).trim()
                     
-                    // Добавляем в историю
-                    addToHistory(hoverState.selectedTableRow, hoverState.selectedTableColumn, oldValue, newValue)
+                    // Подготавливаем данные для TableModelListener (чтобы он добавил в историю)
+                    editingCellOldValue = oldValue
+                    editingCellRow = hoverState.selectedTableRow
+                    editingCellColumn = hoverState.selectedTableColumn
                     
                     tableModel.setValueAt(newValue, hoverState.selectedTableRow, hoverState.selectedTableColumn)
                     println("ADB_DEBUG: Вставлено из буфера: '$newValue' (история: ${historyStack.size})")
