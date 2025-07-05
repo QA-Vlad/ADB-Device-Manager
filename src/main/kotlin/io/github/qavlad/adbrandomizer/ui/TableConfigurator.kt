@@ -27,6 +27,7 @@ class TableConfigurator(
     
     fun configure() {
         table.apply {
+            tableHeader.reorderingAllowed = false
             setSelectionMode(ListSelectionModel.SINGLE_SELECTION)
             rowHeight = JBUI.scale(35)
             dragEnabled = true
