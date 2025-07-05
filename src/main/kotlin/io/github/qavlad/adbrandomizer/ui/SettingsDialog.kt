@@ -209,9 +209,10 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
         // Инициализируем компоненты после создания таблицы
         validationRenderer = ValidationRenderer(
             hoverState = { hoverState },
-            getPresetAtRow = ::getPresetAtRow
+            getPresetAtRow = ::getPresetAtRow,
+            findDuplicates = { (table.model as DevicePresetTableModel).findDuplicates() }
         )
-        
+
         keyboardHandler = KeyboardHandler(
             table = table,
             tableModel = tableModel,

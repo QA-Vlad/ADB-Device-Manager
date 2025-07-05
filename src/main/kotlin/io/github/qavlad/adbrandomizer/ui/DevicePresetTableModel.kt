@@ -1,4 +1,3 @@
-// Файл: src/main/kotlin/io/github/qavlad/adbrandomizer/ui/DevicePresetTableModel.kt
 package io.github.qavlad.adbrandomizer.ui
 
 import io.github.qavlad.adbrandomizer.services.DevicePreset
@@ -52,6 +51,35 @@ class DevicePresetTableModel(
                 dpi = row.elementAt(4) as? String ?: ""
             )
         }
+    }
+
+    /**
+     * Находит все дубликаты пресетов по комбинации Size + DPI.
+     * @return Map, где ключ - это индекс строки-дубликата, а значение - список индексов других таких же дубликатов.
+     */
+    fun findDuplicates(): Map<Int, List<Int>> {
+        val presets = getPresets()
+        val presetGroups = presets.withIndex()
+            .groupBy {
+                // Группируем по комбинации Size и DPI, пустые значения игнорируем
+                if (it.value.size.isNotBlank() && it.value.dpi.isNotBlank()) {
+                    "${it.value.size}|${it.value.dpi}"
+                } else {
+                    // Используем уникальный идентификатор для неполных пресетов, чтобы они не группировались
+                    "unique_${it.index}"
+                }
+            }
+            .filter { it.value.size > 1 } // Оставляем только группы, где больше одного элемента (т.е. дубликаты)
+
+        val duplicatesMap = mutableMapOf<Int, List<Int>>()
+        presetGroups.values.forEach { group ->
+            val indices = group.map { it.index }
+            indices.forEach { index ->
+                // Для каждой строки-дубликата сохраняем список других дубликатов в этой же группе
+                duplicatesMap[index] = indices.filter { it != index }
+            }
+        }
+        return duplicatesMap
     }
 
     override fun addRow(rowData: Vector<*>?) {
