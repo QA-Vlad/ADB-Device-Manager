@@ -17,7 +17,9 @@ class KeyboardHandler(
     private val historyManager: HistoryManager,
     private val validateFields: () -> Unit,
     private val setEditingCellData: (String?, Int, Int) -> Unit,
-    private val onDuplicate: (Int) -> Unit
+    private val onDuplicate: (Int) -> Unit,
+    private val onUndo: (HistoryOperation) -> Unit,
+    private val onRedo: (HistoryOperation) -> Unit
 ) {
     private var keyEventDispatcher: KeyEventDispatcher? = null
 
@@ -49,7 +51,18 @@ class KeyboardHandler(
                             println("ADB_DEBUG: Table is in editing mode - ignoring global undo")
                             return@KeyEventDispatcher false
                         } else {
-                            undoLastPaste()
+                            performUndo()
+                            return@KeyEventDispatcher true
+                        }
+                    }
+                    e.keyCode == KeyEvent.VK_Y && e.isControlDown -> {
+                        println("ADB_DEBUG: Ctrl+Y pressed")
+
+                        if (table.isEditing) {
+                            println("ADB_DEBUG: Table is in editing mode - ignoring global redo")
+                            return@KeyEventDispatcher false
+                        } else {
+                            performRedo()
                             return@KeyEventDispatcher true
                         }
                     }
@@ -102,10 +115,18 @@ class KeyboardHandler(
                             }
                             e.keyCode == KeyEvent.VK_Z && e.isControlDown -> {
                                 if (!table.isEditing) {
-                                    undoLastPaste()
+                                    performUndo()
                                     e.consume()
                                 } else {
                                     println("ADB_DEBUG: Table is editing - local KeyListener ignoring undo")
+                                }
+                            }
+                            e.keyCode == KeyEvent.VK_Y && e.isControlDown -> {
+                                if (!table.isEditing) {
+                                    performRedo()
+                                    e.consume()
+                                } else {
+                                    println("ADB_DEBUG: Table is editing - local KeyListener ignoring redo")
                                 }
                             }
                             !e.isControlDown && !e.isAltDown -> {
@@ -166,15 +187,17 @@ class KeyboardHandler(
         }
     }
 
-    private fun undoLastPaste() {
-        val entry = historyManager.undoLast()
-        if (entry != null) {
-            val coords = historyManager.findCellCoordinates(entry.cellId)
-            if (coords != null) {
-                (table.model as? DevicePresetTableModel)?.undoValueAt(entry.oldValue, coords.first, coords.second)
-                validateFields()
-                table.repaint()
-            }
+    private fun performUndo() {
+        val operation = historyManager.undoLast()
+        if (operation != null) {
+            onUndo(operation)
+        }
+    }
+    
+    private fun performRedo() {
+        val operation = historyManager.redoLast()
+        if (operation != null) {
+            onRedo(operation)
         }
     }
 

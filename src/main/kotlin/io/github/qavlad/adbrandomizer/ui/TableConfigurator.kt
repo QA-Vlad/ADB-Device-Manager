@@ -22,7 +22,9 @@ class TableConfigurator(
     private val onCellClicked: (Int, Int, Int) -> Unit,
     private val onTableExited: () -> Unit,
     private val validationRenderer: ValidationRenderer,
-    private val showContextMenu: (MouseEvent) -> Unit
+    private val showContextMenu: (MouseEvent) -> Unit,
+    private val historyManager: HistoryManager,
+    private val getPresetAtRow: (Int) -> io.github.qavlad.adbrandomizer.services.DevicePreset
 ) {
     
     fun configure() {
@@ -151,7 +153,7 @@ class TableConfigurator(
             minWidth = JBUI.scale(40)
             maxWidth = JBUI.scale(40)
             cellRenderer = ButtonRenderer()
-            cellEditor = ButtonEditor(table)
+            cellEditor = ButtonEditor(table, historyManager, getPresetAtRow)
         }
     }
 }
@@ -169,7 +171,11 @@ private class ButtonRenderer : JButton(AllIcons.Actions.Cancel), TableCellRender
     }
 }
 
-private class ButtonEditor(private val table: JTable) : AbstractTableCellEditor(), TableCellEditor {
+private class ButtonEditor(
+    private val table: JTable,
+    private val historyManager: HistoryManager,
+    private val getPresetAtRow: (Int) -> io.github.qavlad.adbrandomizer.services.DevicePreset
+) : AbstractTableCellEditor(), TableCellEditor {
     private val button = JButton(AllIcons.Actions.Cancel)
 
     init {
@@ -182,7 +188,14 @@ private class ButtonEditor(private val table: JTable) : AbstractTableCellEditor(
             fireEditingStopped()
 
             if (modelRow != -1) {
+                // Получаем данные пресета перед удалением
+                val preset = getPresetAtRow(modelRow)
+                
+                // Удаляем строку
                 (table.model as DefaultTableModel).removeRow(modelRow)
+                
+                // Добавляем операцию в историю
+                historyManager.addPresetDelete(modelRow, preset)
             }
         }
     }

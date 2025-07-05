@@ -37,6 +37,8 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
     private var editingCellColumn: Int = -1
 
     private fun onRowMoved(fromIndex: Int, toIndex: Int) {
+        // Добавляем операцию в историю и обновляем состояние
+        historyManager.addPresetMove(fromIndex, toIndex)
         historyManager.onRowMoved(fromIndex, toIndex)
 
         if (hoverState.selectedTableRow == fromIndex) {
@@ -53,9 +55,7 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
             }
         }
 
-        SwingUtilities.invokeLater {
-            table.repaint()
-        }
+        refreshTable()
     }
 
     init {
@@ -221,7 +221,9 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
                 editingCellRow = row
                 editingCellColumn = column
             },
-            onDuplicate = ::duplicatePreset
+            onDuplicate = ::duplicatePreset,
+            onUndo = ::performUndo,
+            onRedo = ::performRedo
         )
 
         tableConfigurator = TableConfigurator(
@@ -232,7 +234,9 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
             onCellClicked = ::handleCellClick,
             onTableExited = ::handleTableExit,
             validationRenderer = validationRenderer,
-            showContextMenu = ::showContextMenu
+            showContextMenu = ::showContextMenu,
+            historyManager = historyManager,
+            getPresetAtRow = ::getPresetAtRow
         )
 
         tableConfigurator.configure()
@@ -310,7 +314,12 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
         val addButton = JButton("Add Preset", AllIcons.General.Add).apply {
             addActionListener {
                 val newRowIndex = tableModel.rowCount
-                tableModel.addRow(Vector(listOf("☰", newRowIndex + 1, "", "", "", "Delete")))
+                val newPreset = DevicePreset("", "", "")
+                val newRowVector = createRowVector(newPreset, newRowIndex + 1)
+                tableModel.addRow(newRowVector)
+                
+                // Добавляем операцию в историю
+                historyManager.addPresetAdd(newRowIndex, newPreset)
 
                 SwingUtilities.invokeLater {
                     hoverState = hoverState.withTableSelection(newRowIndex, 2)
@@ -331,11 +340,21 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
                     DevicePreset("Pixel 5", "1080x2340", "432")
                 )
                 val existingLabels = tableModel.getPresets().map { it.label }.toSet()
+                val importedPresets = mutableListOf<DevicePreset>()
+                val startIndex = tableModel.rowCount
+                
                 commonPresets.forEach {
                     if (!existingLabels.contains(it.label)) {
                         val newRowIndex = tableModel.rowCount
-                        tableModel.addRow(Vector(listOf("☰", newRowIndex + 1, it.label, it.size, it.dpi, "Delete")))
+                        val newRowVector = createRowVector(it, newRowIndex + 1)
+                        tableModel.addRow(newRowVector)
+                        importedPresets.add(it)
                     }
+                }
+                
+                // Добавляем операцию в историю, если что-то было импортировано
+                if (importedPresets.isNotEmpty()) {
+                    historyManager.addPresetImport(startIndex, importedPresets)
                 }
             }
         }
@@ -343,6 +362,26 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
         panel.add(importButton)
 
         return panel
+    }
+
+    // Вспомогательная функция для создания Vector строки таблицы из DevicePreset
+    private fun createRowVector(preset: DevicePreset, rowNumber: Int = 0): Vector<Any> {
+        return Vector<Any>().apply {
+            add("☰")
+            add(rowNumber)
+            add(preset.label)
+            add(preset.size)
+            add(preset.dpi)
+            add("Delete")
+        }
+    }
+
+    // Вспомогательная функция для обновления таблицы
+    private fun refreshTable() {
+        SwingUtilities.invokeLater {
+            validateFields()
+            table.repaint()
+        }
     }
 
     private fun getPresetAtRow(row: Int): DevicePreset {
@@ -451,9 +490,7 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
 
             PresetApplicationService.applyPreset(project, currentPreset, setSize, setDpi)
 
-            SwingUtilities.invokeLater {
-                table.repaint()
-            }
+            refreshTable()
         }
     }
 
@@ -463,16 +500,8 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
         val originalPreset = getPresetAtRow(row)
         val newPreset = originalPreset.copy(label = "${originalPreset.label} (copy)")
 
-        // Конвертируем DevicePreset обратно в Vector для вставки
-        val newRowVector = Vector<Any>()
-        newRowVector.add("☰")
-        newRowVector.add(0) // Номер будет обновлен автоматически
-        newRowVector.add(newPreset.label)
-        newRowVector.add(newPreset.size)
-        newRowVector.add(newPreset.dpi)
-        newRowVector.add("Delete")
-
         val insertIndex = row + 1
+        val newRowVector = createRowVector(newPreset, 0) // Номер будет обновлен автоматически
         (table.model as DevicePresetTableModel).insertRow(insertIndex, newRowVector)
 
         // Выделяем новую строку и начинаем редактирование
@@ -482,6 +511,103 @@ class SettingsDialog(private val project: Project?) : DialogWrapper(project) {
             table.editCellAt(insertIndex, 2)
             table.editorComponent?.requestFocusInWindow()
             table.repaint()
+        }
+        
+        // Добавляем операцию в историю
+        historyManager.addPresetDuplicate(row, insertIndex, originalPreset)
+    }
+    
+    private fun performUndo(operation: HistoryOperation) {
+        when (operation) {
+            is HistoryOperation.CellEdit -> {
+                val coords = historyManager.findCellCoordinates(operation.cellId)
+                if (coords != null) {
+                    tableModel.undoValueAt(operation.oldValue, coords.first, coords.second)
+                    refreshTable()
+                }
+            }
+            is HistoryOperation.PresetAdd -> {
+                // Удаляем добавленный пресет
+                if (operation.rowIndex < tableModel.rowCount) {
+                    tableModel.removeRow(operation.rowIndex)
+                    refreshTable()
+                }
+            }
+            is HistoryOperation.PresetDelete -> {
+                // Восстанавливаем удаленный пресет
+                val newRowVector = createRowVector(operation.presetData, 0)
+                tableModel.insertRow(operation.rowIndex, newRowVector)
+                refreshTable()
+            }
+            is HistoryOperation.PresetMove -> {
+                // Возвращаем пресет на исходную позицию
+                tableModel.moveRow(operation.toIndex, operation.toIndex, operation.fromIndex)
+                historyManager.onRowMoved(operation.toIndex, operation.fromIndex)
+                refreshTable()
+            }
+            is HistoryOperation.PresetImport -> {
+                // Удаляем импортированные пресеты
+                val endIndex = operation.startIndex + operation.importedPresets.size - 1
+                for (i in endIndex downTo operation.startIndex) {
+                    if (i < tableModel.rowCount) {
+                        tableModel.removeRow(i)
+                    }
+                }
+                refreshTable()
+            }
+            is HistoryOperation.PresetDuplicate -> {
+                // Удаляем дублированный пресет
+                if (operation.duplicateIndex < tableModel.rowCount) {
+                    tableModel.removeRow(operation.duplicateIndex)
+                    refreshTable()
+                }
+            }
+        }
+    }
+    
+    private fun performRedo(operation: HistoryOperation) {
+        when (operation) {
+            is HistoryOperation.CellEdit -> {
+                val coords = historyManager.findCellCoordinates(operation.cellId)
+                if (coords != null) {
+                    tableModel.redoValueAt(operation.newValue, coords.first, coords.second)
+                    refreshTable()
+                }
+            }
+            is HistoryOperation.PresetAdd -> {
+                // Повторно добавляем пресет
+                val newRowVector = createRowVector(operation.presetData, 0)
+                tableModel.insertRow(operation.rowIndex, newRowVector)
+                refreshTable()
+            }
+            is HistoryOperation.PresetDelete -> {
+                // Повторно удаляем пресет
+                if (operation.rowIndex < tableModel.rowCount) {
+                    tableModel.removeRow(operation.rowIndex)
+                    refreshTable()
+                }
+            }
+            is HistoryOperation.PresetMove -> {
+                // Повторно перемещаем пресет
+                tableModel.moveRow(operation.fromIndex, operation.fromIndex, operation.toIndex)
+                historyManager.onRowMoved(operation.fromIndex, operation.toIndex)
+                refreshTable()
+            }
+            is HistoryOperation.PresetImport -> {
+                // Повторно импортируем пресеты
+                for ((index, preset) in operation.importedPresets.withIndex()) {
+                    val newRowVector = createRowVector(preset, 0)
+                    tableModel.insertRow(operation.startIndex + index, newRowVector)
+                }
+                refreshTable()
+            }
+            is HistoryOperation.PresetDuplicate -> {
+                // Повторно дублируем пресет
+                val newPreset = operation.presetData.copy(label = "${operation.presetData.label} (copy)")
+                val newRowVector = createRowVector(newPreset, 0)
+                tableModel.insertRow(operation.duplicateIndex, newRowVector)
+                refreshTable()
+            }
         }
     }
 }

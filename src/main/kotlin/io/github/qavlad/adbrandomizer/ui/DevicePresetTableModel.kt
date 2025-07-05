@@ -42,6 +42,15 @@ class DevicePresetTableModel(
             isUndoOperation = false
         }
     }
+    
+    fun redoValueAt(aValue: Any?, row: Int, column: Int) {
+        isUndoOperation = true
+        try {
+            setValueAt(aValue, row, column)
+        } finally {
+            isUndoOperation = false
+        }
+    }
 
     fun getPresets(): List<DevicePreset> {
         return dataVector.map { row ->
