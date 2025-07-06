@@ -14,8 +14,8 @@ object PresetApplicationService {
         object : Task.Backgroundable(project, "Applying preset") {
             override fun run(indicator: ProgressIndicator) {
                 val presetData = validateAndParsePresetData(preset, setSize, setDpi) ?: return
-                val devices = AdbService.getConnectedDevices(project)
-                
+                val devicesResult = AdbService.getConnectedDevices(project)
+                val devices = devicesResult.getOrNull() ?: emptyList()
                 if (devices.isEmpty()) {
                     ApplicationManager.getApplication().invokeLater {
                         NotificationUtils.showInfo(project, "No devices connected")

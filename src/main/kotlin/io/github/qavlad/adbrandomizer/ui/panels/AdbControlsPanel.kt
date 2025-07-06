@@ -73,7 +73,8 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
     // ==================== VALIDATION AND HELPERS ====================
 
     private fun validateDevicesAvailable(): Boolean {
-        val devices = AdbService.getConnectedDevices()
+        val devicesResult = AdbService.getConnectedDevices()
+        val devices = devicesResult.getOrNull() ?: emptyList()
         if (devices.isEmpty()) {
             NotificationUtils.showInfo(project, "No connected devices found.")
             return false
@@ -174,7 +175,7 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
 
         object : Task.Backgroundable(project, actionDescription) {
             override fun run(indicator: ProgressIndicator) {
-                val devices = AdbService.getConnectedDevices()
+                val devices = AdbService.getConnectedDevices().getOrNull() ?: emptyList()
                 resetAllDevices(devices, resetSize, resetDpi, indicator)
                 
                 DeviceStateService.handleReset(resetSize, resetDpi)
@@ -251,7 +252,7 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                 indicator.text = "Connecting to $ipAddress:$port..."
 
                 try {
-                    val success = AdbService.connectWifi(project, ipAddress, port)
+                    val success = AdbService.connectWifi(project, ipAddress, port).getOrNull() ?: false
                     handleConnectionResult(success, ipAddress, port)
                 } catch (e: Exception) {
                     ApplicationManager.getApplication().invokeLater {
@@ -265,7 +266,7 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
     private fun handleConnectionResult(success: Boolean, ipAddress: String, port: Int) {
         if (success) {
             Thread.sleep(PluginConfig.Network.CONNECTION_VERIFY_DELAY_MS)
-            val devices = AdbService.getConnectedDevices()
+            val devices = AdbService.getConnectedDevices().getOrNull() ?: emptyList()
             val connected = devices.any { it.serialNumber.startsWith(ipAddress) }
 
             ApplicationManager.getApplication().invokeLater {
@@ -288,7 +289,8 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                 indicator.isIndeterminate = true
                 indicator.text = "Getting IP address for ${device.name}..."
 
-                val ipAddress = AdbService.getDeviceIpAddress(device)
+                val ipResult = AdbService.getDeviceIpAddress(device)
+                val ipAddress = ipResult.getOrNull()
                 if (ipAddress.isNullOrBlank()) {
                     NotificationUtils.showError(project, "Cannot find IP address for device ${device.name}. Make sure it's connected to Wi-Fi.")
                     return
@@ -297,7 +299,8 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                 indicator.text = "Enabling TCP/IP mode on ${device.name}..."
                 try {
                     // Получаем IP до включения TCP/IP, чтобы убедиться что устройство подключено к Wi-Fi
-                    val ipBeforeEnable = AdbService.getDeviceIpAddress(device)
+                    val ipBeforeResult = AdbService.getDeviceIpAddress(device)
+                    val ipBeforeEnable = ipBeforeResult.getOrNull()
                     if (ipBeforeEnable.isNullOrBlank()) {
                         ApplicationManager.getApplication().invokeLater {
                             NotificationUtils.showError(project, "Cannot get device IP. Make sure Wi-Fi is enabled and connected.")
@@ -315,13 +318,13 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                     indicator.text = "Connecting to $ipAddress:5555..."
                     
                     // Первая попытка подключения
-                    var success = AdbService.connectWifi(project, ipAddress)
+                    var success = AdbService.connectWifi(project, ipAddress).getOrNull() ?: false
                     
                     if (!success) {
                         // Если не удалось, пробуем еще раз с большей задержкой
                         println("ADB_Randomizer: First connection attempt failed, retrying...")
                         Thread.sleep(PluginConfig.Network.WIFI_CONNECTION_VERIFY_DELAY_MS)
-                        success = AdbService.connectWifi(project, ipAddress)
+                        success = AdbService.connectWifi(project, ipAddress).getOrNull() ?: false
                     }
                     
                     showWifiConnectionResult(success, device.name, ipAddress)

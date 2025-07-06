@@ -115,13 +115,12 @@ object DeviceStateService {
     
     fun refreshDeviceStates(@Suppress("UNUSED_PARAMETER") project: Project) {
         try {
-            val devices = AdbService.getConnectedDevices()
-            
+            val devicesResult = AdbService.getConnectedDevices()
+            val devices = devicesResult.getOrNull() ?: emptyList()
             devices.forEach { device ->
                 try {
-                    val currentSize = AdbService.getCurrentSize(device)
-                    val currentDpi = AdbService.getCurrentDpi(device)
-                    
+                    val currentSize = AdbService.getCurrentSize(device).getOrNull()
+                    val currentDpi = AdbService.getCurrentDpi(device).getOrNull()
                     updateDeviceState(
                         device.serialNumber,
                         currentSize?.first,

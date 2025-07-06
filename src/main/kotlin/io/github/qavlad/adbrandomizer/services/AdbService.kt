@@ -5,29 +5,35 @@ import com.android.ddmlib.IDevice
 import com.android.ddmlib.NullOutputReceiver
 import com.intellij.openapi.project.Project
 import io.github.qavlad.adbrandomizer.config.PluginConfig
+import io.github.qavlad.adbrandomizer.core.Result
 import io.github.qavlad.adbrandomizer.utils.AdbPathResolver
+import io.github.qavlad.adbrandomizer.utils.PluginLogger
 import io.github.qavlad.adbrandomizer.utils.ValidationUtils
 import java.util.concurrent.TimeUnit
 import java.util.regex.Pattern
+import io.github.qavlad.adbrandomizer.core.runDeviceOperation
+import io.github.qavlad.adbrandomizer.core.runAdbOperation
 
 object AdbService {
 
-    fun getConnectedDevices(@Suppress("UNUSED_PARAMETER") project: Project): List<IDevice> {
+    fun getConnectedDevices(@Suppress("UNUSED_PARAMETER") project: Project): Result<List<IDevice>> {
         return AdbConnectionManager.getConnectedDevices()
     }
 
     // Overload для обратной совместимости
-    fun getConnectedDevices(): List<IDevice> {
+    fun getConnectedDevices(): Result<List<IDevice>> {
         return AdbConnectionManager.getConnectedDevices()
     }
 
-    fun getDeviceIpAddress(device: IDevice): String? {
-        return try {
+    fun getDeviceIpAddress(device: IDevice): Result<String> {
+        return runDeviceOperation(device.name, "get IP address") {
             val receiver = CollectingOutputReceiver()
-            device.executeShellCommand("ip route", receiver, 5, TimeUnit.SECONDS)
+            device.executeShellCommand("ip route", receiver, PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             
             val output = receiver.output
-            if (output.isBlank()) return null
+            if (output.isBlank()) {
+                throw Exception("Empty ip route output")
+            }
             
             // Паттерн для поиска IP адреса в выводе ip route
             // Пример строки: "192.168.1.0/24 dev wlan0 proto kernel scope link src 192.168.1.20"
@@ -47,7 +53,7 @@ object AdbService {
             }
             
             // Приоритет интерфейсов: wlan > rmnet_data > eth
-            addresses.minByOrNull { (interfaceName, _) ->
+            val selectedIp = addresses.minByOrNull { (interfaceName, _) ->
                 when {
                     interfaceName.startsWith("wlan") -> 0
                     interfaceName.startsWith("rmnet_data") -> 1
@@ -56,30 +62,41 @@ object AdbService {
                 }
             }?.second
             
-        } catch (e: Exception) {
-            println("ADB_Randomizer: Error getting device IP: ${e.message}")
+            if (selectedIp != null) {
+                PluginLogger.debug("IP address found via ip route: %s for device %s", selectedIp, device.name)
+                selectedIp
+            } else {
+                throw Exception("No usable IP address found in ip route output")
+            }
+        }.onError { exception, message ->
+            PluginLogger.warn("IP route method failed for device %s: %s", device.name, message ?: exception.message)
+        }.flatMap {
             // Fallback на старый метод
             getDeviceIpAddressFallback(device)
         }
     }
     
-    private fun getDeviceIpAddressFallback(device: IDevice): String? {
-        // Список возможных Wi-Fi интерфейсов для проверки
-        val wifiInterfaces = listOf("wlan0", "wlan1", "wlan2", "eth0", "rmnet_data0")
+    private fun getDeviceIpAddressFallback(device: IDevice): Result<String> {
+        return runDeviceOperation(device.name, "get IP address fallback") {
+            // Список возможных Wi-Fi интерфейсов для проверки
+            val wifiInterfaces = PluginConfig.Network.WIFI_INTERFACES
 
-        for (interfaceName in wifiInterfaces) {
-            val ip = getIpFromInterface(device, interfaceName)
-            if (ip != null) return ip
+            for (interfaceName in wifiInterfaces) {
+                val ipResult = getIpFromInterface(device, interfaceName)
+                if (ipResult.isSuccess()) {
+                    return@runDeviceOperation ipResult.getOrThrow()
+                }
+            }
+
+            // Fallback: пытаемся получить IP через другие методы
+            getIpAddressFallbackOld(device).getOrThrow()
         }
-
-        // Fallback: пытаемся получить IP через другие методы
-        return getIpAddressFallbackOld(device)
     }
 
-    private fun getIpFromInterface(device: IDevice, interfaceName: String): String? {
-        return try {
+    private fun getIpFromInterface(device: IDevice, interfaceName: String): Result<String> {
+        return runDeviceOperation(device.name, "get IP from interface $interfaceName") {
             val receiver = CollectingOutputReceiver()
-            device.executeShellCommand("ip -f inet addr show $interfaceName", receiver, 5, TimeUnit.SECONDS)
+            device.executeShellCommand("ip -f inet addr show $interfaceName", receiver, PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
 
             val output = receiver.output
             if (output.isNotBlank() && !output.contains("does not exist")) {
@@ -90,32 +107,35 @@ object AdbService {
                     val ip = matcher.group(1)
                     // Используем ValidationUtils для проверки IP
                     if (ValidationUtils.isUsableIpAddress(ip)) {
+                        PluginLogger.debug("IP found on interface %s: %s for device %s", interfaceName, ip, device.name)
                         ip
                     } else {
-                        null
+                        throw Exception("Invalid IP address found: $ip")
                     }
                 } else {
-                    null
+                    throw Exception("No IP address found in interface $interfaceName output")
                 }
             } else {
-                null
+                throw Exception("Interface $interfaceName does not exist or has no output")
             }
-        } catch (_: Exception) {
-            null
         }
     }
 
-    private fun getIpAddressFallbackOld(device: IDevice): String? {
-        // Метод 1: через netcfg (старые устройства)
-        val netcfgIp = getIpFromNetcfg(device)
-        if (netcfgIp != null) return netcfgIp
+    private fun getIpAddressFallbackOld(device: IDevice): Result<String> {
+        return runDeviceOperation(device.name, "get IP address fallback old") {
+            // Метод 1: через netcfg (старые устройства)
+            val netcfgResult = getIpFromNetcfg(device)
+            if (netcfgResult.isSuccess()) {
+                return@runDeviceOperation netcfgResult.getOrThrow()
+            }
 
-        // Метод 2: через ifconfig (если доступен)
-        return getIpFromIfconfig(device)
+            // Метод 2: через ifconfig (если доступен)
+            getIpFromIfconfig(device).getOrThrow()
+        }
     }
 
-    private fun getIpFromNetcfg(device: IDevice): String? {
-        return try {
+    private fun getIpFromNetcfg(device: IDevice): Result<String> {
+        return runDeviceOperation(device.name, "get IP from netcfg") {
             val netcfgReceiver = CollectingOutputReceiver()
             device.executeShellCommand("netcfg", netcfgReceiver, PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
 
@@ -128,24 +148,22 @@ object AdbService {
                 if (matcher.find()) {
                     val ip = matcher.group(1)
                     if (ValidationUtils.isUsableIpAddress(ip)) {
+                        PluginLogger.debug("IP found via netcfg: %s for device %s", ip, device.name)
                         ip
                     } else {
-                        null
+                        throw Exception("Invalid IP address found in netcfg: $ip")
                     }
                 } else {
-                    null
+                    throw Exception("No IP address found in netcfg output")
                 }
             } else {
-                null
+                throw Exception("Empty netcfg output")
             }
-        } catch (e: Exception) {
-            println("ADB_Randomizer: Error in netcfg IP detection: ${e.message}")
-            null
         }
     }
 
-    private fun getIpFromIfconfig(device: IDevice): String? {
-        return try {
+    private fun getIpFromIfconfig(device: IDevice): Result<String> {
+        return runDeviceOperation(device.name, "get IP from ifconfig") {
             val ifconfigReceiver = CollectingOutputReceiver()
             device.executeShellCommand("ifconfig wlan0", ifconfigReceiver, PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
 
@@ -157,107 +175,118 @@ object AdbService {
                 if (matcher.find()) {
                     val ip = matcher.group(1)
                     if (ValidationUtils.isUsableIpAddress(ip)) {
+                        PluginLogger.debug("IP found via ifconfig: %s for device %s", ip, device.name)
                         ip
                     } else {
-                        null
+                        throw Exception("Invalid IP address found in ifconfig: $ip")
                     }
                 } else {
-                    null
+                    throw Exception("No IP address found in ifconfig output")
                 }
             } else {
-                null
+                throw Exception("ifconfig wlan0 not found or has no output")
             }
-        } catch (e: Exception) {
-            println("ADB_Randomizer: Error in ifconfig IP detection: ${e.message}")
-            null
         }
     }
 
-    fun resetSize(device: IDevice) {
-        device.executeShellCommand("wm size reset", NullOutputReceiver(), PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+    fun resetSize(device: IDevice): Result<Unit> {
+        return runDeviceOperation(device.name, "reset size") {
+            device.executeShellCommand("wm size reset", NullOutputReceiver(), PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            PluginLogger.commandExecuted("wm size reset", device.name, true)
+        }
     }
 
-    fun resetDpi(device: IDevice) {
-        device.executeShellCommand("wm density reset", NullOutputReceiver(), PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+    fun resetDpi(device: IDevice): Result<Unit> {
+        return runDeviceOperation(device.name, "reset DPI") {
+            device.executeShellCommand("wm density reset", NullOutputReceiver(), PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            PluginLogger.commandExecuted("wm density reset", device.name, true)
+        }
     }
 
-    fun setSize(device: IDevice, width: Int, height: Int) {
-        val command = "wm size ${width}x${height}"
-        device.executeShellCommand(command, NullOutputReceiver(), PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+    fun setSize(device: IDevice, width: Int, height: Int): Result<Unit> {
+        return runDeviceOperation(device.name, "set size ${width}x${height}") {
+            val command = "wm size ${width}x${height}"
+            device.executeShellCommand(command, NullOutputReceiver(), PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            PluginLogger.commandExecuted(command, device.name, true)
+        }
     }
 
-    fun setDpi(device: IDevice, dpi: Int) {
-        val command = "wm density $dpi"
-        device.executeShellCommand(command, NullOutputReceiver(), PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+    fun setDpi(device: IDevice, dpi: Int): Result<Unit> {
+        return runDeviceOperation(device.name, "set DPI $dpi") {
+            val command = "wm density $dpi"
+            device.executeShellCommand(command, NullOutputReceiver(), PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            PluginLogger.commandExecuted(command, device.name, true)
+        }
     }
     
-    fun getCurrentSize(device: IDevice): Pair<Int, Int>? {
-        return try {
+    fun getCurrentSize(device: IDevice): Result<Pair<Int, Int>> {
+        return runDeviceOperation(device.name, "get current size") {
             val receiver = CollectingOutputReceiver()
-            device.executeShellCommand("wm size", receiver, 10, TimeUnit.SECONDS)
+            device.executeShellCommand("wm size", receiver, PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             
             val output = receiver.output.trim()
             // Формат вывода: "Physical size: 1080x1920" или "Override size: 1080x1920"
-            val sizePattern = Pattern.compile("""(?:Physical|Override) size: (\d+)x(\d+)""")
+            val sizePattern = Pattern.compile(PluginConfig.Patterns.SIZE_OUTPUT_PATTERN)
             val matcher = sizePattern.matcher(output)
             
             if (matcher.find()) {
                 val width = matcher.group(1).toInt()
                 val height = matcher.group(2).toInt()
+                PluginLogger.debug("Current size for device %s: %dx%d", device.name, width, height)
                 Pair(width, height)
             } else {
-                null
+                throw Exception("Could not parse size from output: $output")
             }
-        } catch (_: Exception) {
-            null
         }
     }
     
-    fun getCurrentDpi(device: IDevice): Int? {
-        return try {
+    fun getCurrentDpi(device: IDevice): Result<Int> {
+        return runDeviceOperation(device.name, "get current DPI") {
             val receiver = CollectingOutputReceiver()
-            device.executeShellCommand("wm density", receiver, 10, TimeUnit.SECONDS)
+            device.executeShellCommand("wm density", receiver, PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             
             val output = receiver.output.trim()
             // Формат вывода: "Physical density: 480" или "Override density: 480"
-            val dpiPattern = Pattern.compile("""(?:Physical|Override) density: (\d+)""")
+            val dpiPattern = Pattern.compile(PluginConfig.Patterns.DPI_OUTPUT_PATTERN)
             val matcher = dpiPattern.matcher(output)
             
             if (matcher.find()) {
-                matcher.group(1).toInt()
+                val dpi = matcher.group(1).toInt()
+                PluginLogger.debug("Current DPI for device %s: %d", device.name, dpi)
+                dpi
             } else {
-                null
+                throw Exception("Could not parse density from output: $output")
             }
-        } catch (_: Exception) {
-            null
         }
     }
 
-    fun enableTcpIp(device: IDevice, port: Int = 5555) {
-        // Валидация порта
-        if (!ValidationUtils.isValidAdbPort(port)) {
-            throw IllegalArgumentException("Port must be between ${PluginConfig.Network.MIN_ADB_PORT} and ${PluginConfig.Network.MAX_PORT}, got: $port")
-        }
+    fun enableTcpIp(device: IDevice, port: Int = 5555): Result<Unit> {
+        return runDeviceOperation(device.name, "enable TCP/IP on port $port") {
+            // Валидация порта
+            if (!ValidationUtils.isValidAdbPort(port)) {
+                throw IllegalArgumentException("Port must be between ${PluginConfig.Network.MIN_ADB_PORT} and ${PluginConfig.Network.MAX_PORT}, got: $port")
+            }
 
-        println("ADB_Randomizer: Enabling TCP/IP mode on port $port for device ${device.serialNumber}")
-        
-        try {
-            // Включаем TCP/IP режим
-            device.executeShellCommand("setprop service.adb.tcp.port $port", NullOutputReceiver(), PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-            Thread.sleep(500)
+            PluginLogger.info("Enabling TCP/IP mode on port %d for device %s", port, device.serialNumber)
             
-            // Перезапускаем ADB сервис на устройстве
-            device.executeShellCommand("stop adbd", NullOutputReceiver(), PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-            Thread.sleep(500)
-            device.executeShellCommand("start adbd", NullOutputReceiver(), PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-            Thread.sleep(1500)
-            
-            println("ADB_Randomizer: TCP/IP mode should be enabled on port $port")
-        } catch (e: Exception) {
-            // Fallback на стандартный метод
-            println("ADB_Randomizer: Failed to enable TCP/IP via setprop, trying standard method: ${e.message}")
-            device.executeShellCommand("tcpip $port", NullOutputReceiver(), PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-            Thread.sleep(2000)
+            try {
+                // Включаем TCP/IP режим
+                device.executeShellCommand("setprop service.adb.tcp.port $port", NullOutputReceiver(), PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                Thread.sleep(500)
+                
+                // Перезапускаем ADB сервис на устройстве
+                device.executeShellCommand("stop adbd", NullOutputReceiver(), PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                Thread.sleep(500)
+                device.executeShellCommand("start adbd", NullOutputReceiver(), PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                Thread.sleep(1500)
+                
+                PluginLogger.info("TCP/IP mode enabled on port %d for device %s", port, device.name)
+            } catch (e: Exception) {
+                // Fallback на стандартный метод
+                PluginLogger.warn("Failed to enable TCP/IP via setprop, trying standard method: %s", e.message)
+                device.executeShellCommand("tcpip $port", NullOutputReceiver(), PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                Thread.sleep(2000)
+            }
         }
     }
 
@@ -271,20 +300,19 @@ object AdbService {
         }
     }
 
-    fun connectWifi(@Suppress("UNUSED_PARAMETER") project: Project?, ipAddress: String, port: Int = 5555): Boolean {
-        return try {
+    fun connectWifi(@Suppress("UNUSED_PARAMETER") project: Project?, ipAddress: String, port: Int = 5555): Result<Boolean> {
+        return runAdbOperation("connect to Wi-Fi device $ipAddress:$port") {
             val adbPath = AdbPathResolver.findAdbExecutable()
             if (adbPath == null) {
-                println("ADB_Randomizer: ADB path not found.")
-                return false
+                throw Exception("ADB path not found")
             }
 
             if (!ValidationUtils.isValidIpAddress(ipAddress)) {
-                println("ADB_Randomizer: Invalid IP address: $ipAddress")
-                return false
+                throw Exception("Invalid IP address: $ipAddress")
             }
 
             val target = "$ipAddress:$port"
+            PluginLogger.wifiConnectionAttempt(ipAddress, port)
 
             // Сначала проверяем, не подключены ли уже
             val checkCmd = ProcessBuilder(adbPath, "devices")
@@ -292,8 +320,8 @@ object AdbService {
             val checkOutput = checkProcess.inputStream.bufferedReader().use { it.readText() }
 
             if (checkOutput.contains(target)) {
-                println("ADB_Randomizer: Device $target already connected")
-                return true
+                PluginLogger.info("Device %s already connected", target)
+                return@runAdbOperation true
             }
 
             // Отключаемся от всех устройств перед новым подключением
@@ -302,7 +330,7 @@ object AdbService {
             Thread.sleep(PluginConfig.Network.DISCONNECT_WAIT_MS)
 
             // Подключаемся
-            println("ADB_Randomizer: Connecting to $target...")
+            PluginLogger.info("Connecting to %s...", target)
             val connectCmd = ProcessBuilder(adbPath, "connect", target)
             connectCmd.redirectErrorStream(true)
 
@@ -311,7 +339,7 @@ object AdbService {
 
             if (completed) {
                 val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
-                println("ADB_Randomizer: Connect output: $output")
+                PluginLogger.debug("Connect output: %s", output)
 
                 // Проверяем разные варианты успешного подключения
                 val success = (process.exitValue() == 0) &&
@@ -329,21 +357,24 @@ object AdbService {
                     val verifyProcess = verifyCmd.start()
                     val verifyOutput = verifyProcess.inputStream.bufferedReader().use { it.readText() }
                     val verified = verifyOutput.contains(target)
-                    println("ADB_Randomizer: Connection verified: $verified")
-                    return verified
+                    PluginLogger.debug("Connection verified: %s", verified)
+                    
+                    if (verified) {
+                        PluginLogger.wifiConnectionSuccess(ipAddress, port)
+                    } else {
+                        PluginLogger.wifiConnectionFailed(ipAddress, port)
+                    }
+                    
+                    return@runAdbOperation verified
                 }
 
-                return false
+                PluginLogger.wifiConnectionFailed(ipAddress, port)
+                return@runAdbOperation false
             } else {
                 process.destroyForcibly()
-                println("ADB_Randomizer: Connection timed out")
-                return false
+                PluginLogger.warn("Connection timed out for %s", target)
+                return@runAdbOperation false
             }
-
-        } catch (e: Exception) {
-            println("ADB_Randomizer: Connect error: ${e.message}")
-            e.printStackTrace()
-            false
         }
     }
 }

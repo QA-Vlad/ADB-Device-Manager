@@ -4,7 +4,10 @@ import com.android.ddmlib.AndroidDebugBridge
 import com.android.ddmlib.IDevice
 import com.intellij.openapi.application.ApplicationManager
 import io.github.qavlad.adbrandomizer.config.PluginConfig
+import io.github.qavlad.adbrandomizer.core.Result
+import io.github.qavlad.adbrandomizer.core.runAdbOperation
 import io.github.qavlad.adbrandomizer.utils.AdbPathResolver
+import io.github.qavlad.adbrandomizer.utils.PluginLogger
 import java.util.concurrent.TimeUnit
 
 /**
@@ -18,19 +21,19 @@ internal object AdbConnectionManager {
     private var lastDeviceCount = -1
 
     @Suppress("DEPRECATION")
-    fun getOrCreateDebugBridge(): AndroidDebugBridge? {
+    fun getOrCreateDebugBridge(): Result<AndroidDebugBridge> {
         if (customBridge != null && customBridge!!.isConnected) {
-            return customBridge
+            return Result.Success(customBridge!!)
         }
 
         val adbPath = AdbPathResolver.findAdbExecutable()
         if (adbPath == null) {
-            println("ADB_Randomizer: ADB executable not found")
-            return null
+            PluginLogger.error("ADB executable not found")
+            return Result.Error(Exception("ADB executable not found"), "ADB executable not found")
         }
 
-        try {
-            println("ADB_Randomizer: Starting ADB server...")
+        return runAdbOperation("create debug bridge") {
+            PluginLogger.info("Starting ADB server...")
             val startServerCmd = ProcessBuilder(adbPath, "start-server")
             val process = startServerCmd.start()
             process.waitFor(PluginConfig.Adb.SERVER_START_TIMEOUT_SECONDS, TimeUnit.SECONDS)
@@ -38,7 +41,7 @@ internal object AdbConnectionManager {
             if (!isInitialized) {
                 AndroidDebugBridge.initIfNeeded(false)
                 isInitialized = true
-                println("ADB_Randomizer: AndroidDebugBridge initialized")
+                PluginLogger.info("AndroidDebugBridge initialized")
             }
 
             @Suppress("DEPRECATION")
@@ -51,54 +54,57 @@ internal object AdbConnectionManager {
             }
 
             if (customBridge != null && customBridge!!.isConnected) {
-                println("ADB_Randomizer: Successfully created ADB bridge with $adbPath")
-                return customBridge
+                PluginLogger.info("Successfully created ADB bridge with %s", adbPath)
+                customBridge!!
             } else {
-                println("ADB_Randomizer: Failed to connect ADB bridge")
-                return null
+                throw Exception("Failed to connect ADB bridge after ${PluginConfig.Adb.BRIDGE_CONNECTION_ATTEMPTS} attempts")
             }
-        } catch (e: Exception) {
-            println("ADB_Randomizer: Error creating ADB bridge: ${e.message}")
-            e.printStackTrace()
-            return null
         }
     }
 
-    fun getConnectedDevices(): List<IDevice> {
-        var bridge: AndroidDebugBridge? = null
+    fun getConnectedDevices(): Result<List<IDevice>> {
+        return runAdbOperation("get connected devices") {
+            var bridge: AndroidDebugBridge? = null
 
-        ApplicationManager.getApplication().invokeAndWait {
-            bridge = getOrCreateDebugBridge()
-        }
-
-        if (bridge == null) {
-            println("ADB_Randomizer: AndroidDebugBridge is not available")
-            return emptyList()
-        }
-
-        var attempts = PluginConfig.Adb.DEVICE_LIST_WAIT_ATTEMPTS
-        while (!bridge!!.hasInitialDeviceList() && attempts > 0) {
-            try {
-                Thread.sleep(PluginConfig.Adb.DEVICE_LIST_WAIT_DELAY_MS)
-            } catch (_: InterruptedException) {
-                Thread.currentThread().interrupt()
-                return emptyList()
+            ApplicationManager.getApplication().invokeAndWait {
+                val bridgeResult = getOrCreateDebugBridge()
+                bridge = when (bridgeResult) {
+                    is Result.Success -> bridgeResult.data
+                    is Result.Error -> {
+                        PluginLogger.error("Failed to create debug bridge", bridgeResult.exception)
+                        null
+                    }
+                }
             }
-            attempts--
-        }
 
-        val devices = bridge!!.devices.filter { it.isOnline }
-
-        if (devices.size != lastDeviceCount) {
-            println("ADB_Randomizer: Connected devices count changed: ${devices.size}")
-            lastDeviceCount = devices.size
-            
-            devices.forEach { device ->
-                println("ADB_Randomizer: Device: ${device.name} (${device.serialNumber})")
+            if (bridge == null) {
+                throw Exception("AndroidDebugBridge is not available")
             }
-        }
 
-        return devices
+            var attempts = PluginConfig.Adb.DEVICE_LIST_WAIT_ATTEMPTS
+            while (!bridge!!.hasInitialDeviceList() && attempts > 0) {
+                try {
+                    Thread.sleep(PluginConfig.Adb.DEVICE_LIST_WAIT_DELAY_MS)
+                } catch (_: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    throw Exception("Device list wait interrupted")
+                }
+                attempts--
+            }
+
+            val devices = bridge!!.devices.filter { it.isOnline }
+
+            if (devices.size != lastDeviceCount) {
+                PluginLogger.info("Connected devices count changed: %d", devices.size)
+                lastDeviceCount = devices.size
+                
+                devices.forEach { device ->
+                    PluginLogger.deviceConnected(device.name, device.serialNumber)
+                }
+            }
+
+            devices
+        }
     }
 
 

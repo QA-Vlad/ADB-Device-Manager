@@ -27,7 +27,8 @@ class DevicePollingService(private val project: Project) {
     private fun updateDevices(onDevicesUpdated: (List<DeviceInfo>) -> Unit) {
         ApplicationManager.getApplication().executeOnPooledThread {
             try {
-                val devices = AdbService.getConnectedDevices(project).filter { it.isOnline }
+                val devicesResult = AdbService.getConnectedDevices(project)
+                val devices = devicesResult.getOrNull()?.filter { it.isOnline } ?: emptyList()
                 val deviceInfos = devices.map { device ->
                     val serial = device.serialNumber
                     
@@ -36,8 +37,9 @@ class DevicePollingService(private val project: Project) {
                     
                     // If not in cache or null, try to get it from device
                     if (ip == null) {
-                        ip = AdbService.getDeviceIpAddress(device)
-                        if (ip != null) {
+                        val ipResult = AdbService.getDeviceIpAddress(device)
+                        if (ipResult.isSuccess()) {
+                            ip = ipResult.getOrNull()
                             deviceIpCache[serial] = ip
                             println("ADB_Randomizer: Device ${device.name} IP: $ip")
                         }
