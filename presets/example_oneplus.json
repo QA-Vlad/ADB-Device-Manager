@@ -1,0 +1,32 @@
+{
+  "id": "example-oneplus",
+  "name": "OnePlus",
+  "presets": [
+    {
+      "label": "OnePlus 11",
+      "size": "1440x3216",
+      "dpi": "525"
+    },
+    {
+      "label": "OnePlus 10 Pro",
+      "size": "1440x3216",
+      "dpi": "525"
+    },
+    {
+      "label": "OnePlus 9",
+      "size": "1080x2400",
+      "dpi": "402"
+    },
+    {
+      "label": "OnePlus 8T",
+      "size": "1080x2400",
+      "dpi": "402"
+    },
+    {
+      "label": "OnePlus 7 Pro",
+      "size": "1440x3120",
+      "dpi": "516"
+    }
+  ],
+  "isDefault": false
+}

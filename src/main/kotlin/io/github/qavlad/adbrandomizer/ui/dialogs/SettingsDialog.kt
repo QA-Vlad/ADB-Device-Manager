@@ -7,6 +7,7 @@ import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.table.JBTable
 import com.intellij.util.ui.JBUI
 import io.github.qavlad.adbrandomizer.config.PluginConfig
+import io.github.qavlad.adbrandomizer.ui.components.TableWithAddButtonPanel
 import io.github.qavlad.adbrandomizer.utils.ButtonUtils
 import java.awt.BorderLayout
 import java.awt.Component
@@ -37,6 +38,10 @@ class SettingsDialog(project: Project?) : DialogWrapper(project) {
 
     override fun createCenterPanel(): JComponent {
         println("ADB_DEBUG: createCenterPanel called")
+        
+        // Создаем панель управления списками
+        val listManagerPanel = controller.createListManagerPanel()
+        
         // Создаем модель и таблицу через контроллер
         val tableModel = controller.createTableModel()
         val table = controller.createTable(tableModel)
@@ -46,19 +51,22 @@ class SettingsDialog(project: Project?) : DialogWrapper(project) {
 
         // Создаем UI
         val scrollPane = JBScrollPane(table).apply { 
-            preferredSize = Dimension(PluginConfig.UI.SETTINGS_DIALOG_WIDTH, PluginConfig.UI.SETTINGS_DIALOG_HEIGHT) 
+            preferredSize = Dimension(PluginConfig.UI.SETTINGS_DIALOG_WIDTH, PluginConfig.UI.SETTINGS_DIALOG_HEIGHT - 90) 
         }
-        
-        val buttonPanel = createButtonPanel()
 
-        val tablePanel = JPanel(BorderLayout()).apply {
-            add(table.tableHeader, BorderLayout.NORTH)
-            add(scrollPane, BorderLayout.CENTER)
-        }
+        // Используем новую панель с кнопкой добавления
+        val tableWithButtonPanel = TableWithAddButtonPanel(
+            table = table,
+            scrollPane = scrollPane,
+            onAddPreset = { controller.addNewPreset() }
+        )
+        
+        // Обновляем видимость кнопки в зависимости от режима
+        controller.setTablePanelReference(tableWithButtonPanel)
 
         val mainPanel = JPanel(BorderLayout(0, JBUI.scale(10))).apply {
-            add(tablePanel, BorderLayout.CENTER)
-            add(buttonPanel, BorderLayout.SOUTH)
+            add(listManagerPanel, BorderLayout.NORTH)
+            add(tableWithButtonPanel, BorderLayout.CENTER)
         }
         
         // Добавляем обработчик клика для выхода из режима редактирования ко всем компонентам
@@ -74,27 +82,7 @@ class SettingsDialog(project: Project?) : DialogWrapper(project) {
         return mainPanel
     }
 
-    private fun createButtonPanel(): JPanel {
-        val panel = JPanel()
 
-        val addButton = JButton("Add Preset", AllIcons.General.Add).apply {
-            addActionListener {
-                controller.addNewPreset()
-            }
-        }
-        ButtonUtils.addHoverEffect(addButton)
-        panel.add(addButton)
-
-        val importButton = JButton("Import Common Devices").apply {
-            addActionListener {
-                controller.importCommonDevices()
-            }
-        }
-        ButtonUtils.addHoverEffect(importButton)
-        panel.add(importButton)
-
-        return panel
-    }
     
     /**
      * Настраивает глобальный обработчик кликов через AWTEventListener

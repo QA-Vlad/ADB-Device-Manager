@@ -1,5 +1,6 @@
 package io.github.qavlad.adbrandomizer.ui.dialogs
 
+import com.intellij.icons.AllIcons
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.SystemInfo
 import com.intellij.ui.table.JBTable
@@ -20,6 +21,11 @@ import javax.swing.*
 import javax.swing.table.TableCellRenderer
 import com.intellij.openapi.application.ApplicationManager
 import javax.swing.SwingUtilities
+import java.awt.BorderLayout
+import java.awt.FlowLayout
+import java.awt.Dimension
+import javax.swing.table.TableColumn
+import io.github.qavlad.adbrandomizer.ui.components.TableWithAddButtonPanel
 
 /**
  * Контроллер для диалога настроек.
@@ -40,6 +46,9 @@ class SettingsDialogController(
         private set
     lateinit var validationRenderer: ValidationRenderer
         private set
+    lateinit var listManagerPanel: PresetListManagerPanel
+        private set
+    private var tableWithButtonPanel: TableWithAddButtonPanel? = null
 
     // Состояние
     var hoverState = HoverState.noHover()
@@ -47,6 +56,9 @@ class SettingsDialogController(
     val historyManager = HistoryManager()
     private var updateListener: (() -> Unit)? = null
     private var globalClickListener: java.awt.event.AWTEventListener? = null
+    private var currentPresetList: PresetList? = null
+    private var isShowAllPresetsMode = false
+    private var isHideDuplicatesMode = false
 
     // Состояние редактирования ячейки
     private var editingCellOldValue: String? = null
@@ -62,24 +74,38 @@ class SettingsDialogController(
     }
 
     /**
+     * Создает панель управления списками пресетов
+     */
+    fun createListManagerPanel(): PresetListManagerPanel {
+        listManagerPanel = PresetListManagerPanel(
+            onListChanged = { presetList ->
+                currentPresetList = presetList
+                loadPresetsIntoTable()
+            },
+            onShowAllPresetsChanged = { showAll ->
+                isShowAllPresetsMode = showAll
+                tableWithButtonPanel?.setAddButtonVisible(!showAll)
+                loadPresetsIntoTable()
+            },
+            onHideDuplicatesChanged = { hideDuplicates ->
+                isHideDuplicatesMode = hideDuplicates
+                loadPresetsIntoTable()
+            }
+        )
+        return listManagerPanel
+    }
+
+    /**
      * Создает модель таблицы с начальными данными
      */
     fun createTableModel(): DevicePresetTableModel {
         val columnNames = Vector(listOf(" ", "№", "Label", "Size (e.g., 1080x1920)", "DPI (e.g., 480)", "  "))
-        val presets = SettingsService.getPresets()
-        val dataVector = Vector<Vector<Any>>()
+        tableModel = DevicePresetTableModel(Vector<Vector<Any>>(), columnNames, historyManager)
+        // НЕ добавляем слушатель здесь, так как table еще не создана
         
-        presets.forEachIndexed { index, preset ->
-            dataVector.add(createRowVector(preset, index + 1))
-        }
-
-        tableModel = DevicePresetTableModel(dataVector, columnNames, historyManager)
-        tableModel.addTableModelListener {
-            validateFields()
-            SwingUtilities.invokeLater {
-                table.repaint()
-            }
-        }
+        // Загружаем начальные данные
+        currentPresetList = PresetListService.getActivePresetList()
+        // НЕ вызываем loadPresetsIntoTable() здесь
         
         return tableModel
     }
@@ -89,8 +115,21 @@ class SettingsDialogController(
      */
     fun createTable(model: DevicePresetTableModel): JBTable {
         table = object : JBTable(model) {
+            override fun isCellEditable(row: Int, column: Int): Boolean {
+                // В режиме "Show all presets" редактирование запрещено
+                if (isShowAllPresetsMode) {
+                    return false
+                }
+                return super.isCellEditable(row, column)
+            }
+
             @Suppress("DEPRECATION")
             override fun prepareRenderer(renderer: TableCellRenderer, row: Int, column: Int): Component {
+                // Проверяем, что индексы в допустимых пределах
+                if (row >= rowCount || column >= columnCount) {
+                    return super.prepareRenderer(renderer, row, column)
+                }
+                
                 val component = super.prepareRenderer(renderer, row, column)
 
                 if (component is JComponent) {
@@ -166,6 +205,15 @@ class SettingsDialogController(
      */
     fun initializeHandlers() {
         println("ADB_DEBUG: initializeHandlers called")
+        
+        // Теперь безопасно добавляем слушатель модели
+        tableModel.addTableModelListener {
+            validateFields()
+            SwingUtilities.invokeLater {
+                table.repaint()
+            }
+        }
+        
         validationRenderer = ValidationRenderer(
             hoverState = { hoverState },
             getPresetAtRow = ::getPresetAtRow,
@@ -202,9 +250,161 @@ class SettingsDialogController(
         )
 
         tableConfigurator.configure()
+        
+        // Загружаем данные после полной инициализации
+        loadPresetsIntoTable()
+        
+        // Добавляем дополнительные колонки для режима "Show all presets"
+        setupTableColumns()
+        
         table.addKeyListener(keyboardHandler.createTableKeyListener())
         keyboardHandler.addGlobalKeyListener()
         validateFields()
+    }
+    
+    /**
+     * Настройка колонок таблицы в зависимости от режима
+     */
+    private fun setupTableColumns() {
+        // В режиме "Show all presets" добавляем колонку с названием списка
+        if (isShowAllPresetsMode) {
+            // Если колонка еще не добавлена
+            if (table.columnModel.columnCount == 6) {
+                // Обновляем заголовок модели
+                val columnNames = Vector(listOf(" ", "№", "Label", "Size (e.g., 1080x1920)", "DPI (e.g., 480)", "  ", "List"))
+                tableModel.setColumnIdentifiers(columnNames)
+                
+                val listColumn = TableColumn(6)
+                listColumn.headerValue = "List"
+                listColumn.preferredWidth = 150
+                table.columnModel.addColumn(listColumn)
+            }
+        } else {
+            // Удаляем колонку если она есть
+            if (table.columnModel.columnCount == 7) {
+                // Обновляем заголовок модели обратно
+                val columnNames = Vector(listOf(" ", "№", "Label", "Size (e.g., 1080x1920)", "DPI (e.g., 480)", "  "))
+                tableModel.setColumnIdentifiers(columnNames)
+                
+                table.columnModel.removeColumn(table.columnModel.getColumn(6))
+            }
+        }
+    }
+    
+    /**
+     * Устанавливает ссылку на панель с таблицей и кнопкой
+     */
+    fun setTablePanelReference(panel: TableWithAddButtonPanel) {
+        tableWithButtonPanel = panel
+    }
+
+    // === Загрузка данных в таблицу ===
+    
+    /**
+     * Загружает пресеты в таблицу в зависимости от текущего режима
+     */
+    private fun loadPresetsIntoTable() {
+        // Сначала настраиваем колонки
+        setupTableColumns()
+        
+        // Очищаем таблицу
+        tableModel.rowCount = 0
+        
+        if (isShowAllPresetsMode) {
+            // Режим "Show all presets" - загружаем все пресеты из всех списков
+            val allPresets = PresetListService.getAllPresetsFromAllLists()
+            val duplicatesToHide = if (isHideDuplicatesMode) findGlobalDuplicates(allPresets) else emptySet()
+            
+            allPresets.forEachIndexed { index, (listName, preset) ->
+                val key = "${preset.size}|${preset.dpi}#$index"
+                if (!isHideDuplicatesMode || !duplicatesToHide.contains(key)) {
+                    val rowVector = createRowVectorWithList(preset, tableModel.rowCount + 1, listName)
+                    tableModel.addRow(rowVector)
+                }
+            }
+        } else {
+            // Обычный режим - загружаем пресеты только из текущего списка
+            val presets = currentPresetList?.presets ?: emptyList()
+            val duplicatesToHide = if (isHideDuplicatesMode) findLocalDuplicates(presets) else emptySet()
+            
+            presets.forEachIndexed { index, preset ->
+                val key = "${preset.size}|${preset.dpi}#$index"
+                if (!isHideDuplicatesMode || !duplicatesToHide.contains(key)) {
+                    val rowVector = createRowVector(preset, tableModel.rowCount + 1)
+                    tableModel.addRow(rowVector)
+                }
+            }
+        }
+        
+        refreshTable()
+    }
+    
+    /**
+     * Находит дубликаты в глобальном списке пресетов
+     * Возвращает Set ключей, которые нужно скрыть (все дубликаты кроме первого)
+     */
+    private fun findGlobalDuplicates(allPresets: List<Pair<String, DevicePreset>>): Set<String> {
+        val seen = mutableSetOf<String>()
+        val duplicatesToHide = mutableSetOf<String>()
+        val indexedPresets = allPresets.withIndex()
+        
+        indexedPresets.forEach { (index, presetPair) ->
+            val preset = presetPair.second
+            if (preset.size.isNotBlank() && preset.dpi.isNotBlank()) {
+                val key = "${preset.size}|${preset.dpi}"
+                if (seen.contains(key)) {
+                    // Это дубликат - добавляем в список для скрытия с индексом
+                    duplicatesToHide.add("$key#$index")
+                } else {
+                    // Первое вхождение - запоминаем
+                    seen.add(key)
+                }
+            }
+        }
+        
+        return duplicatesToHide
+    }
+    
+    /**
+     * Находит дубликаты в локальном списке пресетов
+     * Возвращает Set ключей, которые нужно скрыть (все дубликаты кроме первого)
+     */
+    private fun findLocalDuplicates(presets: List<DevicePreset>): Set<String> {
+        val seen = mutableSetOf<String>()
+        val duplicatesToHide = mutableSetOf<String>()
+        
+        presets.withIndex().forEach { (index, preset) ->
+            if (preset.size.isNotBlank() && preset.dpi.isNotBlank()) {
+                val key = "${preset.size}|${preset.dpi}"
+                if (seen.contains(key)) {
+                    // Это дубликат - добавляем в список для скрытия с индексом
+                    duplicatesToHide.add("$key#$index")
+                } else {
+                    // Первое вхождение - запоминаем
+                    seen.add(key)
+                }
+            }
+        }
+        
+        return duplicatesToHide
+    }
+    
+    /**
+     * Создает Vector строки таблицы с информацией о списке
+     */
+    private fun createRowVectorWithList(preset: DevicePreset, rowNumber: Int, listName: String): Vector<Any> {
+        val vector = Vector<Any>()
+        vector.add("☰")
+        vector.add(rowNumber)
+        vector.add(preset.label)
+        vector.add(preset.size) 
+        vector.add(preset.dpi)
+        vector.add("Delete")
+        // Добавляем название списка только если колонка добавлена
+        if (isShowAllPresetsMode && table.columnModel.columnCount > 6) {
+            vector.add(listName)
+        }
+        return vector
     }
 
     // === Обработчики событий ===
@@ -286,13 +486,16 @@ class SettingsDialogController(
         val preset = getPresetAtRow(row)
         val popupMenu = JPopupMenu()
 
-        val shortcut = if (SystemInfo.isMac) "Cmd+D" else "Ctrl+D"
-        val duplicateItem = JMenuItem("Duplicate ($shortcut)")
-        duplicateItem.addActionListener {
-            duplicatePreset(row)
+        // В режиме "Show all presets" не показываем опцию дублирования
+        if (!isShowAllPresetsMode) {
+            val shortcut = if (SystemInfo.isMac) "Cmd+D" else "Ctrl+D"
+            val duplicateItem = JMenuItem("Duplicate ($shortcut)")
+            duplicateItem.addActionListener {
+                duplicatePreset(row)
+            }
+            popupMenu.add(duplicateItem)
+            popupMenu.addSeparator()
         }
-        popupMenu.add(duplicateItem)
-        popupMenu.addSeparator()
 
         if (preset.dpi.isNotBlank()) {
             val applyDpiItem = JMenuItem("Apply DPI only (${preset.dpi})")
@@ -318,9 +521,7 @@ class SettingsDialogController(
             popupMenu.add(applyBothItem)
         }
 
-        if (popupMenu.componentCount > 2) {
-            popupMenu.show(e.component, e.x, e.y)
-        } else if (popupMenu.componentCount > 0 && popupMenu.getComponent(0) == duplicateItem) {
+        if (popupMenu.componentCount > 0) {
             popupMenu.show(e.component, e.x, e.y)
         }
     }
@@ -328,6 +529,17 @@ class SettingsDialogController(
     // === Действия с пресетами ===
 
     fun addNewPreset() {
+        // Запрещаем добавление в режиме "Show all presets"
+        if (isShowAllPresetsMode) {
+            JOptionPane.showMessageDialog(
+                table,
+                "Cannot add presets in 'Show all presets' mode.\nPlease switch to a specific list.",
+                "Action Not Available",
+                JOptionPane.INFORMATION_MESSAGE
+            )
+            return
+        }
+        
         val newRowIndex = tableModel.rowCount
         val newPreset = DevicePreset("", "", "")
         val newRowVector = createRowVector(newPreset, newRowIndex + 1)
@@ -368,6 +580,17 @@ class SettingsDialogController(
 
     fun duplicatePreset(row: Int) {
         if (row < 0 || row >= tableModel.rowCount) return
+        
+        // Запрещаем дублирование в режиме "Show all presets"
+        if (isShowAllPresetsMode) {
+            JOptionPane.showMessageDialog(
+                table,
+                "Cannot duplicate presets in 'Show all presets' mode.\nPlease switch to a specific list.",
+                "Action Not Available",
+                JOptionPane.INFORMATION_MESSAGE
+            )
+            return
+        }
 
         val originalPreset = getPresetAtRow(row)
         val newPreset = originalPreset.copy(label = "${originalPreset.label} (copy)")
@@ -484,6 +707,11 @@ class SettingsDialogController(
     // === Валидация ===
 
     fun validateFields() {
+        // Проверяем, что table инициализирована
+        if (!::table.isInitialized || !::tableModel.isInitialized) {
+            return
+        }
+        
         var allValid = true
         for (i in 0 until tableModel.rowCount) {
             val size = tableModel.getValueAt(i, 3) as? String ?: ""
@@ -499,6 +727,11 @@ class SettingsDialogController(
 
     fun saveSettings() {
         if (table.isEditing) table.cellEditor.stopCellEditing()
+        
+        // В режиме "Show all presets" не сохраняем изменения
+        if (isShowAllPresetsMode) {
+            return
+        }
 
         val rowsToRemove = mutableListOf<Int>()
 
@@ -516,7 +749,11 @@ class SettingsDialogController(
             tableModel.removeRow(rowIndex)
         }
 
-        SettingsService.savePresets(tableModel.getPresets())
+        // Сохраняем пресеты в текущий список
+        currentPresetList?.let { list ->
+            list.presets = tableModel.getPresets().toMutableList()
+            PresetListService.savePresetList(list)
+        }
     }
 
     // === Вспомогательные методы ===

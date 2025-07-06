@@ -27,9 +27,17 @@ object SettingsService {
 
     /**
      * Загружает список пресетов из хранилища.
+     * Теперь использует PresetListService для поддержки нескольких списков.
      * @return List<DevicePreset> - список сохраненных пресетов.
      */
     fun getPresets(): List<DevicePreset> {
+        // Сначала пытаемся получить из нового сервиса
+        val presetsFromNewService = PresetListService.getPresetsForCompatibility()
+        if (presetsFromNewService.isNotEmpty()) {
+            return presetsFromNewService
+        }
+        
+        // Если в новом сервисе пусто, пробуем старый способ для миграции
         val json = properties.getValue(PRESETS_KEY)
         if (json.isNullOrBlank()) {
             return getDefaultPresets()
@@ -37,7 +45,16 @@ object SettingsService {
         return try {
             // Указываем Gson, что мы хотим получить именно List<DevicePreset>
             val type = object : TypeToken<List<DevicePreset>>() {}.type
-            gson.fromJson(json, type)
+            val oldPresets: List<DevicePreset> = gson.fromJson(json, type)
+            
+            // Мигрируем старые пресеты в новую систему
+            if (oldPresets.isNotEmpty()) {
+                PresetListService.savePresetsForCompatibility(oldPresets)
+                // Очищаем старое хранилище
+                properties.setValue(PRESETS_KEY, null)
+            }
+            
+            oldPresets
         } catch (_: Exception) {
             // Если JSON некорректен, возвращаем дефолтные значения
             getDefaultPresets()
@@ -46,11 +63,15 @@ object SettingsService {
 
     /**
      * Сохраняет список пресетов в хранилище.
+     * Теперь использует PresetListService для поддержки нескольких списков.
      * @param presets - список пресетов для сохранения.
      */
     fun savePresets(presets: List<DevicePreset>) {
-        val json = gson.toJson(presets)
-        properties.setValue(PRESETS_KEY, json)
+        // Используем новый сервис для сохранения
+        PresetListService.savePresetsForCompatibility(presets)
+        
+        // Очищаем старое хранилище если оно есть
+        properties.setValue(PRESETS_KEY, null)
     }
 
     /**
