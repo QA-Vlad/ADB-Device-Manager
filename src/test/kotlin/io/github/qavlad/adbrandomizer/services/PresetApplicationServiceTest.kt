@@ -7,6 +7,7 @@ import org.junit.After
 import org.junit.Before
 import org.junit.Test
 import org.junit.Assert.*
+import io.github.qavlad.adbrandomizer.core.Result
 
 /**
  * Пример теста с использованием моков (MockK библиотека)
@@ -47,11 +48,11 @@ class PresetApplicationServiceTest {
         every { ValidationUtils.parseDpi("480") } returns 480
         
         // Настраиваем AdbService, чтобы он возвращал, мок устройства
-        every { AdbService.getConnectedDevices(any()) } returns listOf(mockDevice)
+        every { AdbService.getConnectedDevices(any()) } returns Result.Success(listOf(mockDevice))
         
         // Говорим что методы setSize и setDpi должны просто ничего не делать
-        every { AdbService.setSize(mockDevice, 1080, 1920) } just Runs
-        every { AdbService.setDpi(mockDevice, 480) } just Runs
+        every { AdbService.setSize(mockDevice, 1080, 1920) } returns Result.Success(Unit)
+        every { AdbService.setDpi(mockDevice, 480) } returns Result.Success(Unit)
         
         // Act - выполнение
         // Здесь бы мы вызвали PresetApplicationService.applyPreset()
@@ -59,7 +60,7 @@ class PresetApplicationServiceTest {
         // давай сделаем упрощённый пример
         
         // Симулируем применение пресета
-        val devices = AdbService.getConnectedDevices(mockProject)
+        val devices = AdbService.getConnectedDevices(mockProject).getOrNull() ?: emptyList()
         devices.forEach { device ->
             val size = ValidationUtils.parseSize(preset.size)
             if (size != null) {
@@ -84,11 +85,11 @@ class PresetApplicationServiceTest {
         
         every { ValidationUtils.parseSize("invalid") } returns null
         every { ValidationUtils.parseDpi("480") } returns 480
-        every { AdbService.getConnectedDevices(any()) } returns listOf(mockDevice)
-        every { AdbService.setDpi(mockDevice, 480) } just Runs
+        every { AdbService.getConnectedDevices(any()) } returns Result.Success(listOf(mockDevice))
+        every { AdbService.setDpi(mockDevice, 480) } returns Result.Success(Unit)
         
         // Act
-        val devices = AdbService.getConnectedDevices(mockProject)
+        val devices = AdbService.getConnectedDevices(mockProject).getOrNull() ?: emptyList()
         devices.forEach { device ->
             val size = ValidationUtils.parseSize(preset.size)
             if (size != null) {
@@ -110,10 +111,10 @@ class PresetApplicationServiceTest {
     @Test
     fun `applyPreset should handle no connected devices`() {
         // Arrange
-        every { AdbService.getConnectedDevices(any()) } returns emptyList()
+        every { AdbService.getConnectedDevices(any()) } returns Result.Success(emptyList())
         
         // Act
-        val devices = AdbService.getConnectedDevices(mockProject)
+        val devices = AdbService.getConnectedDevices(mockProject).getOrNull() ?: emptyList()
         
         // Assert
         assertTrue("Должен вернуть пустой список", devices.isEmpty())
