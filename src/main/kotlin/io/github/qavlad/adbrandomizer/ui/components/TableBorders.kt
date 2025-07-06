@@ -1,4 +1,4 @@
-package io.github.qavlad.adbrandomizer.ui
+package io.github.qavlad.adbrandomizer.ui.components
 
 import com.intellij.ui.JBColor
 import com.intellij.util.ui.JBUI

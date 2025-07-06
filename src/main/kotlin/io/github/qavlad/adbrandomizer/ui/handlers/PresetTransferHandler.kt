@@ -1,5 +1,4 @@
-// Файл: src/main/kotlin/io/github/qavlad/adbrandomizer/ui/PresetTransferHandler.kt
-package io.github.qavlad.adbrandomizer.ui
+package io.github.qavlad.adbrandomizer.ui.handlers
 
 import java.awt.datatransfer.DataFlavor
 import java.awt.datatransfer.StringSelection

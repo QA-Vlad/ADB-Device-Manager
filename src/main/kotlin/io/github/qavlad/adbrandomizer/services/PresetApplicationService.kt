@@ -104,18 +104,13 @@ object PresetApplicationService {
     
     private fun updateDeviceStatesAfterPresetApplication(devices: List<IDevice>, presetData: PresetData) {
         devices.forEach { device ->
-            // Получаем текущее состояние и обновляем только те параметры, которые были изменены
-            val currentState = DeviceStateService.getDeviceState(device.serialNumber)
-            
-            val newWidth = presetData.width ?: currentState?.width
-            val newHeight = presetData.height ?: currentState?.height 
-            val newDpi = presetData.dpi ?: currentState?.dpi
-            
+            // Если мы применили новые значения, обновляем их в состоянии
+            // Если какое-то значение не применялось (null), оно не изменится
             DeviceStateService.updateDeviceState(
                 device.serialNumber,
-                newWidth,
-                newHeight,
-                newDpi
+                presetData.width,
+                presetData.height,
+                presetData.dpi
             )
         }
     }

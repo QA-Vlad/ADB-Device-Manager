@@ -39,6 +39,11 @@ intellij {
 
 dependencies {
     implementation("com.google.code.gson:gson:2.10.1")
+    
+    // Тестовые зависимости
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.jetbrains.kotlin:kotlin-test-junit")
+    testImplementation("io.mockk:mockk:1.13.7")
 }
 
 tasks {
@@ -50,6 +55,15 @@ tasks {
         compilerOptions {
             jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
             freeCompilerArgs.add("-Xjvm-default=all")
+        }
+    }
+    
+    test {
+        useJUnit()
+        testLogging {
+            events("passed", "skipped", "failed")
+            exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+            showStandardStreams = true
         }
     }
 

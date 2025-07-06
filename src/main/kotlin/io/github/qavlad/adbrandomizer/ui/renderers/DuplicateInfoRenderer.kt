@@ -1,5 +1,4 @@
-// Файл: src/main/kotlin/io/github/qavlad/adbrandomizer/ui/DuplicateInfoRenderer.kt
-package io.github.qavlad.adbrandomizer.ui
+package io.github.qavlad.adbrandomizer.ui.renderers
 
 import com.intellij.icons.AllIcons
 import com.intellij.ui.components.JBLabel

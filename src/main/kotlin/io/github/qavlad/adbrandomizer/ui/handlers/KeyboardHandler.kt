@@ -1,5 +1,9 @@
-package io.github.qavlad.adbrandomizer.ui
+package io.github.qavlad.adbrandomizer.ui.handlers
 
+import io.github.qavlad.adbrandomizer.ui.components.DevicePresetTableModel
+import io.github.qavlad.adbrandomizer.ui.components.HoverState
+import io.github.qavlad.adbrandomizer.ui.components.HistoryManager
+import io.github.qavlad.adbrandomizer.ui.components.HistoryOperation
 import java.awt.KeyEventDispatcher
 import java.awt.KeyboardFocusManager
 import java.awt.Toolkit

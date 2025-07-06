@@ -1,9 +1,14 @@
-package io.github.qavlad.adbrandomizer.ui
+package io.github.qavlad.adbrandomizer.ui.renderers
 
 import com.intellij.ui.Gray
 import com.intellij.ui.JBColor
 import io.github.qavlad.adbrandomizer.services.DevicePreset
 import io.github.qavlad.adbrandomizer.services.DeviceStateService
+import io.github.qavlad.adbrandomizer.ui.components.HoverState
+// ✅ ДОБАВЛЕНЫ НЕДОСТАЮЩИЕ ИМПОРТЫ
+import io.github.qavlad.adbrandomizer.ui.components.ActiveParameterBorder
+import io.github.qavlad.adbrandomizer.ui.components.GrayParameterBorder
+import io.github.qavlad.adbrandomizer.ui.components.YellowParameterBorder
 import java.awt.Color
 import java.awt.Component
 import javax.swing.JTable
@@ -18,7 +23,7 @@ enum class IndicatorType {
 class ValidationRenderer(
     private val hoverState: () -> HoverState,
     private val getPresetAtRow: (Int) -> DevicePreset,
-    private val findDuplicates: () -> Map<Int, List<Int>> // Добавляем функцию поиска дубликатов
+    private val findDuplicates: () -> Map<Int, List<Int>>
 ) : DefaultTableCellRenderer() {
 
     private val duplicateInfoRenderer = DuplicateInfoRenderer()
@@ -70,6 +75,7 @@ class ValidationRenderer(
         val component = super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column)
         component.background = cellBackground
         component.foreground = cellForeground
+        border = null // Сбрасываем рамку по умолчанию
 
         // Добавляем рамку и для Label-колонки, если нужно
         if (column == 2) {
@@ -78,14 +84,15 @@ class ValidationRenderer(
             val sizeIndicator = getSizeIndicatorType(preset, activePresets)
             val dpiIndicator = getDpiIndicatorType(preset, activePresets)
 
-            if (sizeIndicator == IndicatorType.GRAY || dpiIndicator == IndicatorType.GRAY) {
-                border = GrayParameterBorder()
+            // Логика определения общей рамки для строки
+            if (sizeIndicator == IndicatorType.GREEN && dpiIndicator == IndicatorType.GREEN) {
+                border = ActiveParameterBorder()
+                component.foreground = JBColor.GREEN.darker()
             } else if (sizeIndicator == IndicatorType.YELLOW || dpiIndicator == IndicatorType.YELLOW) {
                 border = YellowParameterBorder()
                 component.foreground = JBColor.ORANGE
-            } else if (sizeIndicator == IndicatorType.GREEN && dpiIndicator == IndicatorType.GREEN) {
-                border = ActiveParameterBorder()
-                component.foreground = JBColor.GREEN.darker()
+            } else if (sizeIndicator == IndicatorType.GRAY || dpiIndicator == IndicatorType.GRAY) {
+                border = GrayParameterBorder()
             }
         }
 
@@ -107,8 +114,7 @@ class ValidationRenderer(
             resetPreset = activePresets.resetSizePreset,
             resetValue = activePresets.resetSizeValue,
             activeValue = activePresets.activeSizePreset?.size,
-            originalPreset = activePresets.originalSizePreset,
-            originalValue = activePresets.originalSizePreset?.size
+            originalPreset = activePresets.originalSizePreset
         )
     }
 
@@ -119,8 +125,7 @@ class ValidationRenderer(
             resetPreset = activePresets.resetDpiPreset,
             resetValue = activePresets.resetDpiValue,
             activeValue = activePresets.activeDpiPreset?.dpi,
-            originalPreset = activePresets.originalDpiPreset,
-            originalValue = activePresets.originalDpiPreset?.dpi
+            originalPreset = activePresets.originalDpiPreset
         )
     }
 
@@ -130,14 +135,16 @@ class ValidationRenderer(
         resetPreset: DevicePreset?,
         resetValue: String?,
         activeValue: String?,
-        originalPreset: DevicePreset?,
-        originalValue: String?
+        originalPreset: DevicePreset?
     ): IndicatorType {
         if (presetValue.isBlank()) return IndicatorType.NONE
 
+        // Серая рамка: если это пресет, который был сброшен
         if (resetValue != null && presetValue == resetValue && resetPreset?.label == preset.label) {
             return IndicatorType.GRAY
         }
+
+        val originalValue = if (preset.size == presetValue) originalPreset?.size else originalPreset?.dpi
 
         return getParameterIndicatorType(
             preset = preset,
@@ -155,23 +162,20 @@ class ValidationRenderer(
         originalPreset: DevicePreset?,
         originalValue: String?
     ): IndicatorType {
-        val isCurrentlyActive = activeValue == presetValue
+        val isCurrentlyActive = activeValue != null && activeValue == presetValue
 
-        if (isCurrentlyActive) {
-            val wasFromThisPreset = originalPreset?.label == preset.label
-
-            if (wasFromThisPreset) {
-                val isModified = presetValue != originalValue
-                return if (isModified) IndicatorType.YELLOW else IndicatorType.GREEN
-            }
-            // Если значение совпадает, но оно не из этого пресета - не выделяем
+        // Если это тот самый пресет, который был применен изначально
+        if (originalPreset?.label == preset.label) {
+            val isModified = presetValue != originalValue
+            // Зеленая, если не изменен, желтая, если изменен
+            return if (isModified) IndicatorType.YELLOW else IndicatorType.GREEN
         }
 
-        val isFromOriginalPreset = originalPreset?.label == preset.label
-
-        if (isFromOriginalPreset) {
-            val isModified = presetValue != originalValue
-            return if (isModified) IndicatorType.YELLOW else IndicatorType.GREEN
+        // Если активное значение совпадает со значением в этой строке, но это не тот пресет,
+        // который мы применяли, то он не должен подсвечиваться.
+        if (isCurrentlyActive) {
+            // Это может быть дубликат, который случайно совпал
+            return IndicatorType.NONE
         }
 
         return IndicatorType.NONE

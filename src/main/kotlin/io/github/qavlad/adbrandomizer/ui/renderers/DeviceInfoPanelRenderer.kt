@@ -1,10 +1,10 @@
-// Файл: src/main/kotlin/io/github/qavlad/adbrandomizer/ui/DeviceInfoPanelRenderer.kt
-package io.github.qavlad.adbrandomizer.ui
+package io.github.qavlad.adbrandomizer.ui.renderers
 
 import com.intellij.openapi.util.IconLoader
 import com.intellij.ui.JBColor
 import com.intellij.util.ui.ImageUtil
 import com.intellij.util.ui.JBFont
+import io.github.qavlad.adbrandomizer.services.DeviceInfo
 import io.github.qavlad.adbrandomizer.utils.DeviceConnectionUtils
 import io.github.qavlad.adbrandomizer.utils.DeviceDisplayInfo
 import java.awt.*

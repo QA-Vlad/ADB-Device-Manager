@@ -1,6 +1,4 @@
-// Файл: src/main/kotlin/io/github/qavlad/adbrandomizer/ui/ScrcpyCompatibilityDialog.kt
-
-package io.github.qavlad.adbrandomizer.ui
+package io.github.qavlad.adbrandomizer.ui.dialogs
 
 import com.intellij.ide.BrowserUtil
 import com.intellij.openapi.fileChooser.FileChooser

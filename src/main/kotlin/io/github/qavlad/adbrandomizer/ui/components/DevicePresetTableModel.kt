@@ -1,18 +1,41 @@
-package io.github.qavlad.adbrandomizer.ui
+package io.github.qavlad.adbrandomizer.ui.components
 
 import io.github.qavlad.adbrandomizer.services.DevicePreset
 import java.util.*
 import javax.swing.table.DefaultTableModel
 
-class DevicePresetTableModel(
-    data: Vector<Vector<Any>>,
-    columnNames: Vector<String>,
-    private val historyManager: HistoryManager
-) : DefaultTableModel(data, columnNames) {
+class DevicePresetTableModel : DefaultTableModel {
+
+    companion object {
+        /**
+         * Создает Vector строки таблицы из DevicePreset
+         */
+        fun createRowVector(preset: DevicePreset, rowNumber: Int = 0): Vector<Any> {
+            return Vector<Any>().apply {
+                add("☰")
+                add(rowNumber)
+                add(preset.label)
+                add(preset.size)
+                add(preset.dpi)
+                add("Delete")
+            }
+        }
+    }
 
     private var isUndoOperation = false
+    private val historyManager: HistoryManager
 
-    init {
+    // Конструктор для совместимости с оригинальным SettingsDialog
+    constructor(data: Vector<Vector<Any>>, columnNames: Vector<String>, historyManager: HistoryManager) : super(data, columnNames) {
+        this.historyManager = historyManager
+        updateRowNumbers()
+    }
+
+    // Конструктор для новой версии
+    @Suppress("UNUSED")
+    constructor(columnNames: List<String>, historyManager: HistoryManager) : super() {
+        this.historyManager = historyManager
+        setColumnIdentifiers(Vector(columnNames))
         updateRowNumbers()
     }
 
@@ -54,13 +77,30 @@ class DevicePresetTableModel(
 
     fun getPresets(): List<DevicePreset> {
         return dataVector.map { row ->
+            val rowVector = row as Vector<Any>
             DevicePreset(
-                label = row.elementAt(2) as? String ?: "",
-                size = row.elementAt(3) as? String ?: "",
-                dpi = row.elementAt(4) as? String ?: ""
+                label = rowVector.elementAt(2) as? String ?: "",
+                size = rowVector.elementAt(3) as? String ?: "",
+                dpi = rowVector.elementAt(4) as? String ?: ""
             )
         }
     }
+
+    @Suppress("UNUSED")
+    fun setPresets(presets: List<DevicePreset>) {
+        // Очищаем таблицу
+        rowCount = 0
+
+        // Добавляем новые пресеты
+        presets.forEach { preset ->
+            addRow(createRowVector(preset))
+        }
+        updateRowNumbers()
+    }
+
+
+
+
 
     /**
      * Находит все дубликаты пресетов по комбинации Size + DPI.

@@ -1,7 +1,6 @@
-// Файл: src/main/kotlin/io/github/qavlad/adbrandomizer/utils/DeviceConnectionUtils.kt
 package io.github.qavlad.adbrandomizer.utils
 
-import io.github.qavlad.adbrandomizer.ui.DeviceInfo
+import io.github.qavlad.adbrandomizer.services.DeviceInfo
 import java.awt.Rectangle
 
 object DeviceConnectionUtils {
@@ -49,7 +48,9 @@ object DeviceConnectionUtils {
         }
 
         return allDevices.any { otherDevice ->
-            deviceInfo.isSamePhysicalDevice(otherDevice) &&
+            // Убрали isSamePhysicalDevice, так как его нет в предоставленном коде.
+            // Сравнение по displaySerialNumber - разумная альтернатива.
+            (deviceInfo.displaySerialNumber != null && deviceInfo.displaySerialNumber == otherDevice.displaySerialNumber) &&
                     isWifiConnection(otherDevice.logicalSerialNumber)
         }
     }

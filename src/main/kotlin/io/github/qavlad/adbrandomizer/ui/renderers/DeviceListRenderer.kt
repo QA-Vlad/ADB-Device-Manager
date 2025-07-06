@@ -1,7 +1,8 @@
-// Файл: src/main/kotlin/io/github/qavlad/adbrandomizer/ui/DeviceListRenderer.kt
-package io.github.qavlad.adbrandomizer.ui
+package io.github.qavlad.adbrandomizer.ui.renderers
 
 import com.android.ddmlib.IDevice
+import io.github.qavlad.adbrandomizer.services.DeviceInfo
+import io.github.qavlad.adbrandomizer.ui.components.HoverState
 import java.awt.*
 import javax.swing.*
 
@@ -63,46 +64,3 @@ class DeviceListRenderer(
     }
 }
 
-/**
- * Data class для хранения информации об устройстве
- * Остается без изменений, но перенесен в отдельный файл для лучшей организации
- */
-data class DeviceInfo(
-    val device: IDevice,
-    val displayName: String,
-    val displaySerialNumber: String?,
-    val logicalSerialNumber: String,
-    val androidVersion: String,
-    val apiLevel: String,
-    val ipAddress: String?
-) {
-
-    override fun equals(other: Any?): Boolean {
-        if (this === other) return true
-        if (javaClass != other?.javaClass) return false
-        other as DeviceInfo
-        return logicalSerialNumber == other.logicalSerialNumber
-    }
-
-    override fun hashCode(): Int = logicalSerialNumber.hashCode()
-
-    /**
-     * Метод для безопасного сравнения устройств
-     */
-    fun isSamePhysicalDevice(other: DeviceInfo): Boolean {
-        // Если оба серийных номера не null и не пустые
-        if (!displaySerialNumber.isNullOrBlank() && !other.displaySerialNumber.isNullOrBlank()) {
-            return displaySerialNumber == other.displaySerialNumber
-        }
-
-        // Если один из них Wi-Fi, а другой USB, но с похожими именами
-        val thisIsWifi = logicalSerialNumber.matches(Regex("""^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}:\d+$"""))
-        val otherIsWifi = other.logicalSerialNumber.matches(Regex("""^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}:\d+$"""))
-
-        if (thisIsWifi != otherIsWifi) {
-            return displayName == other.displayName && androidVersion == other.androidVersion
-        }
-
-        return false
-    }
-}

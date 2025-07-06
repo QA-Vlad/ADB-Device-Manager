@@ -31,7 +31,14 @@ object DeviceStateService {
     private var lastResetDpiValue: String? = null
     
     fun updateDeviceState(deviceId: String, width: Int?, height: Int?, dpi: Int?) {
-        deviceStates[deviceId] = DeviceDisplayState(width, height, dpi)
+        val currentState = deviceStates[deviceId]
+        
+        // Обновляем состояние, сохраняя существующие значения для null параметров
+        deviceStates[deviceId] = DeviceDisplayState(
+            width = width ?: currentState?.width,
+            height = height ?: currentState?.height,
+            dpi = dpi ?: currentState?.dpi
+        )
     }
 
     fun setLastAppliedPresets(sizePreset: DevicePreset?, dpiPreset: DevicePreset?) {
@@ -59,9 +66,7 @@ object DeviceStateService {
             lastAppliedDpiPreset = null
         }
     }
-    fun getDeviceState(deviceId: String): DeviceDisplayState? {
-        return deviceStates[deviceId]
-    }
+
     
     fun getCurrentActivePresets(): ActivePresetInfo {
         val allPresets = SettingsService.getPresets()
@@ -108,9 +113,9 @@ object DeviceStateService {
         }
     }
     
-    fun refreshDeviceStates(project: Project) {
+    fun refreshDeviceStates(@Suppress("UNUSED_PARAMETER") project: Project) {
         try {
-            val devices = AdbService.getConnectedDevices(project)
+            val devices = AdbService.getConnectedDevices()
             
             devices.forEach { device ->
                 try {

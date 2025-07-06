@@ -1,9 +1,11 @@
-package io.github.qavlad.adbrandomizer.ui
+package io.github.qavlad.adbrandomizer.ui.components
 
 import com.intellij.icons.AllIcons
 import com.intellij.ui.table.JBTable
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.AbstractTableCellEditor
+import io.github.qavlad.adbrandomizer.ui.handlers.PresetTransferHandler
+import io.github.qavlad.adbrandomizer.ui.renderers.ValidationRenderer
 import java.awt.Dimension
 import java.awt.Component
 import java.awt.event.MouseAdapter

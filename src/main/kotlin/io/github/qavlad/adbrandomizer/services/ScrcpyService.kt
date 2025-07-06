@@ -5,6 +5,7 @@ package io.github.qavlad.adbrandomizer.services
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.progress.ProcessCanceledException
 import com.intellij.openapi.project.Project
+import io.github.qavlad.adbrandomizer.ui.dialogs.ScrcpyCompatibilityDialog
 import io.github.qavlad.adbrandomizer.utils.AdbPathResolver
 import java.io.File
 
@@ -27,7 +28,7 @@ object ScrcpyService {
         return null
     }
 
-    fun launchScrcpy(scrcpyPath: String, serialNumber: String, project: Project): Boolean {
+    fun launchScrcpy(scrcpyPath: String, serialNumber: String, @Suppress("UNUSED_PARAMETER") project: Project): Boolean {
         try {
             if (scrcpyPath.isBlank() || serialNumber.isBlank()) {
                 println("ADB_Randomizer: Empty scrcpy path or serial number provided")
@@ -56,13 +57,13 @@ object ScrcpyService {
             if (!success) {
                 var retry = false
                 ApplicationManager.getApplication().invokeAndWait {
-                    val dialog = io.github.qavlad.adbrandomizer.ui.ScrcpyCompatibilityDialog(
+                    val dialog = ScrcpyCompatibilityDialog(
                         project,
                         version.ifBlank { "Unknown" },
                         serialNumber
                     )
                     dialog.show()
-                    if (dialog.exitCode == io.github.qavlad.adbrandomizer.ui.ScrcpyCompatibilityDialog.RETRY_EXIT_CODE) {
+                    if (dialog.exitCode == ScrcpyCompatibilityDialog.RETRY_EXIT_CODE) {
                         retry = true
                     }
                 }
@@ -193,7 +194,7 @@ object ScrcpyService {
                     println("ADB_Randomizer: Scrcpy for device $serialNumber closed with exit code: $exitCode")
                     outputReader.join(1000)
                     errorReader.join(1000)
-                } catch (e: InterruptedException) {
+                } catch (_: InterruptedException) {
                     println("ADB_Randomizer: Scrcpy monitoring interrupted for device: $serialNumber")
                     Thread.currentThread().interrupt()
                 } catch (e: Exception) {

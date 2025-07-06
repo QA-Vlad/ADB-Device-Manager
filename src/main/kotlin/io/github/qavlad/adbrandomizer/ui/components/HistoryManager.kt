@@ -1,4 +1,4 @@
-package io.github.qavlad.adbrandomizer.ui
+package io.github.qavlad.adbrandomizer.ui.components
 
 import java.util.*
 

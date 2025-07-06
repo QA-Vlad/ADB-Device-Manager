@@ -1,5 +1,4 @@
-// Файл: src/main/kotlin/io/github/qavlad/adbrandomizer/ui/HoverState.kt
-package io.github.qavlad.adbrandomizer.ui
+package io.github.qavlad.adbrandomizer.ui.components
 
 /**
  * Универсальное состояние hover эффектов для всех UI компонентов
@@ -23,12 +22,7 @@ data class HoverState(
         return hoveredDeviceIndex == index && hoveredButtonType == buttonType
     }
 
-    /**
-     * Проверяет, есть ли активный hover на любой кнопке устройства
-     */
-    fun hasActiveDeviceHover(): Boolean {
-        return hoveredDeviceIndex != -1 && hoveredButtonType != null
-    }
+
     
     /**
      * Проверяет, находится ли указанная ячейка таблицы в состоянии hover
@@ -71,6 +65,8 @@ data class HoverState(
     fun clearTableSelection(): HoverState {
         return copy(selectedTableRow = -1, selectedTableColumn = -1)
     }
+    
+
 
     companion object {
         const val BUTTON_TYPE_MIRROR = "MIRROR"
@@ -81,18 +77,6 @@ data class HoverState(
          */
         fun noHover(): HoverState = HoverState()
 
-        /**
-         * Создает состояние с hover на указанной кнопке устройства
-         */
-        fun deviceHovering(index: Int, buttonType: String): HoverState {
-            return HoverState(hoveredDeviceIndex = index, hoveredButtonType = buttonType)
-        }
-        
-        /**
-         * Создает состояние с hover ячейки таблицы
-         */
-        fun tableHovering(row: Int, column: Int): HoverState {
-            return HoverState(hoveredTableRow = row, hoveredTableColumn = column)
-        }
+
     }
 }

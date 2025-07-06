@@ -1,12 +1,8 @@
-// Файл: src/main/kotlin/io/github/qavlad/adbrandomizer/services/AdbService.kt
-
 package io.github.qavlad.adbrandomizer.services
 
-import com.android.ddmlib.AndroidDebugBridge
 import com.android.ddmlib.CollectingOutputReceiver
 import com.android.ddmlib.IDevice
 import com.android.ddmlib.NullOutputReceiver
-import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.project.Project
 import io.github.qavlad.adbrandomizer.utils.AdbPathResolver
 import io.github.qavlad.adbrandomizer.utils.ValidationUtils
@@ -15,98 +11,58 @@ import java.util.regex.Pattern
 
 object AdbService {
 
-    private var customBridge: AndroidDebugBridge? = null
-    private var isInitialized = false
-    private var lastDeviceCount = -1
-
-    @Suppress("DEPRECATION") // AndroidDebugBridge API deprecated but no modern replacement available
-    private fun getOrCreateDebugBridge(): AndroidDebugBridge? {
-        if (customBridge != null && customBridge!!.isConnected) {
-            return customBridge
-        }
-
-        val adbPath = AdbPathResolver.findAdbExecutable()
-        if (adbPath == null) {
-            println("ADB_Randomizer: ADB executable not found")
-            return null
-        }
-
-        try {
-            // ПРИНУДИТЕЛЬНО запускаем ADB сервер
-            println("ADB_Randomizer: Starting ADB server...")
-            val startServerCmd = ProcessBuilder(adbPath, "start-server")
-            val process = startServerCmd.start()
-            process.waitFor(5, TimeUnit.SECONDS)
-
-            // Используем современный API где возможно
-            if (!isInitialized) {
-                AndroidDebugBridge.initIfNeeded(false)  // Менее deprecated чем init()
-                isInitialized = true
-                println("ADB_Randomizer: AndroidDebugBridge initialized")
-            }
-
-            // Используем createBridge с путем к adb
-            // Подавляем deprecation warning так как нет современной альтернативы
-            @Suppress("DEPRECATION")
-            customBridge = AndroidDebugBridge.createBridge(adbPath, false)
-
-            // Увеличиваем время ожидания
-            var attempts = 100  // было 50, стало 100
-            while (customBridge != null && !customBridge!!.isConnected && attempts > 0) {
-                Thread.sleep(200)  // было 100, стало 200
-                attempts--
-            }
-
-            if (customBridge != null && customBridge!!.isConnected) {
-                println("ADB_Randomizer: Successfully created ADB bridge with $adbPath")
-                return customBridge
-            } else {
-                println("ADB_Randomizer: Failed to connect ADB bridge")
-                return null
-            }
-        } catch (e: Exception) {
-            println("ADB_Randomizer: Error creating ADB bridge: ${e.message}")
-            e.printStackTrace()
-            return null
-        }
+    fun getConnectedDevices(@Suppress("UNUSED_PARAMETER") project: Project): List<IDevice> {
+        return AdbConnectionManager.getConnectedDevices()
     }
 
-    @Suppress("UNUSED_PARAMETER")
-    fun getConnectedDevices(project: Project): List<IDevice> {
-        var bridge: AndroidDebugBridge? = null
-
-        ApplicationManager.getApplication().invokeAndWait {
-            bridge = getOrCreateDebugBridge()
-        }
-
-        if (bridge == null) {
-            println("ADB_Randomizer: AndroidDebugBridge is not available")
-            return emptyList()
-        }
-
-        var attempts = 20
-        while (!bridge!!.hasInitialDeviceList() && attempts > 0) {
-            try {
-                Thread.sleep(100)
-            } catch (_: InterruptedException) {
-                Thread.currentThread().interrupt()
-                return emptyList()
-            }
-            attempts--
-        }
-
-        val devices = bridge!!.devices.filter { it.isOnline }
-
-        // ЛОГИРУЕМ ТОЛЬКО ПРИ ИЗМЕНЕНИЯХ
-        if (devices.size != lastDeviceCount) {
-            println("ADB_Randomizer: Found ${devices.size} online devices")
-            lastDeviceCount = devices.size
-        }
-
-        return devices
+    // Overload для обратной совместимости
+    fun getConnectedDevices(): List<IDevice> {
+        return AdbConnectionManager.getConnectedDevices()
     }
 
     fun getDeviceIpAddress(device: IDevice): String? {
+        return try {
+            val receiver = CollectingOutputReceiver()
+            device.executeShellCommand("ip route", receiver, 5, TimeUnit.SECONDS)
+            
+            val output = receiver.output
+            if (output.isBlank()) return null
+            
+            // Паттерн для поиска IP адреса в выводе ip route
+            // Пример строки: "192.168.1.0/24 dev wlan0 proto kernel scope link src 192.168.1.20"
+            val pattern = Pattern.compile(""".*\bdev\s*(\S+)\s*.*\bsrc\s*(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b.*""")
+            
+            val addresses = mutableListOf<Pair<String, String>>() // interface -> IP
+            
+            output.lines().forEach { line ->
+                val matcher = pattern.matcher(line)
+                if (matcher.matches()) {
+                    val interfaceName = matcher.group(1)
+                    val ip = matcher.group(2)
+                    if (ValidationUtils.isUsableIpAddress(ip)) {
+                        addresses.add(interfaceName to ip)
+                    }
+                }
+            }
+            
+            // Приоритет интерфейсов: wlan > rmnet_data > eth
+            addresses.minByOrNull { (interfaceName, _) ->
+                when {
+                    interfaceName.startsWith("wlan") -> 0
+                    interfaceName.startsWith("rmnet_data") -> 1
+                    interfaceName.startsWith("eth") -> 2
+                    else -> 3
+                }
+            }?.second
+            
+        } catch (e: Exception) {
+            println("ADB_Randomizer: Error getting device IP: ${e.message}")
+            // Fallback на старый метод
+            getDeviceIpAddressFallback(device)
+        }
+    }
+    
+    private fun getDeviceIpAddressFallback(device: IDevice): String? {
         // Список возможных Wi-Fi интерфейсов для проверки
         val wifiInterfaces = listOf("wlan0", "wlan1", "wlan2", "eth0", "rmnet_data0")
 
@@ -116,7 +72,7 @@ object AdbService {
         }
 
         // Fallback: пытаемся получить IP через другие методы
-        return getIpAddressFallback(device)
+        return getIpAddressFallbackOld(device)
     }
 
     private fun getIpFromInterface(device: IDevice, interfaceName: String): String? {
@@ -133,17 +89,22 @@ object AdbService {
                     val ip = matcher.group(1)
                     // Используем ValidationUtils для проверки IP
                     if (ValidationUtils.isUsableIpAddress(ip)) {
-                        return ip
+                        ip
+                    } else {
+                        null
                     }
+                } else {
+                    null
                 }
+            } else {
+                null
             }
-            null
         } catch (_: Exception) {
             null
         }
     }
 
-    private fun getIpAddressFallback(device: IDevice): String? {
+    private fun getIpAddressFallbackOld(device: IDevice): String? {
         // Метод 1: через netcfg (старые устройства)
         val netcfgIp = getIpFromNetcfg(device)
         if (netcfgIp != null) return netcfgIp
@@ -166,11 +127,16 @@ object AdbService {
                 if (matcher.find()) {
                     val ip = matcher.group(1)
                     if (ValidationUtils.isUsableIpAddress(ip)) {
-                        return ip
+                        ip
+                    } else {
+                        null
                     }
+                } else {
+                    null
                 }
+            } else {
+                null
             }
-            null
         } catch (e: Exception) {
             println("ADB_Randomizer: Error in netcfg IP detection: ${e.message}")
             null
@@ -190,11 +156,16 @@ object AdbService {
                 if (matcher.find()) {
                     val ip = matcher.group(1)
                     if (ValidationUtils.isUsableIpAddress(ip)) {
-                        return ip
+                        ip
+                    } else {
+                        null
                     }
+                } else {
+                    null
                 }
+            } else {
+                null
             }
-            null
         } catch (e: Exception) {
             println("ADB_Randomizer: Error in ifconfig IP detection: ${e.message}")
             null
@@ -232,9 +203,10 @@ object AdbService {
             if (matcher.find()) {
                 val width = matcher.group(1).toInt()
                 val height = matcher.group(2).toInt()
-                return Pair(width, height)
+                Pair(width, height)
+            } else {
+                null
             }
-            null
         } catch (_: Exception) {
             null
         }
@@ -251,9 +223,10 @@ object AdbService {
             val matcher = dpiPattern.matcher(output)
             
             if (matcher.find()) {
-                return matcher.group(1).toInt()
+                matcher.group(1).toInt()
+            } else {
+                null
             }
-            null
         } catch (_: Exception) {
             null
         }
@@ -265,16 +238,30 @@ object AdbService {
             throw IllegalArgumentException("Port must be between 1024 and 65535, got: $port")
         }
 
-        // Проверяем, не занят ли порт уже
-        if (isPortInUse(port)) {
-            println("ADB_Randomizer: Warning - Port $port might be in use")
+        println("ADB_Randomizer: Enabling TCP/IP mode on port $port for device ${device.serialNumber}")
+        
+        try {
+            // Включаем TCP/IP режим
+            device.executeShellCommand("setprop service.adb.tcp.port $port", NullOutputReceiver(), 5, TimeUnit.SECONDS)
+            Thread.sleep(500)
+            
+            // Перезапускаем ADB сервис на устройстве
+            device.executeShellCommand("stop adbd", NullOutputReceiver(), 5, TimeUnit.SECONDS)
+            Thread.sleep(500)
+            device.executeShellCommand("start adbd", NullOutputReceiver(), 5, TimeUnit.SECONDS)
+            Thread.sleep(1500)
+            
+            println("ADB_Randomizer: TCP/IP mode should be enabled on port $port")
+        } catch (e: Exception) {
+            // Fallback на стандартный метод
+            println("ADB_Randomizer: Failed to enable TCP/IP via setprop, trying standard method: ${e.message}")
+            device.executeShellCommand("tcpip $port", NullOutputReceiver(), 15, TimeUnit.SECONDS)
+            Thread.sleep(2000)
         }
-
-        device.executeShellCommand("tcpip $port", NullOutputReceiver(), 15, TimeUnit.SECONDS)
-        Thread.sleep(1000)
     }
 
     // Метод для проверки занятости порта
+    @Suppress("UNUSED")
     private fun isPortInUse(port: Int): Boolean {
         return try {
             java.net.ServerSocket(port).use { false }
@@ -283,8 +270,7 @@ object AdbService {
         }
     }
 
-    @Suppress("UNUSED_PARAMETER")
-    fun connectWifi(project: Project, ipAddress: String, port: Int = 5555): Boolean {
+    fun connectWifi(@Suppress("UNUSED_PARAMETER") project: Project?, ipAddress: String, port: Int = 5555): Boolean {
         return try {
             val adbPath = AdbPathResolver.findAdbExecutable()
             if (adbPath == null) {
@@ -309,7 +295,13 @@ object AdbService {
                 return true
             }
 
+            // Отключаемся от всех устройств перед новым подключением
+            val disconnectCmd = ProcessBuilder(adbPath, "disconnect")
+            disconnectCmd.start().waitFor(2, TimeUnit.SECONDS)
+            Thread.sleep(500)
+
             // Подключаемся
+            println("ADB_Randomizer: Connecting to $target...")
             val connectCmd = ProcessBuilder(adbPath, "connect", target)
             connectCmd.redirectErrorStream(true)
 
@@ -317,21 +309,39 @@ object AdbService {
             val completed = process.waitFor(10, TimeUnit.SECONDS)
 
             if (completed) {
-                val output = process.inputStream.bufferedReader().use { it.readText() }
+                val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
                 println("ADB_Randomizer: Connect output: $output")
 
+                // Проверяем разные варианты успешного подключения
                 val success = (process.exitValue() == 0) &&
-                        (output.contains("connected to") || output.contains("already connected")) &&
-                        !output.contains("failed")
+                        (output.contains("connected to $ipAddress:$port") || 
+                         output.contains("connected to $target") ||
+                         output.contains("already connected to $target")) &&
+                        !output.contains("failed") &&
+                        !output.contains("cannot connect") &&
+                        !output.contains("Connection refused")
 
-                return success
+                if (success) {
+                    // Дополнительная проверка через devices
+                    Thread.sleep(1000)
+                    val verifyCmd = ProcessBuilder(adbPath, "devices")
+                    val verifyProcess = verifyCmd.start()
+                    val verifyOutput = verifyProcess.inputStream.bufferedReader().use { it.readText() }
+                    val verified = verifyOutput.contains(target)
+                    println("ADB_Randomizer: Connection verified: $verified")
+                    return verified
+                }
+
+                return false
             } else {
                 process.destroyForcibly()
+                println("ADB_Randomizer: Connection timed out")
                 return false
             }
 
         } catch (e: Exception) {
             println("ADB_Randomizer: Connect error: ${e.message}")
+            e.printStackTrace()
             false
         }
     }
