@@ -178,9 +178,11 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                 
                 DeviceStateService.handleReset(resetSize, resetDpi)
                 
+                // Немедленно уведомляем об обновлении до UI обновлений
+                SettingsDialogUpdateNotifier.notifyUpdate()
+                
                 ApplicationManager.getApplication().invokeLater {
                     showResetResult(devices.size, resetSize, resetDpi)
-                    SettingsDialogUpdateNotifier.notifyUpdate()
                 }
             }
         }.queue()

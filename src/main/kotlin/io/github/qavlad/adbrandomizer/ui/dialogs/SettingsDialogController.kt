@@ -569,11 +569,12 @@ class SettingsDialogController(
 
     private fun refreshDeviceStatesIfNeeded() {
         if (project != null) {
-            val activePresets = DeviceStateService.getCurrentActivePresets()
-            if (activePresets.activeSizePreset == null && activePresets.activeDpiPreset == null) {
-                DeviceStateService.refreshDeviceStates(project)
-            }
+            // Всегда обновляем состояние устройств при открытии диалога
+            DeviceStateService.refreshDeviceStates(project)
+            
+            // Немедленно перерисовываем таблицу
             SwingUtilities.invokeLater {
+                validateFields()
                 table.repaint()
             }
         }

@@ -91,7 +91,11 @@ class ValidationRenderer(
             } else if (sizeIndicator == IndicatorType.YELLOW || dpiIndicator == IndicatorType.YELLOW) {
                 border = YellowParameterBorder()
                 component.foreground = JBColor.ORANGE
-            } else if (sizeIndicator == IndicatorType.GRAY || dpiIndicator == IndicatorType.GRAY) {
+            } else if (sizeIndicator == IndicatorType.GRAY && dpiIndicator == IndicatorType.GRAY && 
+                       preset.size.isNotBlank() && preset.dpi.isNotBlank()) {
+                // Серая рамка на Label только если:
+                // 1. ОБЕ колонки имеют серую рамку
+                // 2. Оба значения (size и dpi) не пустые
                 border = GrayParameterBorder()
             }
         }

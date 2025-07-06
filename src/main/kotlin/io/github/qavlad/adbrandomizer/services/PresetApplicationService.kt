@@ -34,6 +34,9 @@ object PresetApplicationService {
                 
                 DeviceStateService.setLastAppliedPresets(appliedSizePreset, appliedDpiPreset)
                 
+                // Немедленно уведомляем об обновлении до UI обновлений
+                SettingsDialogUpdateNotifier.notifyUpdate()
+                
                 ApplicationManager.getApplication().invokeLater {
                     // Ищем пресет по label, а не по точному совпадению
                     val savedPresets = SettingsService.getPresets()
