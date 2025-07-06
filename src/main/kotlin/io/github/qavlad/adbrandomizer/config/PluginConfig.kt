@@ -38,25 +38,15 @@ object PluginConfig {
     
     // Network Configuration
     object Network {
-        const val DEFAULT_ADB_PORT = 5555
+        // const val DEFAULT_ADB_PORT = 5555 // удалено
         const val MIN_ADB_PORT = 1024
         const val MAX_PORT = 65535
         val WIFI_INTERFACES = listOf("wlan0", "wlan1", "wlan2", "eth0", "rmnet_data0")
         const val TCPIP_ENABLE_DELAY_MS = 1000L
-        const val WIFI_CONNECTION_VERIFY_ATTEMPTS = 10
+        // const val WIFI_CONNECTION_VERIFY_ATTEMPTS = 3 // удалено
         const val WIFI_CONNECTION_VERIFY_DELAY_MS = 1000L
         const val CONNECTION_VERIFY_DELAY_MS = 1000L
         const val DISCONNECT_WAIT_MS = 500L
-    }
-    
-    // Device Properties
-    object DeviceProperties {
-        val SERIAL_NUMBER_PROPERTIES = listOf(
-            "ro.serialno", 
-            "ro.boot.serialno", 
-            "gsm.sn1", 
-            "ril.serialnumber"
-        )
     }
     
     // Default Presets
@@ -80,11 +70,10 @@ object PluginConfig {
     object Patterns {
         val WIFI_SERIAL_REGEX = Regex("""^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}:\d+$""")
         val SIZE_FORMAT_REGEX = Regex("""^\d+\s*[xхXХ]\s*\d+$""")
-        val IP_PATTERN = """inet (\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})"""
-        val NETCFG_PATTERN = """wlan\d+\s+UP\s+(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})"""
-        val IFCONFIG_PATTERN = """inet addr:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})"""
-        val SIZE_OUTPUT_PATTERN = """(?:Physical|Override) size: (\d+)x(\d+)"""
-        val DPI_OUTPUT_PATTERN = """(?:Physical|Override) density: (\d+)"""
+        const val NETCFG_PATTERN = "wlan\\d+\\s+UP\\s+(\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3})"
+        const val IFCONFIG_PATTERN = "inet addr:(\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3})"
+        const val SIZE_OUTPUT_PATTERN = "(?:Physical|Override) size: (\\d+)x(\\d+)"
+        const val DPI_OUTPUT_PATTERN = "(?:Physical|Override) density: (\\d+)"
     }
     
     // Settings Keys
@@ -98,12 +87,5 @@ object PluginConfig {
         const val RETRY_EXIT_CODE = 101
         const val BUTTON_TYPE_MIRROR = "MIRROR"
         const val BUTTON_TYPE_WIFI = "WIFI"
-    }
-    
-    // Feature Flags (для будущего)
-    object Features {
-        const val ENABLE_DEVICE_LOGS = true
-        const val ENABLE_AUTO_RECONNECT = false
-        const val ENABLE_CRASH_REPORTING = false
     }
 } 

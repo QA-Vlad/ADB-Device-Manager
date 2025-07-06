@@ -1,7 +1,7 @@
 package io.github.qavlad.adbrandomizer.services
 
-import com.intellij.openapi.project.Project
 import io.github.qavlad.adbrandomizer.utils.ValidationUtils
+import kotlinx.coroutines.withContext
 
 object DeviceStateService {
     
@@ -113,7 +113,7 @@ object DeviceStateService {
         }
     }
     
-    fun refreshDeviceStates(@Suppress("UNUSED_PARAMETER") project: Project) {
+    suspend fun refreshDeviceStatesAsync() = withContext(kotlinx.coroutines.Dispatchers.IO) {
         try {
             val devicesResult = AdbService.getConnectedDevices()
             val devices = devicesResult.getOrNull() ?: emptyList()

@@ -19,6 +19,8 @@ import java.awt.event.MouseEvent
 import java.util.*
 import javax.swing.*
 import javax.swing.table.TableCellRenderer
+import com.intellij.openapi.application.ApplicationManager
+import javax.swing.SwingUtilities
 
 /**
  * Контроллер для диалога настроек.
@@ -566,13 +568,14 @@ class SettingsDialogController(
 
     private fun refreshDeviceStatesIfNeeded() {
         if (project != null) {
-            // Всегда обновляем состояние устройств при открытии диалога
-            DeviceStateService.refreshDeviceStates(project)
-            
-            // Немедленно перерисовываем таблицу
-            SwingUtilities.invokeLater {
-                validateFields()
-                table.repaint()
+            ApplicationManager.getApplication().executeOnPooledThread {
+                kotlinx.coroutines.runBlocking {
+                    DeviceStateService.refreshDeviceStatesAsync()
+                }
+                SwingUtilities.invokeLater {
+                    validateFields()
+                    table.repaint()
+                }
             }
         }
     }
