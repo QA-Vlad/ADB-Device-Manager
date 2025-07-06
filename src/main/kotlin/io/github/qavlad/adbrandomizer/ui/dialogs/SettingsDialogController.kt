@@ -14,6 +14,7 @@ import io.github.qavlad.adbrandomizer.ui.theme.ColorScheme
 import java.awt.Component
 import java.awt.Container
 import java.awt.event.MouseEvent
+import java.awt.event.MouseAdapter
 import java.util.*
 import javax.swing.*
 import javax.swing.table.TableCellRenderer
@@ -45,6 +46,7 @@ class SettingsDialogController(
         private set
     val historyManager = HistoryManager()
     private var updateListener: (() -> Unit)? = null
+    private var globalClickListener: java.awt.event.AWTEventListener? = null
 
     // Состояние редактирования ячейки
     private var editingCellOldValue: String? = null
@@ -163,6 +165,7 @@ class SettingsDialogController(
      * Инициализирует обработчики и конфигураторы
      */
     fun initializeHandlers() {
+        println("ADB_DEBUG: initializeHandlers called")
         validationRenderer = ValidationRenderer(
             hoverState = { hoverState },
             getPresetAtRow = ::getPresetAtRow,
@@ -239,6 +242,10 @@ class SettingsDialogController(
                 table.repaint(oldRect)
             }
         }
+    }
+    
+    fun setGlobalClickListener(listener: java.awt.event.AWTEventListener) {
+        globalClickListener = listener
     }
 
     fun handleTableExit() {
@@ -575,5 +582,50 @@ class SettingsDialogController(
     fun dispose() {
         updateListener?.let { SettingsDialogUpdateNotifier.removeListener(it) }
         keyboardHandler.removeGlobalKeyListener()
+        
+        // Удаляем глобальный обработчик кликов
+        globalClickListener?.let {
+            java.awt.Toolkit.getDefaultToolkit().removeAWTEventListener(it)
+        }
+    }
+    
+    /**
+     * Рекурсивно добавляет обработчик клика ко всем компонентам для выхода из режима редактирования
+     */
+    fun addClickListenerRecursively(container: Container, table: JBTable) {
+        val mouseListener = object : MouseAdapter() {
+            override fun mouseClicked(e: MouseEvent) {
+                // Проверяем, что клик не по самой таблице и не по кнопкам
+                if (e.source !is JBTable && e.source !is JButton && table.isEditing) {
+                    println("ADB_DEBUG: Cell editing stopped by recursive click listener")
+                    table.cellEditor?.stopCellEditing()
+                }
+            }
+        }
+        
+        println("ADB_DEBUG: Adding mouse listener to: ${container.javaClass.simpleName}")
+        // Добавляем обработчик к контейнеру
+        container.addMouseListener(mouseListener)
+        
+        // Рекурсивно обрабатываем все дочерние компоненты
+        for (component in container.components) {
+            println("ADB_DEBUG: Processing component: ${component.javaClass.simpleName}")
+            when (component) {
+                is JBTable -> {
+                    // Пропускаем таблицу
+                }
+                is JButton -> {
+                    // Пропускаем кнопки
+                }
+                is Container -> {
+                    addClickListenerRecursively(component, table)
+                }
+                else -> {
+                    // Добавляем обработчик к обычным компонентам
+                    println("ADB_DEBUG: Adding mouse listener to non-container: ${component.javaClass.simpleName}")
+                    component.addMouseListener(mouseListener)
+                }
+            }
+        }
     }
 }

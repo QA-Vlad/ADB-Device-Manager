@@ -80,7 +80,7 @@ class TableConfigurator(
             val column = table.columnAtPoint(e.point)
             
             if (!hoverState().isTableCellHovered(row, column)) {
-                println("ADB_DEBUG: Updating hover state to row=$row, column=$column")
+                // println("ADB_DEBUG: Updating hover state to row=$row, column=$column")
                 
                 val oldHoverState = hoverState()
                 setHoverState(hoverState().withTableHover(row, column))
@@ -102,6 +102,12 @@ class TableConfigurator(
         override fun mouseClicked(e: MouseEvent) {
             val row = table.rowAtPoint(e.point)
             val column = table.columnAtPoint(e.point)
+            
+            // Если клик произошел за пределами таблицы и таблица в режиме редактирования, останавливаем редактирование
+            if ((row == -1 || column == -1) && table.isEditing) {
+                table.cellEditor?.stopCellEditing()
+                return
+            }
             
             onCellClicked(row, column, e.clickCount)
         }

@@ -80,7 +80,7 @@ class ValidationRenderer(
             if (sizeIndicator == IndicatorType.GREEN && dpiIndicator == IndicatorType.GREEN) {
                 border = ActiveParameterBorder()
                 component.foreground = ColorScheme.PresetIndicator.ACTIVE_TEXT
-            } else if (sizeIndicator == IndicatorType.YELLOW || dpiIndicator == IndicatorType.YELLOW) {
+            } else if (sizeIndicator == IndicatorType.YELLOW && dpiIndicator == IndicatorType.YELLOW) {
                 border = YellowParameterBorder()
                 component.foreground = ColorScheme.PresetIndicator.MODIFIED_TEXT
             } else if (sizeIndicator == IndicatorType.GRAY && dpiIndicator == IndicatorType.GRAY && 
