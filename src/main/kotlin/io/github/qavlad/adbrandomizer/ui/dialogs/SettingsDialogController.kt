@@ -2,8 +2,6 @@ package io.github.qavlad.adbrandomizer.ui.dialogs
 
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.SystemInfo
-import com.intellij.ui.Gray
-import com.intellij.ui.JBColor
 import com.intellij.ui.table.JBTable
 import io.github.qavlad.adbrandomizer.config.PluginConfig
 import io.github.qavlad.adbrandomizer.services.*
@@ -12,7 +10,7 @@ import io.github.qavlad.adbrandomizer.ui.handlers.KeyboardHandler
 import io.github.qavlad.adbrandomizer.ui.renderers.ValidationRenderer
 import io.github.qavlad.adbrandomizer.utils.ButtonUtils
 import io.github.qavlad.adbrandomizer.utils.ValidationUtils
-import java.awt.Color
+import io.github.qavlad.adbrandomizer.ui.theme.ColorScheme
 import java.awt.Component
 import java.awt.Container
 import java.awt.event.MouseEvent
@@ -108,24 +106,18 @@ class SettingsDialogController(
                         }
                         if (!isValid) {
                             isInvalidCell = true
-                            component.background = JBColor.PINK
-                            component.foreground = JBColor.BLACK
-                            component.isOpaque = true
                         }
                     }
 
-                    if (!isInvalidCell) {
-                        if (isSelectedCell) {
-                            component.background = JBColor(Color(230, 230, 250), Color(80, 80, 100))
-                            component.isOpaque = true
-                        } else if (isHovered) {
-                            component.background = JBColor(Gray._240, Gray._70)
-                            component.isOpaque = true
-                        } else {
-                            component.background = UIManager.getColor("Table.background") ?: JBColor.WHITE
-                            component.isOpaque = true
-                        }
-                    }
+                    component.background = ColorScheme.getTableCellBackground(
+                        isSelected = isSelectedCell,
+                        isHovered = isHovered,
+                        isError = isInvalidCell
+                    )
+                    component.foreground = ColorScheme.getTableCellForeground(
+                        isError = isInvalidCell
+                    )
+                    component.isOpaque = true
                 }
 
                 return component

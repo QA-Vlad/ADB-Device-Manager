@@ -13,6 +13,7 @@ import io.github.qavlad.adbrandomizer.ui.dialogs.SettingsDialog
 import io.github.qavlad.adbrandomizer.ui.dialogs.ScrcpyCompatibilityDialog
 import io.github.qavlad.adbrandomizer.utils.NotificationUtils
 import io.github.qavlad.adbrandomizer.utils.ValidationUtils
+import io.github.qavlad.adbrandomizer.utils.PluginLogger
 import java.awt.*
 import java.util.Locale
 import javax.swing.*
@@ -74,7 +75,12 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
 
     private fun validateDevicesAvailable(): Boolean {
         val devicesResult = AdbService.getConnectedDevices()
-        val devices = devicesResult.getOrNull() ?: emptyList()
+        val devices = devicesResult.getOrNull() ?: run {
+            devicesResult.onError { exception, message ->
+                PluginLogger.error("Failed to get connected devices", exception, message ?: "")
+            }
+            emptyList()
+        }
         if (devices.isEmpty()) {
             NotificationUtils.showInfo(project, "No connected devices found.")
             return false
@@ -175,7 +181,13 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
 
         object : Task.Backgroundable(project, actionDescription) {
             override fun run(indicator: ProgressIndicator) {
-                val devices = AdbService.getConnectedDevices().getOrNull() ?: emptyList()
+                val devicesResult = AdbService.getConnectedDevices()
+                val devices = devicesResult.getOrNull() ?: run {
+                    devicesResult.onError { exception, message ->
+                        PluginLogger.error("Failed to get devices for reset", exception, message ?: "")
+                    }
+                    emptyList()
+                }
                 resetAllDevices(devices, resetSize, resetDpi, indicator)
                 
                 DeviceStateService.handleReset(resetSize, resetDpi)
@@ -252,7 +264,13 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                 indicator.text = "Connecting to $ipAddress:$port..."
 
                 try {
-                    val success = AdbService.connectWifi(project, ipAddress, port).getOrNull() ?: false
+                    val connectResult = AdbService.connectWifi(project, ipAddress, port)
+                    val success = connectResult.getOrNull() ?: run {
+                        connectResult.onError { exception, message ->
+                            PluginLogger.wifiConnectionFailed(ipAddress, port, exception)
+                        }
+                        false
+                    }
                     handleConnectionResult(success, ipAddress, port)
                 } catch (e: Exception) {
                     ApplicationManager.getApplication().invokeLater {
@@ -266,7 +284,13 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
     private fun handleConnectionResult(success: Boolean, ipAddress: String, port: Int) {
         if (success) {
             Thread.sleep(PluginConfig.Network.CONNECTION_VERIFY_DELAY_MS)
-            val devices = AdbService.getConnectedDevices().getOrNull() ?: emptyList()
+            val devicesResult = AdbService.getConnectedDevices()
+            val devices = devicesResult.getOrNull() ?: run {
+                devicesResult.onError { exception, message ->
+                    PluginLogger.error("Failed to verify connection", exception, message ?: "")
+                }
+                emptyList()
+            }
             val connected = devices.any { it.serialNumber.startsWith(ipAddress) }
 
             ApplicationManager.getApplication().invokeLater {
@@ -290,7 +314,12 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                 indicator.text = "Getting IP address for ${device.name}..."
 
                 val ipResult = AdbService.getDeviceIpAddress(device)
-                val ipAddress = ipResult.getOrNull()
+                val ipAddress = ipResult.getOrNull() ?: run {
+                    ipResult.onError { exception, message ->
+                        PluginLogger.error("Failed to get IP address for device ${device.name}", exception, message ?: "")
+                    }
+                    null
+                }
                 if (ipAddress.isNullOrBlank()) {
                     NotificationUtils.showError(project, "Cannot find IP address for device ${device.name}. Make sure it's connected to Wi-Fi.")
                     return
@@ -300,7 +329,12 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                 try {
                     // Получаем IP до включения TCP/IP, чтобы убедиться что устройство подключено к Wi-Fi
                     val ipBeforeResult = AdbService.getDeviceIpAddress(device)
-                    val ipBeforeEnable = ipBeforeResult.getOrNull()
+                    val ipBeforeEnable = ipBeforeResult.getOrNull() ?: run {
+                        ipBeforeResult.onError { exception, message ->
+                            PluginLogger.error("Failed to verify device IP before TCP/IP enable", exception, message ?: "")
+                        }
+                        null
+                    }
                     if (ipBeforeEnable.isNullOrBlank()) {
                         ApplicationManager.getApplication().invokeLater {
                             NotificationUtils.showError(project, "Cannot get device IP. Make sure Wi-Fi is enabled and connected.")
@@ -309,8 +343,11 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                     }
                     
                     // Сначала включаем TCP/IP режим
-                    AdbService.enableTcpIp(device)
-                    println("ADB_Randomizer: TCP/IP mode enabled on port 5555")
+                    val tcpipResult = AdbService.enableTcpIp(device)
+                    tcpipResult.onError { exception, message ->
+                        PluginLogger.error("Failed to enable TCP/IP mode", exception, message ?: "")
+                    }
+                    PluginLogger.info("TCP/IP mode enabled on port 5555")
                     
                     // Даем устройству время на включение TCP/IP
                     Thread.sleep(PluginConfig.Network.TCPIP_ENABLE_DELAY_MS)
@@ -318,13 +355,25 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                     indicator.text = "Connecting to $ipAddress:5555..."
                     
                     // Первая попытка подключения
-                    var success = AdbService.connectWifi(project, ipAddress).getOrNull() ?: false
+                    val firstConnectResult = AdbService.connectWifi(project, ipAddress)
+                    var success = firstConnectResult.getOrNull() ?: run {
+                        firstConnectResult.onError { exception, message ->
+                            PluginLogger.wifiConnectionFailed(ipAddress, 5555, exception)
+                        }
+                        false
+                    }
                     
                     if (!success) {
                         // Если не удалось, пробуем еще раз с большей задержкой
-                        println("ADB_Randomizer: First connection attempt failed, retrying...")
+                        PluginLogger.info("First connection attempt failed, retrying...")
                         Thread.sleep(PluginConfig.Network.WIFI_CONNECTION_VERIFY_DELAY_MS)
-                        success = AdbService.connectWifi(project, ipAddress).getOrNull() ?: false
+                        val retryConnectResult = AdbService.connectWifi(project, ipAddress)
+                        success = retryConnectResult.getOrNull() ?: run {
+                            retryConnectResult.onError { exception, message ->
+                                PluginLogger.wifiConnectionFailed(ipAddress, 5555, exception)
+                            }
+                            false
+                        }
                     }
                     
                     showWifiConnectionResult(success, device.name, ipAddress)
@@ -426,5 +475,14 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
 
     private fun openPresetSettings() {
         SettingsDialog(project).show()
+    }
+    
+    // ==================== LIFECYCLE ====================
+    
+    /**
+     * Освобождает ресурсы при закрытии панели
+     */
+    fun dispose() {
+        devicePollingService.dispose()
     }
 }

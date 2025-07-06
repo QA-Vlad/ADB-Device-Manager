@@ -1,7 +1,12 @@
 package io.github.qavlad.adbrandomizer.services
 
 import io.github.qavlad.adbrandomizer.utils.ValidationUtils
+import io.github.qavlad.adbrandomizer.utils.PluginLogger
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.async
+import kotlinx.coroutines.Deferred
 
 object DeviceStateService {
     
@@ -113,26 +118,47 @@ object DeviceStateService {
         }
     }
     
-    suspend fun refreshDeviceStatesAsync() = withContext(kotlinx.coroutines.Dispatchers.IO) {
+    suspend fun refreshDeviceStatesAsync() = withContext(Dispatchers.IO) {
         try {
             val devicesResult = AdbService.getConnectedDevices()
-            val devices = devicesResult.getOrNull() ?: emptyList()
-            devices.forEach { device ->
-                try {
-                    val currentSize = AdbService.getCurrentSize(device).getOrNull()
-                    val currentDpi = AdbService.getCurrentDpi(device).getOrNull()
-                    updateDeviceState(
-                        device.serialNumber,
-                        currentSize?.first,
-                        currentSize?.second,
-                        currentDpi
-                    )
-                } catch (e: Exception) {
-                    println("ADB_Randomizer: Error reading device state for ${device.serialNumber}: ${e.message}")
+            val devices = devicesResult.getOrNull() ?: run {
+                devicesResult.onError { exception, message ->
+                    PluginLogger.error("Failed to get devices for async state refresh", exception, message ?: "")
                 }
+                emptyList()
+            }
+            
+            coroutineScope {
+                val deferredResults: List<Deferred<Unit>> = devices.map { device ->
+                    async {
+                        try {
+                            val sizeResult = AdbService.getCurrentSize(device)
+                            val currentSize = sizeResult.getOrNull()
+                            sizeResult.onError { exception, message ->
+                                PluginLogger.error("Failed to get size for device ${device.serialNumber}", exception, message ?: "")
+                            }
+                            
+                            val dpiResult = AdbService.getCurrentDpi(device)
+                            val currentDpi = dpiResult.getOrNull()
+                            dpiResult.onError { exception, message ->
+                                PluginLogger.error("Failed to get DPI for device ${device.serialNumber}", exception, message ?: "")
+                            }
+                            
+                            updateDeviceState(
+                                device.serialNumber,
+                                currentSize?.first,
+                                currentSize?.second,
+                                currentDpi
+                            )
+                        } catch (e: Exception) {
+                            PluginLogger.error("Error reading device state asynchronously for ${device.serialNumber}", e)
+                        }
+                    }
+                }
+                deferredResults.forEach { it.await() }
             }
         } catch (e: Exception) {
-            println("ADB_Randomizer: Error refreshing device states: ${e.message}")
+            PluginLogger.error("Error in async device state refresh", e)
         }
     }
 }

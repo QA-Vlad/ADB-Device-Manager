@@ -1,23 +1,16 @@
 package io.github.qavlad.adbrandomizer.ui.renderers
 
-import com.intellij.ui.Gray
-import com.intellij.ui.JBColor
 import io.github.qavlad.adbrandomizer.services.DevicePreset
 import io.github.qavlad.adbrandomizer.services.DeviceStateService
 import io.github.qavlad.adbrandomizer.ui.components.HoverState
-// ✅ ДОБАВЛЕНЫ НЕДОСТАЮЩИЕ ИМПОРТЫ
 import io.github.qavlad.adbrandomizer.ui.components.ActiveParameterBorder
 import io.github.qavlad.adbrandomizer.ui.components.GrayParameterBorder
 import io.github.qavlad.adbrandomizer.ui.components.YellowParameterBorder
-import java.awt.Color
+import io.github.qavlad.adbrandomizer.ui.theme.ColorScheme
+import io.github.qavlad.adbrandomizer.ui.theme.IndicatorType
 import java.awt.Component
 import javax.swing.JTable
-import javax.swing.UIManager
 import javax.swing.table.DefaultTableCellRenderer
-
-enum class IndicatorType {
-    NONE, GREEN, YELLOW, GRAY
-}
 
 @Suppress("DEPRECATION")
 class ValidationRenderer(
@@ -32,12 +25,12 @@ class ValidationRenderer(
         val isHovered = hoverState().isTableCellHovered(row, column)
         val isSelectedCell = hoverState().isTableCellSelected(row, column)
 
-        val cellBackground = when {
-            isSelectedCell -> JBColor(Color(230, 230, 250), Color(80, 80, 100))
-            isHovered -> JBColor(Gray._240, Gray._70)
-            else -> UIManager.getColor("Table.background") ?: JBColor.WHITE
-        }
-        var cellForeground = UIManager.getColor("Table.foreground") ?: JBColor.BLACK
+        val cellBackground = ColorScheme.getTableCellBackground(
+            isSelected = isSelectedCell,
+            isHovered = isHovered,
+            isError = false
+        )
+        var cellForeground = ColorScheme.Table.getForeground()
 
         // Для колонок с возможной индикацией дубликатов используем новый рендерер
         if (column == 3 || column == 4) {
@@ -60,11 +53,10 @@ class ValidationRenderer(
                 else -> null
             }
 
-            cellForeground = when (indicatorType) {
-                IndicatorType.YELLOW -> JBColor.ORANGE
-                IndicatorType.GREEN -> JBColor.GREEN.darker()
-                else -> cellForeground
-            }
+            cellForeground = ColorScheme.getTableCellForeground(
+                isError = false,
+                indicatorType = indicatorType
+            )
 
             duplicateInfoRenderer.setColors(cellBackground, cellForeground)
 
@@ -87,10 +79,10 @@ class ValidationRenderer(
             // Логика определения общей рамки для строки
             if (sizeIndicator == IndicatorType.GREEN && dpiIndicator == IndicatorType.GREEN) {
                 border = ActiveParameterBorder()
-                component.foreground = JBColor.GREEN.darker()
+                component.foreground = ColorScheme.PresetIndicator.ACTIVE_TEXT
             } else if (sizeIndicator == IndicatorType.YELLOW || dpiIndicator == IndicatorType.YELLOW) {
                 border = YellowParameterBorder()
-                component.foreground = JBColor.ORANGE
+                component.foreground = ColorScheme.PresetIndicator.MODIFIED_TEXT
             } else if (sizeIndicator == IndicatorType.GRAY && dpiIndicator == IndicatorType.GRAY && 
                        preset.size.isNotBlank() && preset.dpi.isNotBlank()) {
                 // Серая рамка на Label только если:

@@ -22,6 +22,11 @@ class PluginToolWindowFactory : ToolWindowFactory {
         // Создаем "контент" из нашей панели
         val content = contentFactory.createContent(mainPanel, "", false)
 
+        // Регистрируем dispose listener для очистки ресурсов
+        content.setDisposer {
+            adbControlsPanel.dispose()
+        }
+
         // Добавляем этот контент в наше Tool Window
         toolWindow.contentManager.addContent(content)
     }
