@@ -26,8 +26,9 @@ class PresetApplicationServiceTest {
         every { mockDevice.name } returns "TestDevice"
         every { mockDevice.serialNumber } returns "123456789"
         
-        // Мокаем статические методы
-        mockkStatic(AdbService::class)
+        // Мокаем object (синглтон)
+        mockkObject(AdbService)
+        // Мокаем статические методы утилитного класса
         mockkStatic(ValidationUtils::class)
     }
     
