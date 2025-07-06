@@ -9,8 +9,7 @@ class ButtonPanel(
     private val onNextPreset: () -> Unit,
     private val onPreviousPreset: () -> Unit,
     private val onResetAction: (resetSize: Boolean, resetDpi: Boolean) -> Unit,
-    private val onOpenPresetSettings: () -> Unit,
-    private val onConnectDevice: () -> Unit
+    private val onOpenPresetSettings: () -> Unit
 ) : JPanel() {
 
     init {
@@ -34,7 +33,6 @@ class ButtonPanel(
         add(createCenteredButton("RESET DPI ONLY") { onResetAction(false, true) })
 
         add(createCenteredButton("PRESETS") { onOpenPresetSettings() })
-        add(createCenteredButton("CONNECT DEVICE") { onConnectDevice() })
     }
 
     private fun createCenteredButton(text: String, action: () -> Unit): Component {

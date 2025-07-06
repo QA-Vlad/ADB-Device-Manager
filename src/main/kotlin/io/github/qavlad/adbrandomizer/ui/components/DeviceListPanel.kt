@@ -3,11 +3,13 @@ package io.github.qavlad.adbrandomizer.ui.components
 import com.android.ddmlib.IDevice
 import com.intellij.ui.components.JBList
 import com.intellij.ui.components.JBScrollPane
+import com.intellij.util.ui.JBUI
 import io.github.qavlad.adbrandomizer.services.DeviceInfo
 import io.github.qavlad.adbrandomizer.ui.renderers.DeviceListRenderer
 import io.github.qavlad.adbrandomizer.utils.DeviceConnectionUtils
 import java.awt.BorderLayout
 import java.awt.Cursor
+import java.awt.Dimension
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import java.awt.event.MouseMotionAdapter
@@ -18,7 +20,8 @@ class DeviceListPanel(
     private val setHoverState: (HoverState) -> Unit,
     private val getAllDevices: () -> List<DeviceInfo>,
     private val onMirrorClick: (DeviceInfo) -> Unit,
-    private val onWifiClick: (IDevice) -> Unit
+    private val onWifiClick: (IDevice) -> Unit,
+    private val compactActionPanel: CompactActionPanel
 ) : JPanel(BorderLayout()) {
 
     private val deviceListModel = DefaultListModel<DeviceInfo>()
@@ -30,7 +33,23 @@ class DeviceListPanel(
     }
 
     private fun setupUI() {
-        border = BorderFactory.createTitledBorder("Connected Devices")
+        // Создаём заголовок отдельно
+        val titleLabel = JLabel("Connected Devices").apply {
+            border = JBUI.Borders.empty()
+            font = font.deriveFont(font.style or java.awt.Font.BOLD)
+        }
+        
+        // Создаём шапку с заголовком и кнопками
+        val headerPanel = JPanel(BorderLayout()).apply {
+            border = JBUI.Borders.compound(
+                BorderFactory.createMatteBorder(1, 1, 1, 1, JBUI.CurrentTheme.CustomFrameDecorations.separatorForeground()),
+                JBUI.Borders.empty(4, 8)
+            )
+            add(titleLabel, BorderLayout.WEST)
+            add(compactActionPanel, BorderLayout.EAST)
+            maximumSize = Dimension(Int.MAX_VALUE, JBUI.scale(36))
+            preferredSize = Dimension(preferredSize.width, JBUI.scale(36))
+        }
         
         deviceList.cellRenderer = DeviceListRenderer(
             getHoverState = getHoverState,
@@ -46,6 +65,8 @@ class DeviceListPanel(
 
         val scrollPane = JBScrollPane(deviceList)
         scrollPane.border = BorderFactory.createEmptyBorder()
+        
+        add(headerPanel, BorderLayout.NORTH)
         add(scrollPane, BorderLayout.CENTER)
     }
 

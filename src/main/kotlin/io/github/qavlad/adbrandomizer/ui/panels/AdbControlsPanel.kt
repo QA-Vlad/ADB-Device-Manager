@@ -27,6 +27,7 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
     private val devicePollingService = DevicePollingService(project)
     private lateinit var deviceListPanel: DeviceListPanel
     private lateinit var buttonPanel: ButtonPanel
+    private lateinit var compactActionPanel: CompactActionPanel
 
     init {
         setupUI()
@@ -39,8 +40,12 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
             onNextPreset = { navigateToNextPreset() },
             onPreviousPreset = { navigateToPreviousPreset() },
             onResetAction = { resetSize, resetDpi -> executeResetAction(resetSize, resetDpi) },
-            onOpenPresetSettings = { openPresetSettings() },
-            onConnectDevice = { promptForManualConnection() }
+            onOpenPresetSettings = { openPresetSettings() }
+        )
+        
+        compactActionPanel = CompactActionPanel(
+            onConnectDevice = { promptForManualConnection() },
+            onKillAdbServer = { executeKillAdbServer() }
         )
         
         deviceListPanel = DeviceListPanel(
@@ -48,7 +53,8 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
             setHoverState = { newState -> currentHoverState = newState },
             getAllDevices = { getAllDevicesFromModel() },
             onMirrorClick = { deviceInfo -> startScreenMirroring(deviceInfo) },
-            onWifiClick = { device -> connectDeviceViaWifi(device) }
+            onWifiClick = { device -> connectDeviceViaWifi(device) },
+            compactActionPanel = compactActionPanel
         )
         
         val splitPane = JSplitPane(JSplitPane.VERTICAL_SPLIT, buttonPanel, deviceListPanel).apply {
@@ -56,6 +62,7 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
             resizeWeight = 0.5
             SwingUtilities.invokeLater { setDividerLocation(0.5) }
         }
+        
         add(splitPane, BorderLayout.CENTER)
     }
 
@@ -231,6 +238,25 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
     }
 
     // ==================== CONNECTION ACTIONS ====================
+
+    private fun executeKillAdbServer() {
+        object : Task.Backgroundable(project, "Killing ADB Server") {
+            override fun run(indicator: ProgressIndicator) {
+                indicator.isIndeterminate = true
+                indicator.text = "Stopping ADB server..."
+                
+                val success = AdbServerService.killAdbServer()
+                
+                ApplicationManager.getApplication().invokeLater {
+                    if (success) {
+                        NotificationUtils.showSuccess(project, "ADB server killed successfully")
+                    } else {
+                        NotificationUtils.showError(project, "Failed to kill ADB server")
+                    }
+                }
+            }
+        }.queue()
+    }
 
     private fun promptForManualConnection() {
         val input = Messages.showInputDialog(
