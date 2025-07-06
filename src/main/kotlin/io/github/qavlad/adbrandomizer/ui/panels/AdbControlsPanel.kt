@@ -17,6 +17,7 @@ import io.github.qavlad.adbrandomizer.utils.PluginLogger
 import java.awt.*
 import java.util.Locale
 import javax.swing.*
+import javax.swing.Timer
 
 class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
 
@@ -54,7 +55,8 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
             getAllDevices = { getAllDevicesFromModel() },
             onMirrorClick = { deviceInfo -> startScreenMirroring(deviceInfo) },
             onWifiClick = { device -> connectDeviceViaWifi(device) },
-            compactActionPanel = compactActionPanel
+            compactActionPanel = compactActionPanel,
+            onForceUpdate = { devicePollingService.forceUpdate() }
         )
         
         val splitPane = JSplitPane(JSplitPane.VERTICAL_SPLIT, buttonPanel, deviceListPanel).apply {
@@ -74,7 +76,9 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
 
     private fun getAllDevicesFromModel(): List<DeviceInfo> {
         return deviceListPanel.getDeviceListModel().let { model ->
-            (0 until model.size()).map { model.getElementAt(it) }
+            (0 until model.size())
+                .mapNotNull { model.getElementAt(it) as? DeviceListItem.Device }
+                .map { it.info }
         }
     }
 
@@ -250,6 +254,13 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                 ApplicationManager.getApplication().invokeLater {
                     if (success) {
                         NotificationUtils.showSuccess(project, "ADB server killed successfully")
+                        // Форсируем обновление списка устройств через небольшую задержку
+                        Timer(1000) {
+                            devicePollingService.forceUpdate()
+                        }.apply {
+                            isRepeats = false
+                            start()
+                        }
                     } else {
                         NotificationUtils.showError(project, "Failed to kill ADB server")
                     }
@@ -317,14 +328,28 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                 }
                 emptyList()
             }
-            val connected = devices.any { it.serialNumber.startsWith(ipAddress) }
+            val connectedDevice = devices.find { it.serialNumber.startsWith(ipAddress) }
+
+            if (connectedDevice != null) {
+                // Сохраняем в историю Wi-Fi устройств
+                val deviceInfo = DeviceInfo(connectedDevice, ipAddress)
+                WifiDeviceHistoryService.addOrUpdateDevice(
+                    WifiDeviceHistoryService.WifiDeviceHistoryEntry(
+                        ipAddress = ipAddress,
+                        port = port,
+                        displayName = deviceInfo.displayName,
+                        androidVersion = deviceInfo.androidVersion,
+                        apiLevel = deviceInfo.apiLevel,
+                        logicalSerialNumber = deviceInfo.logicalSerialNumber,
+                        realSerialNumber = deviceInfo.displaySerialNumber  // Сохраняем настоящий серийник
+                    )
+                )
+            }
 
             ApplicationManager.getApplication().invokeLater {
-                if (connected) {
-                    NotificationUtils.showSuccess(project, "Successfully connected to device at $ipAddress:$port")
-                } else {
-                    NotificationUtils.showError(project, "Connected to $ipAddress:$port but device not visible. Check device settings.")
-                }
+                NotificationUtils.showSuccess(project, "Successfully connected to device at $ipAddress:$port")
+                // Форсируем обновление списка устройств
+                devicePollingService.forceUpdate()
             }
         } else {
             ApplicationManager.getApplication().invokeLater {
@@ -412,7 +437,27 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
 
     private fun showWifiConnectionResult(success: Boolean, deviceName: String, ipAddress: String) {
         if (success) {
+            // Попытка найти устройство среди подключённых и добавить в историю
+            val devicesResult = AdbService.getConnectedDevices()
+            val devices = devicesResult.getOrNull() ?: emptyList()
+            val connectedDevice = devices.find { it.serialNumber.startsWith(ipAddress) }
+            if (connectedDevice != null) {
+                val deviceInfo = DeviceInfo(connectedDevice, ipAddress)
+                WifiDeviceHistoryService.addOrUpdateDevice(
+                    WifiDeviceHistoryService.WifiDeviceHistoryEntry(
+                        ipAddress = ipAddress,
+                        port = 5555,
+                        displayName = deviceInfo.displayName,
+                        androidVersion = deviceInfo.androidVersion,
+                        apiLevel = deviceInfo.apiLevel,
+                        logicalSerialNumber = deviceInfo.logicalSerialNumber,
+                        realSerialNumber = deviceInfo.displaySerialNumber  // Сохраняем настоящий серийник
+                    )
+                )
+            }
             NotificationUtils.showSuccess(project, "Successfully connected to $deviceName at $ipAddress.")
+            // Форсируем обновление списка устройств
+            devicePollingService.forceUpdate()
         } else {
             val message = """Failed to connect to $deviceName via Wi-Fi.
                 |Possible solutions:

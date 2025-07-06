@@ -10,8 +10,10 @@ import javax.swing.SwingUtilities
 class DevicePollingService(private val project: Project) {
     private var pollingJob: Job? = null
     private val pollingScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private var lastUpdateCallback: ((List<DeviceInfo>) -> Unit)? = null
 
     fun startDevicePolling(onDevicesUpdated: (List<DeviceInfo>) -> Unit) {
+        lastUpdateCallback = onDevicesUpdated
         stopDevicePolling()
         
         pollingJob = pollingScope.launch {
@@ -31,6 +33,23 @@ class DevicePollingService(private val project: Project) {
                 throw e
             } catch (e: Exception) {
                 PluginLogger.error("Error in device polling", e)
+            }
+        }
+    }
+    
+    /**
+     * Форсирует немедленное обновление списка устройств
+     */
+    fun forceUpdate() {
+        lastUpdateCallback?.let { callback ->
+            pollingScope.launch {
+                try {
+                    val devicesRaw = AdbServiceAsync.getConnectedDevicesAsync(project).getOrNull() ?: emptyList()
+                    val devices = devicesRaw.map { DeviceInfo(it, null) }
+                    SwingUtilities.invokeLater { callback(devices) }
+                } catch (e: Exception) {
+                    PluginLogger.error("Error in force update", e)
+                }
             }
         }
     }

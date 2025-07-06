@@ -5,7 +5,7 @@ import io.github.qavlad.adbrandomizer.utils.DeviceConnectionUtils
 import java.util.Locale
 
 data class DeviceInfo(
-    val device: IDevice,
+    val device: IDevice?,
     val displayName: String,
     val displaySerialNumber: String?,
     val logicalSerialNumber: String,

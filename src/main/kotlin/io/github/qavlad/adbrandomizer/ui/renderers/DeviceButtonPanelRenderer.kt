@@ -94,7 +94,7 @@ class DeviceButtonPanelRenderer {
             applyHoverEffect(this, index, HoverState.BUTTON_TYPE_WIFI, hoverState)
 
             addActionListener {
-                onWifiClick(deviceInfo.device)
+                deviceInfo.device?.let { onWifiClick(it) }
             }
         }
     }

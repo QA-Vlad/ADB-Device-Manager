@@ -14,7 +14,7 @@ object PluginConfig {
     
     // UI Configuration
     object UI {
-        const val DEVICE_POLLING_INTERVAL_MS = 5000
+        const val DEVICE_POLLING_INTERVAL_MS = 2000
         const val TOOLTIP_INITIAL_DELAY_MS = 100
         const val TOOLTIP_DISMISS_DELAY_MS = 5000
         const val TOOLTIP_RESHOW_DELAY_MS = 50
