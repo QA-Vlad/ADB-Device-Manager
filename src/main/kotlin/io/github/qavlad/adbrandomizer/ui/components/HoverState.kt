@@ -1,5 +1,7 @@
 package io.github.qavlad.adbrandomizer.ui.components
 
+import io.github.qavlad.adbrandomizer.config.PluginConfig
+
 /**
  * Универсальное состояние hover эффектов для всех UI компонентов
  */
@@ -69,8 +71,8 @@ data class HoverState(
 
 
     companion object {
-        const val BUTTON_TYPE_MIRROR = "MIRROR"
-        const val BUTTON_TYPE_WIFI = "WIFI"
+        const val BUTTON_TYPE_MIRROR = PluginConfig.UIConstants.BUTTON_TYPE_MIRROR
+        const val BUTTON_TYPE_WIFI = PluginConfig.UIConstants.BUTTON_TYPE_WIFI
 
         /**
          * Создает состояние без hover эффектов

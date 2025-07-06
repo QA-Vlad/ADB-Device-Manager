@@ -5,9 +5,10 @@ import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.project.Project
+import io.github.qavlad.adbrandomizer.config.PluginConfig
 
 object NotificationUtils {
-    private const val NOTIFICATION_GROUP_ID = "ADB Randomizer Notifications"
+    private const val NOTIFICATION_GROUP_ID = PluginConfig.UI.NOTIFICATION_GROUP_ID
 
     /**
      * Показывает информационное уведомление

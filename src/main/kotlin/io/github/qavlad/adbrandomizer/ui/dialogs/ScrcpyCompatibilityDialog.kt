@@ -10,6 +10,7 @@ import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBTextArea
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.UIUtil
+import io.github.qavlad.adbrandomizer.config.PluginConfig
 import io.github.qavlad.adbrandomizer.services.SettingsService
 import io.github.qavlad.adbrandomizer.utils.ButtonUtils
 import java.awt.*
@@ -32,10 +33,13 @@ class ScrcpyCompatibilityDialog(
         INCOMPATIBLE // scrcpy несовместим (например, слишком старая версия)
     }
 
-    private val scrcpyName = if (System.getProperty("os.name").startsWith("Windows")) "scrcpy.exe" else "scrcpy"
+    private val scrcpyName = if (System.getProperty("os.name").startsWith("Windows")) 
+        PluginConfig.Scrcpy.SCRCPY_NAMES["windows"]!! 
+    else 
+        PluginConfig.Scrcpy.SCRCPY_NAMES["default"]!!
 
     companion object {
-        const val RETRY_EXIT_CODE = 101
+        const val RETRY_EXIT_CODE = PluginConfig.UIConstants.RETRY_EXIT_CODE
     }
 
     init {

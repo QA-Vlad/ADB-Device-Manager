@@ -4,6 +4,7 @@ import com.intellij.icons.AllIcons
 import com.intellij.ui.table.JBTable
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.AbstractTableCellEditor
+import io.github.qavlad.adbrandomizer.config.PluginConfig
 import io.github.qavlad.adbrandomizer.ui.handlers.PresetTransferHandler
 import io.github.qavlad.adbrandomizer.ui.renderers.ValidationRenderer
 import java.awt.Dimension
@@ -33,7 +34,7 @@ class TableConfigurator(
         table.apply {
             tableHeader.reorderingAllowed = false
             setSelectionMode(ListSelectionModel.SINGLE_SELECTION)
-            rowHeight = JBUI.scale(35)
+            rowHeight = JBUI.scale(PluginConfig.UI.TABLE_ROW_HEIGHT)
             dragEnabled = true
             dropMode = DropMode.INSERT_ROWS
             transferHandler = PresetTransferHandler { fromIndex, toIndex ->
@@ -45,9 +46,9 @@ class TableConfigurator(
             setCellSelectionEnabled(false)
 
             val toolTipManager = ToolTipManager.sharedInstance()
-            toolTipManager.initialDelay = 100
-            toolTipManager.dismissDelay = 5000
-            toolTipManager.reshowDelay = 50
+            toolTipManager.initialDelay = PluginConfig.UI.TOOLTIP_INITIAL_DELAY_MS
+            toolTipManager.dismissDelay = PluginConfig.UI.TOOLTIP_DISMISS_DELAY_MS
+            toolTipManager.reshowDelay = PluginConfig.UI.TOOLTIP_RESHOW_DELAY_MS
 
             putClientProperty("JTable.stripedBackground", false)
             putClientProperty("Table.isFileList", false)
@@ -55,7 +56,7 @@ class TableConfigurator(
             putClientProperty("JTable.alternateRowColor", table.background)
             putClientProperty("Table.highlightSelection", false)
             putClientProperty("Table.focusSelectedCell", false)
-            putClientProperty("Table.rowHeight", JBUI.scale(35))
+            putClientProperty("Table.rowHeight", JBUI.scale(PluginConfig.UI.TABLE_ROW_HEIGHT))
             putClientProperty("Table.hoverBackground", null)
             putClientProperty("Table.selectionBackground", background)
             

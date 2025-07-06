@@ -1,11 +1,12 @@
 package io.github.qavlad.adbrandomizer.utils
 
+import io.github.qavlad.adbrandomizer.config.PluginConfig
 import io.github.qavlad.adbrandomizer.services.DeviceInfo
 import java.awt.Rectangle
 
 object DeviceConnectionUtils {
 
-    private val wifiSerialRegex = Regex("""^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}:\d+$""")
+    private val wifiSerialRegex = PluginConfig.Patterns.WIFI_SERIAL_REGEX
 
     /**
      * Проверяет, является ли подключение Wi-Fi на основе серийного номера

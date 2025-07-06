@@ -5,12 +5,13 @@ package io.github.qavlad.adbrandomizer.services
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import com.intellij.ide.util.PropertiesComponent
+import io.github.qavlad.adbrandomizer.config.PluginConfig
 
 object SettingsService {
     // Ключ, под которым мы будем хранить весь JSON со списком пресетов
-    private const val PRESETS_KEY = "ADB_RANDOMIZER_PRESETS_JSON"
+    private const val PRESETS_KEY = PluginConfig.SettingsKeys.PRESETS_KEY
     // Ключ для хранения пути к scrcpy
-    private const val SCRCPY_PATH_KEY = "ADB_RANDOMIZER_SCRCPY_PATH"
+    private const val SCRCPY_PATH_KEY = PluginConfig.SettingsKeys.SCRCPY_PATH_KEY
 
     private val properties = PropertiesComponent.getInstance()
     private val gson = Gson()
@@ -19,11 +20,9 @@ object SettingsService {
      * Возвращает список пресетов по умолчанию, если ничего не сохранено.
      */
     private fun getDefaultPresets(): List<DevicePreset> {
-        return listOf(
-            DevicePreset("Pixel 5", "1080x2340", "432"),
-            DevicePreset("Pixel 3a", "1080x2220", "441"),
-            DevicePreset("Generic Tablet", "1200x1920", "240")
-        )
+        return PluginConfig.DefaultPresets.PRESETS.map { (label, size, dpi) ->
+            DevicePreset(label, size, dpi)
+        }
     }
 
     /**

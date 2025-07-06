@@ -5,6 +5,7 @@ import com.intellij.openapi.util.SystemInfo
 import com.intellij.ui.Gray
 import com.intellij.ui.JBColor
 import com.intellij.ui.table.JBTable
+import io.github.qavlad.adbrandomizer.config.PluginConfig
 import io.github.qavlad.adbrandomizer.services.*
 import io.github.qavlad.adbrandomizer.ui.components.*
 import io.github.qavlad.adbrandomizer.ui.handlers.KeyboardHandler
@@ -343,13 +344,9 @@ class SettingsDialogController(
     }
 
     fun importCommonDevices() {
-        val commonPresets = listOf(
-            DevicePreset("Pixel 6 Pro", "1440x3120", "512"),
-            DevicePreset("Pixel 5", "1080x2340", "432"),
-            DevicePreset("Pixel 4a", "1080x2340", "413"),
-            DevicePreset("Samsung Galaxy S21", "1080x2400", "421"),
-            DevicePreset("OnePlus 9 Pro", "1440x3216", "525")
-        )
+        val commonPresets = PluginConfig.DefaultPresets.COMMON_DEVICES.map { (label, size, dpi) ->
+            DevicePreset(label, size, dpi)
+        }
         val existingLabels = tableModel.getPresets().map { it.label }.toSet()
         val importedPresets = mutableListOf<DevicePreset>()
         val startIndex = tableModel.rowCount

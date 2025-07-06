@@ -6,6 +6,7 @@ import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.Messages
+import io.github.qavlad.adbrandomizer.config.PluginConfig
 import io.github.qavlad.adbrandomizer.services.*
 import io.github.qavlad.adbrandomizer.ui.components.*
 import io.github.qavlad.adbrandomizer.ui.dialogs.SettingsDialog
@@ -263,7 +264,7 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
 
     private fun handleConnectionResult(success: Boolean, ipAddress: String, port: Int) {
         if (success) {
-            Thread.sleep(2000)
+            Thread.sleep(PluginConfig.Network.CONNECTION_VERIFY_DELAY_MS)
             val devices = AdbService.getConnectedDevices()
             val connected = devices.any { it.serialNumber.startsWith(ipAddress) }
 
@@ -309,7 +310,7 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                     println("ADB_Randomizer: TCP/IP mode enabled on port 5555")
                     
                     // Даем устройству время на включение TCP/IP
-                    Thread.sleep(3000)
+                    Thread.sleep(PluginConfig.Network.TCPIP_ENABLE_DELAY_MS)
                     
                     indicator.text = "Connecting to $ipAddress:5555..."
                     
@@ -319,7 +320,7 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                     if (!success) {
                         // Если не удалось, пробуем еще раз с большей задержкой
                         println("ADB_Randomizer: First connection attempt failed, retrying...")
-                        Thread.sleep(2000)
+                        Thread.sleep(PluginConfig.Network.WIFI_CONNECTION_VERIFY_DELAY_MS)
                         success = AdbService.connectWifi(project, ipAddress)
                     }
                     

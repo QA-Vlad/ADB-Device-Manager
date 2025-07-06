@@ -3,6 +3,7 @@ package io.github.qavlad.adbrandomizer.services
 import com.android.ddmlib.AndroidDebugBridge
 import com.android.ddmlib.IDevice
 import com.intellij.openapi.application.ApplicationManager
+import io.github.qavlad.adbrandomizer.config.PluginConfig
 import io.github.qavlad.adbrandomizer.utils.AdbPathResolver
 import java.util.concurrent.TimeUnit
 
@@ -32,7 +33,7 @@ internal object AdbConnectionManager {
             println("ADB_Randomizer: Starting ADB server...")
             val startServerCmd = ProcessBuilder(adbPath, "start-server")
             val process = startServerCmd.start()
-            process.waitFor(5, TimeUnit.SECONDS)
+            process.waitFor(PluginConfig.Adb.SERVER_START_TIMEOUT_SECONDS, TimeUnit.SECONDS)
 
             if (!isInitialized) {
                 AndroidDebugBridge.initIfNeeded(false)
@@ -43,9 +44,9 @@ internal object AdbConnectionManager {
             @Suppress("DEPRECATION")
             customBridge = AndroidDebugBridge.createBridge(adbPath, false)
 
-            var attempts = 100
+            var attempts = PluginConfig.Adb.BRIDGE_CONNECTION_ATTEMPTS
             while (customBridge != null && !customBridge!!.isConnected && attempts > 0) {
-                Thread.sleep(200)
+                Thread.sleep(PluginConfig.Adb.BRIDGE_CONNECTION_DELAY_MS)
                 attempts--
             }
 
@@ -75,10 +76,10 @@ internal object AdbConnectionManager {
             return emptyList()
         }
 
-        var attempts = 20
+        var attempts = PluginConfig.Adb.DEVICE_LIST_WAIT_ATTEMPTS
         while (!bridge!!.hasInitialDeviceList() && attempts > 0) {
             try {
-                Thread.sleep(100)
+                Thread.sleep(PluginConfig.Adb.DEVICE_LIST_WAIT_DELAY_MS)
             } catch (_: InterruptedException) {
                 Thread.currentThread().interrupt()
                 return emptyList()

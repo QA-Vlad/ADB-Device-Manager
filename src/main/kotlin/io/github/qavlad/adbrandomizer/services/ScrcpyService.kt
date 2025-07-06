@@ -5,13 +5,18 @@ package io.github.qavlad.adbrandomizer.services
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.progress.ProcessCanceledException
 import com.intellij.openapi.project.Project
+import io.github.qavlad.adbrandomizer.config.PluginConfig
 import io.github.qavlad.adbrandomizer.ui.dialogs.ScrcpyCompatibilityDialog
 import io.github.qavlad.adbrandomizer.utils.AdbPathResolver
 import java.io.File
+import java.util.concurrent.TimeUnit
 
 object ScrcpyService {
 
-    private val scrcpyName = if (System.getProperty("os.name").startsWith("Windows")) "scrcpy.exe" else "scrcpy"
+    private val scrcpyName = if (System.getProperty("os.name").startsWith("Windows")) 
+        PluginConfig.Scrcpy.SCRCPY_NAMES["windows"]!! 
+    else 
+        PluginConfig.Scrcpy.SCRCPY_NAMES["default"]!!
 
     fun findScrcpyExecutable(): String? {
         val savedPath = SettingsService.getScrcpyPath()
@@ -63,7 +68,7 @@ object ScrcpyService {
                         serialNumber
                     )
                     dialog.show()
-                    if (dialog.exitCode == ScrcpyCompatibilityDialog.RETRY_EXIT_CODE) {
+                    if (dialog.exitCode == PluginConfig.UIConstants.RETRY_EXIT_CODE) {
                         retry = true
                     }
                 }
@@ -150,7 +155,7 @@ object ScrcpyService {
             val outputReader = Thread {
                 try {
                     process.inputStream.bufferedReader().use { reader ->
-                        reader.lineSequence().take(20).forEach { line ->
+                        reader.lineSequence().take(PluginConfig.Scrcpy.MAX_LOG_LINES).forEach { line ->
                             println("ADB_Randomizer: scrcpy stdout: $line")
                         }
                     }
@@ -160,7 +165,7 @@ object ScrcpyService {
             val errorReader = Thread {
                 try {
                     process.errorStream.bufferedReader().use { reader ->
-                        reader.lineSequence().take(20).forEach { line ->
+                        reader.lineSequence().take(PluginConfig.Scrcpy.MAX_LOG_LINES).forEach { line ->
                             println("ADB_Randomizer: scrcpy stderr: $line")
                         }
                     }
@@ -170,7 +175,7 @@ object ScrcpyService {
             outputReader.start()
             errorReader.start()
 
-            Thread.sleep(2000)
+            Thread.sleep(PluginConfig.Scrcpy.STARTUP_WAIT_MS)
 
             if (!process.isAlive) {
                 val exitCode = process.exitValue()
@@ -178,7 +183,7 @@ object ScrcpyService {
                 return exitCode == 0
             }
 
-            Thread.sleep(3000)
+            Thread.sleep(PluginConfig.Scrcpy.PROCESS_CHECK_DELAY_MS)
 
             if (!process.isAlive) {
                 val exitCode = process.exitValue()
@@ -213,7 +218,12 @@ object ScrcpyService {
     private fun checkScrcpyVersion(scrcpyPath: String): String {
         return try {
             val process = ProcessBuilder(scrcpyPath, "--version").start()
-            process.inputStream.bufferedReader().use { it.readText() }.trim()
+            val finished = process.waitFor(PluginConfig.Scrcpy.VERSION_CHECK_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            if (finished) {
+                process.inputStream.bufferedReader().use { it.readText() }.trim()
+            } else {
+                ""
+            }
         } catch (e: Exception) {
             println("ADB_Randomizer: Could not get scrcpy version: ${e.message}")
             ""

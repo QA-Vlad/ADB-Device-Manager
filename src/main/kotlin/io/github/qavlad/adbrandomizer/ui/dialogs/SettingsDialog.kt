@@ -5,6 +5,7 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.util.ui.JBUI
+import io.github.qavlad.adbrandomizer.config.PluginConfig
 import io.github.qavlad.adbrandomizer.utils.ButtonUtils
 import java.awt.BorderLayout
 import java.awt.Dimension
@@ -40,7 +41,7 @@ class SettingsDialog(project: Project?) : DialogWrapper(project) {
 
         // Создаем UI
         val scrollPane = JBScrollPane(table).apply { 
-            preferredSize = Dimension(650, 400) 
+            preferredSize = Dimension(PluginConfig.UI.SETTINGS_DIALOG_WIDTH, PluginConfig.UI.SETTINGS_DIALOG_HEIGHT) 
         }
         
         val buttonPanel = createButtonPanel()

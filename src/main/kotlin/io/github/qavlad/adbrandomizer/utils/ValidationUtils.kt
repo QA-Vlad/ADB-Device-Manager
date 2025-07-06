@@ -1,6 +1,8 @@
 // Файл: src/main/kotlin/io/github/qavlad/adbrandomizer/utils/ValidationUtils.kt
 package io.github.qavlad.adbrandomizer.utils
 
+import io.github.qavlad.adbrandomizer.config.PluginConfig
+
 object ValidationUtils {
 
     /**
@@ -68,8 +70,7 @@ object ValidationUtils {
     fun isValidSizeFormat(size: String): Boolean {
         if (size.isBlank()) return false
 
-        val sizeRegex = Regex("""^\d+\s*[xхXХ]\s*\d+$""")
-        return sizeRegex.matches(size.trim())
+        return PluginConfig.Patterns.SIZE_FORMAT_REGEX.matches(size.trim())
     }
 
     /**
@@ -129,7 +130,7 @@ object ValidationUtils {
      * @return true если порт подходит для ADB, false иначе
      */
     fun isValidAdbPort(port: Int): Boolean {
-        return port in 1024..65535
+        return port in PluginConfig.Network.MIN_ADB_PORT..PluginConfig.Network.MAX_PORT
     }
 
     /**

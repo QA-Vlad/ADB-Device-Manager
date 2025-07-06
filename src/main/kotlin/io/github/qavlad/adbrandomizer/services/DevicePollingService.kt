@@ -2,6 +2,7 @@ package io.github.qavlad.adbrandomizer.services
 
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.project.Project
+import io.github.qavlad.adbrandomizer.config.PluginConfig
 import java.util.concurrent.ConcurrentHashMap
 import javax.swing.Timer
 
@@ -17,7 +18,7 @@ class DevicePollingService(private val project: Project) {
         updateDevices(onDevicesUpdated)
         
         // Start polling timer
-        pollingTimer = Timer(5000) {
+        pollingTimer = Timer(PluginConfig.UI.DEVICE_POLLING_INTERVAL_MS) {
             updateDevices(onDevicesUpdated)
         }
         pollingTimer?.start()
