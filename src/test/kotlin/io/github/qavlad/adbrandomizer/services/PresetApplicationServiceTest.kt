@@ -26,10 +26,9 @@ class PresetApplicationServiceTest {
         every { mockDevice.name } returns "TestDevice"
         every { mockDevice.serialNumber } returns "123456789"
         
-        // Мокаем object (синглтон)
+        // Мокаем objects (синглтоны)
         mockkObject(AdbService)
-        // Мокаем статические методы утилитного класса
-        mockkStatic(ValidationUtils::class)
+        mockkObject(ValidationUtils)
     }
     
     @After
@@ -47,7 +46,7 @@ class PresetApplicationServiceTest {
         every { ValidationUtils.parseSize("1080x1920") } returns Pair(1080, 1920)
         every { ValidationUtils.parseDpi("480") } returns 480
         
-        // Настраиваем AdbService чтобы он возвращал наш мок устройства
+        // Настраиваем AdbService, чтобы он возвращал, мок устройства
         every { AdbService.getConnectedDevices(any()) } returns listOf(mockDevice)
         
         // Говорим что методы setSize и setDpi должны просто ничего не делать
