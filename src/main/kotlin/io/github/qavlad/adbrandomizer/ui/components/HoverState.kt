@@ -30,7 +30,9 @@ data class HoverState(
      * Проверяет, находится ли указанная ячейка таблицы в состоянии hover
      */
     fun isTableCellHovered(row: Int, column: Int): Boolean {
-        return hoveredTableRow == row && hoveredTableColumn == column
+        // Проверяем, что hover установлен и имеет валидные координаты
+        return hoveredTableRow >= 0 && hoveredTableColumn >= 0 && 
+               hoveredTableRow == row && hoveredTableColumn == column
     }
     
     /**

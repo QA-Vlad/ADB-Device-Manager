@@ -1,60 +1,60 @@
 package io.github.qavlad.adbrandomizer.ui.components
 
 import com.intellij.icons.AllIcons
-import io.github.qavlad.adbrandomizer.utils.ButtonUtils
-import java.awt.BorderLayout
-import java.awt.Dimension
-import java.awt.FlowLayout
-import java.awt.Graphics
-import java.awt.Graphics2D
-import java.awt.RenderingHints
+import java.awt.*
 import javax.swing.*
-import com.intellij.util.ui.JBUI
-import javax.swing.border.Border
+import javax.swing.table.TableCellRenderer
+import javax.swing.table.DefaultTableCellRenderer
+
 
 /**
- * Панель с кнопкой добавления пресета под drag-and-drop иконкой
+ * Комбинированный рендерер для первой колонки:
+ * - Показывает кнопку добавления для строки с маркером "+"
+ * - Показывает обычный drag-and-drop для остальных строк
  */
-class AddPresetPanel(
-    private val onAddPreset: () -> Unit
-) : JPanel() {
+class FirstColumnCellRenderer(
+    private val defaultRenderer: TableCellRenderer
+) : DefaultTableCellRenderer() {
     
-    private val addButton: JButton
+    // Иконка для плюсика
+    private val addIcon = AllIcons.General.Add
     
     init {
-        layout = BorderLayout()
-        isOpaque = false
-        
-        // Создаем кнопку с плюсиком
-        addButton = JButton(AllIcons.General.Add).apply {
-            toolTipText = "Add new preset"
-            preferredSize = Dimension(20, 20)
-            addActionListener { onAddPreset() }
-            
-            // Убираем обводку и фон по умолчанию
-            isBorderPainted = false
-            isContentAreaFilled = false
-            isFocusPainted = false
-        }
-        
-        ButtonUtils.addHoverEffect(addButton)
-        
-        // Добавляем с отступами
-        add(Box.createHorizontalStrut(JBUI.scale(5)), BorderLayout.WEST)
-        add(addButton, BorderLayout.CENTER)
-        
-        // Устанавливаем высоту панели
-        preferredSize = Dimension(30, 25)
-        maximumSize = preferredSize
+        horizontalAlignment = CENTER
+        isOpaque = true
     }
     
-    fun setButtonEnabled(enabled: Boolean) {
-        addButton.isEnabled = enabled
+    override fun getTableCellRendererComponent(
+        table: JTable,
+        value: Any?,
+        isSelected: Boolean,
+        hasFocus: Boolean,
+        row: Int,
+        column: Int
+    ): Component {
+        // Сначала вызываем родительский метод для базовой инициализации
+        super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column)
+        
+        // Если это строка с кнопкой добавления
+        if (value == "+") {
+            // Настраиваем рендерер для плюсика
+            text = ""
+            icon = addIcon
+            toolTipText = "Add new preset"
+            
+            // НЕ применяем hover здесь - это делается в prepareRenderer()
+            return this
+        }
+        
+        // Для обычных строк используем стандартный рендерер с иконкой drag-and-drop
+        return defaultRenderer.getTableCellRendererComponent(
+            table, value, isSelected, hasFocus, row, column
+        )
     }
 }
 
 /**
- * Кастомная панель для размещения кнопки добавления под таблицей
+ * Кастомная панель для размещения таблицы с виртуальной строкой для кнопки добавления
  */
 class TableWithAddButtonPanel(
     private val table: JTable,
@@ -62,36 +62,70 @@ class TableWithAddButtonPanel(
     private val onAddPreset: () -> Unit
 ) : JPanel(BorderLayout()) {
     
-    private val addPresetPanel = AddPresetPanel(onAddPreset)
+    private var showAddButton = true
     
     init {
         setupUI()
     }
     
     private fun setupUI() {
-        // Основная панель с таблицей
-        val tablePanel = JPanel(BorderLayout()).apply {
-            add(table.tableHeader, BorderLayout.NORTH)
-            add(scrollPane, BorderLayout.CENTER)
-        }
+        // Просто добавляем scrollPane с таблицей
+        add(scrollPane, BorderLayout.CENTER)
         
-        // Панель для размещения кнопки под таблицей, прямо под драг-энд-дроп иконкой
-        val bottomPanel = JPanel(BorderLayout()).apply {
-            isOpaque = false
-            preferredSize = Dimension(0, 30)
-            add(addPresetPanel, BorderLayout.WEST)
-        }
-        
-        // Добавляем все компоненты
-        add(tablePanel, BorderLayout.CENTER)
-        add(bottomPanel, BorderLayout.SOUTH)
+        // Обработчик кликов по таблице
+        table.addMouseListener(object : java.awt.event.MouseAdapter() {
+            override fun mouseClicked(e: java.awt.event.MouseEvent) {
+                val row = table.rowAtPoint(e.point)
+                val column = table.columnAtPoint(e.point)
+                
+                // Проверяем, что кликнули по ячейке с кнопкой
+                if (row >= 0 && column == 0) {
+                    val value = table.getValueAt(row, column)
+                    if (value == "+") {
+                        onAddPreset()
+                    }
+                }
+            }
+            
+            override fun mouseMoved(e: java.awt.event.MouseEvent) {
+                val row = table.rowAtPoint(e.point)
+                val column = table.columnAtPoint(e.point)
+                
+                // Меняем курсор при наведении на кнопку - только для первой колонки
+                if (row >= 0 && column == 0) {
+                    val value = table.getValueAt(row, column)
+                    if (value == "+") {
+                        table.cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+                    } else {
+                        table.cursor = Cursor.getDefaultCursor()
+                    }
+                } else {
+                    table.cursor = Cursor.getDefaultCursor()
+                }
+            }
+        })
     }
     
     /**
      * Обновляет видимость кнопки добавления в зависимости от режима
      */
     fun setAddButtonVisible(visible: Boolean) {
-        addPresetPanel.isVisible = visible
-        addPresetPanel.setButtonEnabled(visible)
+        showAddButton = visible
+        // Перерисовываем таблицу
+        table.repaint()
+    }
+    
+    /**
+     * Обновляет позицию кнопки при изменении количества строк
+     */
+    fun updateButtonPosition(forceScroll: Boolean = false) {
+        SwingUtilities.invokeLater {
+            // Автоскролл к последней строке
+            if (forceScroll && table.rowCount > 0) {
+                val lastRowIndex = table.rowCount - 1
+                val lastRowRect = table.getCellRect(lastRowIndex, 0, true)
+                table.scrollRectToVisible(lastRowRect)
+            }
+        }
     }
 }

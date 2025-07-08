@@ -133,7 +133,10 @@ class DevicePresetTableModel : DefaultTableModel {
 
     override fun addRow(rowData: Vector<*>?) {
         super.addRow(rowData)
-        updateRowNumbers()
+        // Не обновляем номера строк для строки с кнопкой плюсика
+        if (rowData != null && rowData.size > 0 && rowData[0] != "+") {
+            updateRowNumbers()
+        }
     }
 
     override fun insertRow(row: Int, rowData: Vector<*>?) {
@@ -151,13 +154,18 @@ class DevicePresetTableModel : DefaultTableModel {
         updateRowNumbers()
     }
 
-    private fun updateRowNumbers() {
+    fun updateRowNumbers() {
         // Временно отключаем историю, чтобы обновление номеров строк не засоряло её
         isUndoOperation = true
         try {
+            var actualRowNumber = 1
             for (i in 0 until rowCount) {
-                // Используем super.setValueAt, чтобы не вызывать наш переопределенный метод
-                super.setValueAt(i + 1, i, 1)
+                // Не обновляем номер для строки с кнопкой плюсика
+                if (getValueAt(i, 0) != "+") {
+                    // Используем super.setValueAt, чтобы не вызывать наш переопределенный метод
+                    super.setValueAt(actualRowNumber, i, 1)
+                    actualRowNumber++
+                }
             }
         } finally {
             isUndoOperation = false

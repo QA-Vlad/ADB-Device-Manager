@@ -303,7 +303,7 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                 try {
                     val connectResult = AdbService.connectWifi(project, ipAddress, port)
                     val success = connectResult.getOrNull() ?: run {
-                        connectResult.onError { exception, message ->
+                        connectResult.onError { exception, _ ->
                             PluginLogger.wifiConnectionFailed(ipAddress, port, exception)
                         }
                         false
@@ -408,7 +408,7 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                     // Первая попытка подключения
                     val firstConnectResult = AdbService.connectWifi(project, ipAddress)
                     var success = firstConnectResult.getOrNull() ?: run {
-                        firstConnectResult.onError { exception, message ->
+                        firstConnectResult.onError { exception, _ ->
                             PluginLogger.wifiConnectionFailed(ipAddress, 5555, exception)
                         }
                         false
@@ -420,7 +420,7 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                         Thread.sleep(PluginConfig.Network.WIFI_CONNECTION_VERIFY_DELAY_MS)
                         val retryConnectResult = AdbService.connectWifi(project, ipAddress)
                         success = retryConnectResult.getOrNull() ?: run {
-                            retryConnectResult.onError { exception, message ->
+                            retryConnectResult.onError { exception, _ ->
                                 PluginLogger.wifiConnectionFailed(ipAddress, 5555, exception)
                             }
                             false

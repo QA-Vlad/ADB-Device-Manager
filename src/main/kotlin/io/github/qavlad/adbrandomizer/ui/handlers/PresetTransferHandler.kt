@@ -13,13 +13,36 @@ class PresetTransferHandler(private val onRowMoved: ((Int, Int) -> Unit)? = null
 
     override fun createTransferable(c: JComponent?): Transferable? {
         val table = c as? JTable ?: return null
-        return StringSelection(table.selectedRow.toString())
+        val selectedRow = table.selectedRow
+        
+        // Проверяем, что это не строка с кнопкой
+        if (selectedRow >= 0 && selectedRow < table.rowCount) {
+            val firstColumnValue = table.getValueAt(selectedRow, 0)
+            if (firstColumnValue == "+") {
+                return null // Не позволяем перетаскивать строку с кнопкой
+            }
+        }
+        
+        return StringSelection(selectedRow.toString())
     }
 
     override fun canImport(support: TransferSupport): Boolean {
         val canImport = support.component is JTable && support.isDrop && support.isDataFlavorSupported(DataFlavor.stringFlavor)
 
         if (canImport) {
+            // Проверяем, что не пытаемся сбросить на строку с кнопкой
+            val table = support.component as? JTable
+            val dropLocation = support.dropLocation as? JTable.DropLocation
+            if (table != null && dropLocation != null) {
+                val targetRow = dropLocation.row
+                if (targetRow >= 0 && targetRow < table.rowCount) {
+                    val targetValue = table.getValueAt(targetRow, 0)
+                    if (targetValue == "+") {
+                        return false // Не позволяем drop на строку с кнопкой
+                    }
+                }
+            }
+            
             support.setShowDropLocation(true)
         }
 
@@ -45,6 +68,15 @@ class PresetTransferHandler(private val onRowMoved: ((Int, Int) -> Unit)? = null
                 }
             }
 
+            // Проверяем, что не пытаемся переместить в строку с кнопкой или саму строку с кнопкой
+            val lastRow = model.rowCount - 1
+            if (lastRow >= 0) {
+                val lastRowFirstColumn = model.getValueAt(lastRow, 0)
+                if (lastRowFirstColumn == "+" && (toIndex > lastRow || fromIndex == lastRow)) {
+                    return false // Не позволяем перемещать строку с кнопкой или перемещать что-то после неё
+                }
+            }
+            
             // Корректируем индекс если перетаскиваем вниз
             if (fromIndex < toIndex) {
                 toIndex--

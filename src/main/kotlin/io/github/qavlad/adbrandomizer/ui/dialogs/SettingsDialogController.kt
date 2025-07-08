@@ -1,10 +1,8 @@
 package io.github.qavlad.adbrandomizer.ui.dialogs
 
-import com.intellij.icons.AllIcons
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.SystemInfo
 import com.intellij.ui.table.JBTable
-import io.github.qavlad.adbrandomizer.config.PluginConfig
 import io.github.qavlad.adbrandomizer.services.*
 import io.github.qavlad.adbrandomizer.ui.components.*
 import io.github.qavlad.adbrandomizer.ui.handlers.KeyboardHandler
@@ -21,9 +19,6 @@ import javax.swing.*
 import javax.swing.table.TableCellRenderer
 import com.intellij.openapi.application.ApplicationManager
 import javax.swing.SwingUtilities
-import java.awt.BorderLayout
-import java.awt.FlowLayout
-import java.awt.Dimension
 import javax.swing.table.TableColumn
 import io.github.qavlad.adbrandomizer.ui.components.TableWithAddButtonPanel
 
@@ -120,6 +115,15 @@ class SettingsDialogController(
                 if (isShowAllPresetsMode) {
                     return false
                 }
+                
+                // Проверяем, что это не строка с кнопкой
+                if (row >= 0 && row < rowCount) {
+                    val firstColumnValue = model.getValueAt(row, 0)
+                    if (firstColumnValue == "+") {
+                        return false // Не позволяем редактировать строку с кнопкой
+                    }
+                }
+                
                 return super.isCellEditable(row, column)
             }
 
@@ -133,32 +137,59 @@ class SettingsDialogController(
                 val component = super.prepareRenderer(renderer, row, column)
 
                 if (component is JComponent) {
-                    val isHovered = hoverState.isTableCellHovered(row, column)
-                    val isSelectedCell = hoverState.isTableCellSelected(row, column)
+                    // Проверяем, является ли это строкой с кнопкой
+                    val firstColumnValue = if (row >= 0 && row < rowCount) model.getValueAt(row, 0) else ""
+                    val isButtonRow = firstColumnValue == "+"
+                    
+                    if (isButtonRow && column == 0) {
+                        // Для ячейки с плюсиком проверяем hover состояние
+                        val currentHoverState = hoverState
+                        val isHovered = currentHoverState.isTableCellHovered(row, column)
+                        
+                        // Применяем hover эффект только если мышь именно на этой ячейке
+                        if (isHovered) {
+                            val normalBg = table.background ?: background
+                            val hoverBg = normalBg?.brighter()
+                            component.background = hoverBg ?: normalBg
+                        } else {
+                            component.background = table.background ?: background
+                        }
+                        component.isOpaque = true
+                        return component
+                    } else if (isButtonRow) {
+                        // Для остальных ячеек строки с кнопкой - обычный фон, НЕ применяем hover
+                        component.background = background
+                        component.foreground = foreground
+                        component.isOpaque = true
+                    } else {
+                        // Обычная логика для других строк
+                        val isHovered = hoverState.isTableCellHovered(row, column)
+                        val isSelectedCell = hoverState.isTableCellSelected(row, column)
 
-                    var isInvalidCell = false
-                    if (column in 3..4) {
-                        val value = tableModel.getValueAt(row, column)
-                        val text = value as? String ?: ""
-                        val isValid = if (text.isBlank()) true else when (column) {
-                            3 -> ValidationUtils.isValidSizeFormat(text)
-                            4 -> ValidationUtils.isValidDpi(text)
-                            else -> true
+                        var isInvalidCell = false
+                        if (column in 3..4) {
+                            val value = tableModel.getValueAt(row, column)
+                            val text = value as? String ?: ""
+                            val isValid = if (text.isBlank()) true else when (column) {
+                                3 -> ValidationUtils.isValidSizeFormat(text)
+                                4 -> ValidationUtils.isValidDpi(text)
+                                else -> true
+                            }
+                            if (!isValid) {
+                                isInvalidCell = true
+                            }
                         }
-                        if (!isValid) {
-                            isInvalidCell = true
-                        }
+
+                        component.background = ColorScheme.getTableCellBackground(
+                            isSelected = isSelectedCell,
+                            isHovered = isHovered,
+                            isError = isInvalidCell
+                        )
+                        component.foreground = ColorScheme.getTableCellForeground(
+                            isError = isInvalidCell
+                        )
+                        component.isOpaque = true
                     }
-
-                    component.background = ColorScheme.getTableCellBackground(
-                        isSelected = isSelectedCell,
-                        isHovered = isHovered,
-                        isError = isInvalidCell
-                    )
-                    component.foreground = ColorScheme.getTableCellForeground(
-                        isError = isInvalidCell
-                    )
-                    component.isOpaque = true
                 }
 
                 return component
@@ -334,22 +365,42 @@ class SettingsDialogController(
                     tableModel.addRow(rowVector)
                 }
             }
+            
+            // Добавляем специальную строку с кнопкой добавления в обычном режиме
+            addButtonRow()
         }
         
         refreshTable()
     }
     
     /**
-     * Находит дубликаты в глобальном списке пресетов
+     * Добавляет специальную строку с кнопкой добавления
+     */
+    private fun addButtonRow() {
+        val buttonRowVector = Vector<Any>()
+        buttonRowVector.add("+") // Специальный маркер для рендерера
+        buttonRowVector.add("") // Пустой номер
+        buttonRowVector.add("") // Пустой label
+        buttonRowVector.add("") // Пустой size
+        buttonRowVector.add("") // Пустой dpi
+        buttonRowVector.add("") // Пустая кнопка удаления
+        if (isShowAllPresetsMode && table.columnModel.columnCount > 6) {
+            buttonRowVector.add("") // Пустое название списка
+        }
+        tableModel.addRow(buttonRowVector)
+        // Теперь обновляем номера строк для всех строк кроме строки с кнопкой
+        tableModel.updateRowNumbers()
+    }
+    
+    /**
+     * Находит дубликаты среди пресетов по размеру и DPI
      * Возвращает Set ключей, которые нужно скрыть (все дубликаты кроме первого)
      */
-    private fun findGlobalDuplicates(allPresets: List<Pair<String, DevicePreset>>): Set<String> {
+    private fun findDuplicates(items: List<Pair<Int, DevicePreset>>): Set<String> {
         val seen = mutableSetOf<String>()
         val duplicatesToHide = mutableSetOf<String>()
-        val indexedPresets = allPresets.withIndex()
         
-        indexedPresets.forEach { (index, presetPair) ->
-            val preset = presetPair.second
+        items.forEach { (index, preset) ->
             if (preset.size.isNotBlank() && preset.dpi.isNotBlank()) {
                 val key = "${preset.size}|${preset.dpi}"
                 if (seen.contains(key)) {
@@ -366,27 +417,23 @@ class SettingsDialogController(
     }
     
     /**
+     * Находит дубликаты в глобальном списке пресетов
+     */
+    private fun findGlobalDuplicates(allPresets: List<Pair<String, DevicePreset>>): Set<String> {
+        val indexedPresets = allPresets.withIndex().map { (index, presetPair) ->
+            index to presetPair.second
+        }
+        return findDuplicates(indexedPresets)
+    }
+    
+    /**
      * Находит дубликаты в локальном списке пресетов
-     * Возвращает Set ключей, которые нужно скрыть (все дубликаты кроме первого)
      */
     private fun findLocalDuplicates(presets: List<DevicePreset>): Set<String> {
-        val seen = mutableSetOf<String>()
-        val duplicatesToHide = mutableSetOf<String>()
-        
-        presets.withIndex().forEach { (index, preset) ->
-            if (preset.size.isNotBlank() && preset.dpi.isNotBlank()) {
-                val key = "${preset.size}|${preset.dpi}"
-                if (seen.contains(key)) {
-                    // Это дубликат - добавляем в список для скрытия с индексом
-                    duplicatesToHide.add("$key#$index")
-                } else {
-                    // Первое вхождение - запоминаем
-                    seen.add(key)
-                }
-            }
+        val indexedPresets = presets.withIndex().map { (index, preset) ->
+            index to preset
         }
-        
-        return duplicatesToHide
+        return findDuplicates(indexedPresets)
     }
     
     /**
@@ -411,6 +458,18 @@ class SettingsDialogController(
 
     fun handleCellClick(row: Int, column: Int, clickCount: Int) {
         if (row >= 0 && column >= 0) {
+            // Проверяем, является ли это строкой с кнопкой
+            val isButtonRow = if (row < tableModel.rowCount) {
+                tableModel.getValueAt(row, 0) == "+"
+            } else {
+                false
+            }
+            
+            // Не позволяем выбирать строку с кнопкой
+            if (isButtonRow) {
+                return
+            }
+            
             val oldSelectedRow = hoverState.selectedTableRow
             val oldSelectedColumn = hoverState.selectedTableColumn
 
@@ -449,8 +508,10 @@ class SettingsDialogController(
     }
 
     fun handleTableExit() {
+        println("ADB_DEBUG: handleTableExit called")
         val oldHoverState = hoverState
         hoverState = hoverState.clearTableHover()
+        println("ADB_DEBUG: Cleared hover state")
 
         if (oldHoverState.hoveredTableRow >= 0 && oldHoverState.hoveredTableColumn >= 0) {
             val oldRect = table.getCellRect(oldHoverState.hoveredTableRow, oldHoverState.hoveredTableColumn, false)
@@ -482,6 +543,14 @@ class SettingsDialogController(
     fun showContextMenu(e: MouseEvent) {
         val row = table.rowAtPoint(e.point)
         if (row == -1) return
+        
+        // Проверяем, что это не строка с кнопкой
+        if (row >= 0 && row < tableModel.rowCount) {
+            val firstColumnValue = tableModel.getValueAt(row, 0)
+            if (firstColumnValue == "+") {
+                return // Не показываем контекстное меню для строки с кнопкой
+            }
+        }
 
         val preset = getPresetAtRow(row)
         val popupMenu = JPopupMenu()
@@ -540,10 +609,19 @@ class SettingsDialogController(
             return
         }
         
+        // Удаляем строку с кнопкой, если она есть
+        val lastRowIndex = tableModel.rowCount - 1
+        if (lastRowIndex >= 0 && tableModel.getValueAt(lastRowIndex, 0) == "+") {
+            tableModel.removeRow(lastRowIndex)
+        }
+        
         val newRowIndex = tableModel.rowCount
         val newPreset = DevicePreset("", "", "")
         val newRowVector = createRowVector(newPreset, newRowIndex + 1)
+        
+        // Добавляем новую строку и строку с кнопкой одновременно
         tableModel.addRow(newRowVector)
+        addButtonRow()
         
         historyManager.addPresetAdd(newRowIndex, newPreset)
 
@@ -553,33 +631,23 @@ class SettingsDialogController(
             table.editCellAt(newRowIndex, 2)
             table.editorComponent?.requestFocus()
             table.repaint()
+            
+            // Обновляем позицию кнопки с задержкой и принудительным скроллом
+            SwingUtilities.invokeLater {
+                tableWithButtonPanel?.updateButtonPosition(forceScroll = true)
+            }
         }
     }
 
-    fun importCommonDevices() {
-        val commonPresets = PluginConfig.DefaultPresets.COMMON_DEVICES.map { (label, size, dpi) ->
-            DevicePreset(label, size, dpi)
-        }
-        val existingLabels = tableModel.getPresets().map { it.label }.toSet()
-        val importedPresets = mutableListOf<DevicePreset>()
-        val startIndex = tableModel.rowCount
-        
-        commonPresets.forEach {
-            if (!existingLabels.contains(it.label)) {
-                val newRowIndex = tableModel.rowCount
-                val newRowVector = createRowVector(it, newRowIndex + 1)
-                tableModel.addRow(newRowVector)
-                importedPresets.add(it)
-            }
-        }
-        
-        if (importedPresets.isNotEmpty()) {
-            historyManager.addPresetImport(startIndex, importedPresets)
-        }
-    }
 
     fun duplicatePreset(row: Int) {
         if (row < 0 || row >= tableModel.rowCount) return
+        
+        // Проверяем, что это не строка с кнопкой
+        val firstColumnValue = tableModel.getValueAt(row, 0)
+        if (firstColumnValue == "+") {
+            return // Не дублируем строку с кнопкой
+        }
         
         // Запрещаем дублирование в режиме "Show all presets"
         if (isShowAllPresetsMode) {
@@ -714,6 +782,12 @@ class SettingsDialogController(
         
         var allValid = true
         for (i in 0 until tableModel.rowCount) {
+            // Пропускаем строку с кнопкой
+            val firstColumn = tableModel.getValueAt(i, 0) as? String ?: ""
+            if (firstColumn == "+") {
+                continue
+            }
+            
             val size = tableModel.getValueAt(i, 3) as? String ?: ""
             val dpi = tableModel.getValueAt(i, 4) as? String ?: ""
             if (size.isNotBlank() && !ValidationUtils.isValidSizeFormat(size)) allValid = false
@@ -736,6 +810,13 @@ class SettingsDialogController(
         val rowsToRemove = mutableListOf<Int>()
 
         for (i in 0 until tableModel.rowCount) {
+            val firstColumn = tableModel.getValueAt(i, 0) as? String ?: ""
+            
+            // Пропускаем строку с кнопкой
+            if (firstColumn == "+") {
+                continue
+            }
+            
             val label = (tableModel.getValueAt(i, 2) as? String ?: "").trim()
             val size = (tableModel.getValueAt(i, 3) as? String ?: "").trim()
             val dpi = (tableModel.getValueAt(i, 4) as? String ?: "").trim()
@@ -747,6 +828,12 @@ class SettingsDialogController(
 
         rowsToRemove.reversed().forEach { rowIndex ->
             tableModel.removeRow(rowIndex)
+        }
+        
+        // Удаляем строку с кнопкой перед сохранением
+        val lastRowIndex = tableModel.rowCount - 1
+        if (lastRowIndex >= 0 && tableModel.getValueAt(lastRowIndex, 0) == "+") {
+            tableModel.removeRow(lastRowIndex)
         }
 
         // Сохраняем пресеты в текущий список
@@ -775,6 +862,15 @@ class SettingsDialogController(
     }
 
     private fun getPresetAtRow(row: Int): DevicePreset {
+        // Проверяем, не является ли это строкой с кнопкой
+        if (row >= 0 && row < tableModel.rowCount) {
+            val firstColumn = tableModel.getValueAt(row, 0) as? String ?: ""
+            if (firstColumn == "+") {
+                // Возвращаем пустой пресет для строки с кнопкой
+                return DevicePreset("", "", "")
+            }
+        }
+        
         return DevicePreset(
             label = tableModel.getValueAt(row, 2) as? String ?: "",
             size = tableModel.getValueAt(row, 3) as? String ?: "",

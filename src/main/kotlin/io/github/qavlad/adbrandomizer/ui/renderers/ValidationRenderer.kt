@@ -22,6 +22,22 @@ class ValidationRenderer(
     private val duplicateInfoRenderer = DuplicateInfoRenderer()
 
     override fun getTableCellRendererComponent(table: JTable, value: Any?, isSelected: Boolean, hasFocus: Boolean, row: Int, column: Int): Component {
+        // Проверяем, является ли это строкой с кнопкой плюсик
+        val isButtonRow = if (row >= 0 && row < table.rowCount) {
+            table.getValueAt(row, 0) == "+"
+        } else {
+            false
+        }
+        
+        // Для строки с плюсиком возвращаем обычный компонент без hover эффектов
+        if (isButtonRow) {
+            val component = super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column)
+            component.background = table.background
+            component.foreground = table.foreground
+            border = null
+            return component
+        }
+        
         val isHovered = hoverState().isTableCellHovered(row, column)
         val isSelectedCell = hoverState().isTableCellSelected(row, column)
 

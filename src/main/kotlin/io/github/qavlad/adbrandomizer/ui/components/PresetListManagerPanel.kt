@@ -108,11 +108,13 @@ class PresetListManagerPanel(
             renameButton.isEnabled = !isSelected
             deleteButton.isEnabled = !isSelected
         }
+        ButtonUtils.addHoverEffect(showAllPresetsCheckbox)
         bottomPanel.add(showAllPresetsCheckbox)
         
         hideDuplicatesCheckbox.addItemListener { event ->
             onHideDuplicatesChanged(event.stateChange == ItemEvent.SELECTED)
         }
+        ButtonUtils.addHoverEffect(hideDuplicatesCheckbox)
         bottomPanel.add(hideDuplicatesCheckbox)
         
         // Компонуем все вместе
