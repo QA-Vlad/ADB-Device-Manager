@@ -635,9 +635,8 @@ class SettingsDialogController(
                     }
                     
                     // Получаем обновленные пресеты из таблицы
-                    val updatedTablePresets = tableModel.getPresets().filter { preset ->
-                        preset.label.isNotBlank() || preset.size.isNotBlank() || preset.dpi.isNotBlank()
-                    }
+                    // Включаем все пресеты, даже полностью пустые (для поддержки кнопки "+")
+                    val updatedTablePresets = tableModel.getPresets()
                     
                     // Создаем новый список, обновляя только видимые элементы
                     val newPresets = mutableListOf<DevicePreset>()
@@ -660,10 +659,8 @@ class SettingsDialogController(
                 } else {
                     // В обычном режиме без скрытия дубликатов - просто заменяем все
                     list.presets.clear()
-                    val validPresets = tableModel.getPresets().filter { preset ->
-                        preset.label.isNotBlank() || preset.size.isNotBlank() || preset.dpi.isNotBlank()
-                    }
-                    list.presets.addAll(validPresets)
+                    // Включаем все пресеты, даже полностью пустые (для поддержки кнопки "+")
+                    list.presets.addAll(tableModel.getPresets())
                 }
             }
         }
@@ -748,9 +745,8 @@ class SettingsDialogController(
                     val originalPresets = list.presets.map { it.copy() }
                     
                     // Получаем обновленные пресеты из таблицы
-                    val updatedTablePresets = tablePresets.filter { preset ->
-                        preset.label.isNotBlank() || preset.size.isNotBlank() || preset.dpi.isNotBlank()
-                    }
+                    // Включаем все пресеты, даже полностью пустые (для поддержки кнопки "+")
+                    val updatedTablePresets = tablePresets
                     
                     println("ADB_DEBUG: syncTableChangesToTempLists - hide duplicates mode")
                     println("ADB_DEBUG:   original presets count: ${originalPresets.size}")
@@ -793,41 +789,66 @@ class SettingsDialogController(
                             }
                         }
                     } else if (updatedTablePresets.size > visibleOriginalPresets.size) {
-                        // Количество элементов увеличилось (например, после отмены удаления)
-                        // Нужно заново определить какие элементы должны быть видимыми
-                        println("ADB_DEBUG:   Detected addition/restore of ${updatedTablePresets.size - visibleOriginalPresets.size} preset(s)")
+                        // Количество элементов увеличилось
+                        val addedCount = updatedTablePresets.size - visibleOriginalPresets.size
+                        println("ADB_DEBUG:   Detected addition of $addedCount preset(s)")
                         
-                        // Создаем полный список из таблицы и определяем видимость
-                        val allPresets = updatedTablePresets.toMutableList()
-                        val visibleIndices = mutableListOf<Int>()
-                        val duplicateKeys = mutableSetOf<String>()
-                        
-                        allPresets.forEachIndexed { index, preset ->
-                            val key = if (preset.size.isNotBlank() && preset.dpi.isNotBlank()) {
-                                "${preset.size}|${preset.dpi}"
-                            } else {
-                                "unique_$index"
-                            }
-                            
-                            if (!duplicateKeys.contains(key)) {
-                                duplicateKeys.add(key)
-                                visibleIndices.add(index)
-                            }
+                        // Проверяем если это добавление новых пустых пресетов через кнопку "+"
+                        val hasNewEmptyPresets = updatedTablePresets.takeLast(addedCount).any { preset ->
+                            preset.label.isBlank() && preset.size.isBlank() && preset.dpi.isBlank()
                         }
                         
-                        // Обновляем список, показывая только первые вхождения каждого ключа
-                        list.presets.clear()
-                        list.presets.addAll(allPresets)
-                        
-                        // Заново загружаем таблицу, чтобы отобразить правильный набор видимых элементов
-                        SwingUtilities.invokeLater {
-                            tableModelListener?.let { tableModel.removeTableModelListener(it) }
-                            isTableUpdating = true
-                            try {
-                                loadPresetsIntoTable()
-                            } finally {
-                                isTableUpdating = false
-                                tableModelListener?.let { tableModel.addTableModelListener(it) }
+                        if (hasNewEmptyPresets) {
+                            println("ADB_DEBUG:   New empty preset(s) detected from '+' button")
+                            // Добавляем новые пресеты в конец списка
+                            // Сохраняем все существующие пресеты
+                            val newPresets = originalPresets.toMutableList()
+                            
+                            // Добавляем новые пресеты из таблицы
+                            val newPresetsFromTable = updatedTablePresets.takeLast(addedCount)
+                            newPresets.addAll(newPresetsFromTable)
+                            
+                            // Заменяем список
+                            list.presets.clear()
+                            list.presets.addAll(newPresets)
+                            
+                            println("ADB_DEBUG:   Updated list now has ${list.presets.size} presets")
+                        } else {
+                            // Это восстановление после undo или другая операция
+                            println("ADB_DEBUG:   Addition/restore detected (not from '+' button)")
+                            
+                            // Создаем полный список из таблицы и определяем видимость
+                            val allPresets = updatedTablePresets.toMutableList()
+                            val visibleIndices = mutableListOf<Int>()
+                            val duplicateKeys = mutableSetOf<String>()
+                            
+                            allPresets.forEachIndexed { index, preset ->
+                                val key = if (preset.size.isNotBlank() && preset.dpi.isNotBlank()) {
+                                    "${preset.size}|${preset.dpi}"
+                                } else {
+                                    "unique_$index"
+                                }
+                                
+                                if (!duplicateKeys.contains(key)) {
+                                    duplicateKeys.add(key)
+                                    visibleIndices.add(index)
+                                }
+                            }
+                            
+                            // Обновляем список, показывая только первые вхождения каждого ключа
+                            list.presets.clear()
+                            list.presets.addAll(allPresets)
+                            
+                            // Заново загружаем таблицу, чтобы отобразить правильный набор видимых элементов
+                            SwingUtilities.invokeLater {
+                                tableModelListener?.let { tableModel.removeTableModelListener(it) }
+                                isTableUpdating = true
+                                try {
+                                    loadPresetsIntoTable()
+                                } finally {
+                                    isTableUpdating = false
+                                    tableModelListener?.let { tableModel.addTableModelListener(it) }
+                                }
                             }
                         }
                         return // Выходим, так как таблица будет перезагружена
@@ -897,10 +918,8 @@ class SettingsDialogController(
                     } else {
                         // Обычное обновление без скрытых дубликатов
                         list.presets.clear()
-                        val validPresets = tablePresets.filter { preset ->
-                            preset.label.isNotBlank() || preset.size.isNotBlank() || preset.dpi.isNotBlank()
-                        }
-                        list.presets.addAll(validPresets)
+                        // Включаем все пресеты, даже полностью пустые (для поддержки кнопки "+")
+                        list.presets.addAll(tablePresets)
                     }
                 }
             }
@@ -1982,11 +2001,29 @@ class SettingsDialogController(
                 var firstHiddenDuplicate: DevicePreset? = null
                 
                 if (wasAdded) {
-                    // Количество элементов увеличилось (например, после отмены удаления)
-                    println("ADB_DEBUG:   Addition/restore detected - ${updatedPresets.size - visibleSnapshot!!.size} preset(s) added")
+                    // Количество элементов увеличилось
+                    val addedCount = updatedPresets.size - visibleSnapshot!!.size
+                    println("ADB_DEBUG:   Addition detected - $addedCount preset(s) added")
                     
-                    // Просто берем все обновленные пресеты из таблицы
-                    newPresets.addAll(updatedPresets)
+                    // Проверяем если это добавление новых пустых пресетов через кнопку "+"
+                    val hasNewEmptyPresets = updatedPresets.takeLast(addedCount).any { preset ->
+                        preset.label.isBlank() && preset.size.isBlank() && preset.dpi.isBlank()
+                    }
+                    
+                    if (hasNewEmptyPresets) {
+                        println("ADB_DEBUG:   New empty preset(s) detected from '+' button")
+                        // Сохраняем все существующие пресеты
+                        newPresets.addAll(originalPresets)
+                        
+                        // Добавляем новые пресеты из таблицы
+                        val newPresetsFromTable = updatedPresets.takeLast(addedCount)
+                        newPresets.addAll(newPresetsFromTable)
+                    } else {
+                        // Это восстановление после undo или другая операция
+                        println("ADB_DEBUG:   Addition/restore detected (not from '+' button)")
+                        // Просто берем все обновленные пресеты из таблицы
+                        newPresets.addAll(updatedPresets)
+                    }
                     
                     // Обновляем снимок с новым состоянием
                     val updatedVisibleKeys = mutableListOf<String>()
