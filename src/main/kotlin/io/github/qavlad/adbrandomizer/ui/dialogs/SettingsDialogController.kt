@@ -808,10 +808,98 @@ class SettingsDialogController(
         println("ADB_DEBUG: syncTableChangesToTempLists - after, currentPresetList: ${currentPresetList?.name}, presets: ${currentPresetList?.presets?.size}")
         tempPresetLists.forEach { (k, v) -> println("ADB_DEBUG: TEMP_LIST $k: ${v.name}, presets: ${v.presets.size}") }
         
+        // Проверяем, нужно ли обновить таблицу из-за изменения статуса дублей
+        if (isHideDuplicatesMode && !isFirstLoad && !isSwitchingDuplicatesFilter) {
+            // Проверяем, изменился ли статус дублей после редактирования
+            if (checkIfDuplicateStatusChanged()) {
+                println("ADB_DEBUG: Duplicate status changed after edit, reloading table")
+                // Перезагружаем таблицу для отображения изменений
+                SwingUtilities.invokeLater {
+                    // Временно отключаем слушатель модели, чтобы избежать рекурсии
+                    tableModelListener?.let { tableModel.removeTableModelListener(it) }
+                    
+                    isTableUpdating = true
+                    try {
+                        loadPresetsIntoTable()
+                    } finally {
+                        isTableUpdating = false
+                        // Возвращаем слушатель на место
+                        tableModelListener?.let { tableModel.addTableModelListener(it) }
+                    }
+                }
+            }
+        }
+        
         // Обновляем снимок видимых пресетов после синхронизации
         if (isHideDuplicatesMode) {
             saveVisiblePresetsSnapshot()
         }
+    }
+
+    /**
+     * Проверяет, изменился ли статус дублей после редактирования
+     * @return true если статус изменился (появились новые не-дубли или исчезли старые дубли)
+     */
+    private fun checkIfDuplicateStatusChanged(): Boolean {
+        if (isShowAllPresetsMode) {
+            // В режиме Show all проверяем все пресеты из всех списков
+            val allPresets = mutableListOf<DevicePreset>()
+            tempPresetLists.values.forEach { list ->
+                allPresets.addAll(list.presets)
+            }
+            
+            // Получаем текущие дубликаты
+            val currentDuplicates = findDuplicatesInList(allPresets)
+            
+            // Сравниваем с количеством видимых строк в таблице
+            val visibleRowCount = (0 until tableModel.rowCount).count { row ->
+                val firstColumn = tableModel.getValueAt(row, 0) as? String ?: ""
+                firstColumn != "+"
+            }
+            
+            // Если количество не-дублей изменилось, нужно обновить таблицу
+            val expectedVisibleCount = allPresets.size - currentDuplicates.size
+            return visibleRowCount != expectedVisibleCount
+        } else {
+            // В обычном режиме проверяем только текущий список
+            currentPresetList?.let { list ->
+                // Получаем текущие дубликаты в списке
+                val currentDuplicates = findDuplicatesInList(list.presets)
+                
+                // Сравниваем с количеством видимых строк в таблице
+                val visibleRowCount = (0 until tableModel.rowCount).count { row ->
+                    val firstColumn = tableModel.getValueAt(row, 0) as? String ?: ""
+                    firstColumn != "+"
+                }
+                
+                // Если количество не-дублей изменилось, нужно обновить таблицу
+                val expectedVisibleCount = list.presets.size - currentDuplicates.size
+                return visibleRowCount != expectedVisibleCount
+            }
+        }
+        return false
+    }
+    
+    /**
+     * Находит дубликаты в списке пресетов
+     * @return количество дубликатов (не считая первое вхождение)
+     */
+    private fun findDuplicatesInList(presets: List<DevicePreset>): Set<Int> {
+        val seen = mutableSetOf<String>()
+        val duplicateIndices = mutableSetOf<Int>()
+        
+        presets.forEachIndexed { index, preset ->
+            if (preset.size.isNotBlank() && preset.dpi.isNotBlank()) {
+                val key = "${preset.size}|${preset.dpi}"
+                if (seen.contains(key)) {
+                    duplicateIndices.add(index)
+                } else {
+                    seen.add(key)
+                }
+            }
+        }
+        
+        return duplicateIndices
     }
 
     /**
