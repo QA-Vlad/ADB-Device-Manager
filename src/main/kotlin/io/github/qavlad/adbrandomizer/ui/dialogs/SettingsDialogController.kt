@@ -1413,7 +1413,10 @@ class SettingsDialogController(
             return
         }
 
-
+        // Если включен режим скрытия дублей, сначала отключаем его
+        if (isHideDuplicatesMode) {
+            listManagerPanel.setHideDuplicates(false)
+        }
 
         val originalPreset = getPresetAtRow(row)
         val newPreset = originalPreset.copy(label = "${originalPreset.label} (copy)")
