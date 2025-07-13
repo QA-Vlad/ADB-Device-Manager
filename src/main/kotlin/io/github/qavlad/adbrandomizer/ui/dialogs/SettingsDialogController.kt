@@ -1482,8 +1482,23 @@ class SettingsDialogController(
             }
             is HistoryOperation.PresetDuplicate -> {
                 if (operation.duplicateIndex < tableModel.rowCount) {
+                    // Удаляем строку из таблицы
                     tableModel.removeRow(operation.duplicateIndex)
-                    refreshTable()
+                    
+                    // Удаляем дублированный пресет из временного списка
+                    currentPresetList?.let { list ->
+                        val duplicatePreset = operation.presetData.copy(label = "${operation.presetData.label} (copy)")
+                        list.presets.remove(duplicatePreset)
+                        println("ADB_DEBUG: Removed duplicate preset from temp list: ${duplicatePreset.label}")
+                    }
+                    
+                    // В режиме скрытия дублей нужно перезагрузить таблицу,
+                    // чтобы правильно отобразить изменения
+                    if (isHideDuplicatesMode) {
+                        loadPresetsIntoTable()
+                    } else {
+                        refreshTable()
+                    }
                 }
             }
         }
@@ -1525,7 +1540,20 @@ class SettingsDialogController(
                 val newPreset = operation.presetData.copy(label = "${operation.presetData.label} (copy)")
                 val newRowVector = createRowVector(newPreset, 0)
                 tableModel.insertRow(operation.duplicateIndex, newRowVector)
-                refreshTable()
+                
+                // Добавляем дублированный пресет во временный список
+                currentPresetList?.let { list ->
+                    list.presets.add(operation.duplicateIndex, newPreset)
+                    println("ADB_DEBUG: Added duplicate preset to temp list: ${newPreset.label}")
+                }
+                
+                // В режиме скрытия дублей нужно перезагрузить таблицу,
+                // чтобы правильно отобразить изменения
+                if (isHideDuplicatesMode) {
+                    loadPresetsIntoTable()
+                } else {
+                    refreshTable()
+                }
             }
         }
     }
