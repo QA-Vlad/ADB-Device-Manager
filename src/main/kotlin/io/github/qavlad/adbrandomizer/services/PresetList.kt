@@ -23,33 +23,3 @@ data class PresetList(
         )
     }
 }
-
-/**
- * Расширенный класс для хранения пресета с уникальным идентификатором
- */
-data class DevicePresetWithId(
-    val id: String = UUID.randomUUID().toString(),
-    var label: String,
-    var size: String,
-    var dpi: String
-) {
-    /**
-     * Конвертирует в обычный DevicePreset для обратной совместимости
-     */
-    fun toDevicePreset(): DevicePreset {
-        return DevicePreset(label, size, dpi)
-    }
-    
-    companion object {
-        /**
-         * Создает DevicePresetWithId из обычного DevicePreset
-         */
-        fun fromDevicePreset(preset: DevicePreset): DevicePresetWithId {
-            return DevicePresetWithId(
-                label = preset.label,
-                size = preset.size,
-                dpi = preset.dpi
-            )
-        }
-    }
-}

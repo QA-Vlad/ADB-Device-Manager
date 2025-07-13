@@ -89,4 +89,36 @@ object SettingsService {
     fun getScrcpyPath(): String? {
         return properties.getValue(SCRCPY_PATH_KEY)
     }
+    
+    // Ключи для сохранения состояния чекбоксов
+    private const val SHOW_ALL_PRESETS_MODE_KEY = "ADB_RANDOMIZER_SHOW_ALL_PRESETS_MODE"
+    private const val HIDE_DUPLICATES_MODE_KEY = "ADB_RANDOMIZER_HIDE_DUPLICATES_MODE"
+    
+    /**
+     * Сохраняет состояние чекбокса "Show all presets"
+     */
+    fun setShowAllPresetsMode(enabled: Boolean) {
+        properties.setValue(SHOW_ALL_PRESETS_MODE_KEY, enabled.toString())
+    }
+    
+    /**
+     * Получает состояние чекбокса "Show all presets"
+     */
+    fun getShowAllPresetsMode(): Boolean {
+        return properties.getValue(SHOW_ALL_PRESETS_MODE_KEY)?.toBoolean() ?: false
+    }
+    
+    /**
+     * Сохраняет состояние чекбокса "Hide duplicates"
+     */
+    fun setHideDuplicatesMode(enabled: Boolean) {
+        properties.setValue(HIDE_DUPLICATES_MODE_KEY, enabled.toString())
+    }
+    
+    /**
+     * Получает состояние чекбокса "Hide duplicates"
+     */
+    fun getHideDuplicatesMode(): Boolean {
+        return properties.getValue(HIDE_DUPLICATES_MODE_KEY)?.toBoolean() ?: false
+    }
 }

@@ -1,6 +1,5 @@
 package io.github.qavlad.adbrandomizer.ui.dialogs
 
-import com.intellij.icons.AllIcons
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.ui.components.JBScrollPane
@@ -8,12 +7,10 @@ import com.intellij.ui.table.JBTable
 import com.intellij.util.ui.JBUI
 import io.github.qavlad.adbrandomizer.config.PluginConfig
 import io.github.qavlad.adbrandomizer.ui.components.TableWithAddButtonPanel
-import io.github.qavlad.adbrandomizer.utils.ButtonUtils
 import java.awt.BorderLayout
 import java.awt.Component
 import java.awt.Dimension
 import javax.swing.*
-import javax.swing.JTable
 
 /**
  * Диалог настроек ADB Randomizer.
@@ -70,9 +67,7 @@ class SettingsDialog(project: Project?) : DialogWrapper(project) {
         }
         
         // Добавляем обработчик клика для выхода из режима редактирования ко всем компонентам
-        println("ADB_DEBUG: About to add click listeners recursively")
         controller.addClickListenerRecursively(mainPanel, table)
-        println("ADB_DEBUG: Finished adding click listeners")
         
         // Добавляем глобальный обработчик кликов через AWTEventListener
         SwingUtilities.invokeLater {
@@ -88,7 +83,6 @@ class SettingsDialog(project: Project?) : DialogWrapper(project) {
      * Настраивает глобальный обработчик кликов через AWTEventListener
      */
     private fun setupGlobalClickListener(table: JTable) {
-        println("ADB_DEBUG: Setting up global click listener")
         val toolkit = java.awt.Toolkit.getDefaultToolkit()
         
         val eventListener = java.awt.event.AWTEventListener { event ->
@@ -96,9 +90,6 @@ class SettingsDialog(project: Project?) : DialogWrapper(project) {
                 when (event.id) {
                     java.awt.event.MouseEvent.MOUSE_CLICKED,
                     java.awt.event.MouseEvent.MOUSE_PRESSED -> {
-                        println("ADB_DEBUG: Global ${if (event.id == java.awt.event.MouseEvent.MOUSE_CLICKED) "click" else "press"} detected on component: ${event.source.javaClass.simpleName}")
-                        println("ADB_DEBUG: Table is editing: ${table.isEditing}")
-                        
                         if (table.isEditing) {
                             // Проверяем, что клик не по самой таблице и не по редактору ячеек
                             val clickedComponent = event.source as? Component
@@ -108,10 +99,7 @@ class SettingsDialog(project: Project?) : DialogWrapper(project) {
                                                  SwingUtilities.isDescendingFrom(clickedComponent, table.editorComponent))
                             val isDialogClick = shouldStopEditingForComponent(clickedComponent)
                             
-                            println("ADB_DEBUG: Is table click: $isTableClick, Is editor click: $isEditorClick, Should stop: $isDialogClick")
-                            
                             if (!isTableClick && !isEditorClick && isDialogClick) {
-                                println("ADB_DEBUG: Stopping cell editing due to global ${if (event.id == java.awt.event.MouseEvent.MOUSE_CLICKED) "click" else "press"}")
                                 SwingUtilities.invokeLater {
                                     if (table.isEditing) {
                                         table.cellEditor?.stopCellEditing()
@@ -137,7 +125,6 @@ class SettingsDialog(project: Project?) : DialogWrapper(project) {
         if (component == null) return true
         
         val componentName = component.javaClass.simpleName
-        println("ADB_DEBUG: Checking component: $componentName")
         
         // Список компонентов, клик по которым НЕ должен останавливать редактирование
         val dontStopEditingComponents = setOf(
@@ -150,15 +137,8 @@ class SettingsDialog(project: Project?) : DialogWrapper(project) {
             ""                 // Пустое имя (в случае JTable)
         )
         
-        // Если компонент в списке исключений, то НЕ останавливаем редактирование
-        if (dontStopEditingComponents.contains(componentName)) {
-            println("ADB_DEBUG: Component in exclusion list, not stopping editing")
-            return false
-        }
-        
-        // Для всех остальных компонентов - останавливаем редактирование
-        println("ADB_DEBUG: Component not in exclusion list, stopping editing")
-        return true
+        // Возвращаем результат без логирования
+        return !dontStopEditingComponents.contains(componentName)
     }
 
     override fun doOKAction() {
@@ -168,6 +148,7 @@ class SettingsDialog(project: Project?) : DialogWrapper(project) {
     }
 
     override fun doCancelAction() {
+        controller.restoreOriginalState()
         controller.dispose()
         super.doCancelAction()
     }

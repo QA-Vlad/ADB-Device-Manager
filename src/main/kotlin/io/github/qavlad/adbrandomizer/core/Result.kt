@@ -3,13 +3,7 @@ package io.github.qavlad.adbrandomizer.core
 sealed class Result<out T> {
     data class Success<T>(val data: T) : Result<T>()
     data class Error(val exception: Exception, val message: String? = null) : Result<Nothing>()
-    
-    @Suppress("unused")
-    inline fun onSuccess(action: (value: T) -> Unit): Result<T> {
-        if (this is Success) action(data)
-        return this
-    }
-    
+
     inline fun onError(action: (exception: Exception, message: String?) -> Unit): Result<T> {
         if (this is Error) action(exception, message)
         return this
@@ -33,24 +27,9 @@ sealed class Result<out T> {
     }
     
     fun isSuccess(): Boolean = this is Success
-    
-    @Suppress("unused")
-    fun isError(): Boolean = this is Error
-    
-    @Suppress("unused")
-    fun exceptionOrNull(): Exception? = if (this is Error) exception else null
 }
 
-// Удобные функции для создания Result
-@Suppress("unused")
-inline fun <T> runCatching(block: () -> T): Result<T> {
-    return try {
-        Result.Success(block())
-    } catch (e: Exception) {
-        Result.Error(e)
-    }
-}
-
+// Функции для создания Result
 inline fun <T> runCatchingWithMessage(message: String, block: () -> T): Result<T> {
     return try {
         Result.Success(block())

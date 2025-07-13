@@ -87,11 +87,6 @@ class HistoryManager(private val maxHistorySize: Int = 50) {
         println("ADB_DEBUG: Добавлена операция PresetMove: from=$fromIndex, to=$toIndex")
     }
     
-    fun addPresetImport(startIndex: Int, presets: List<io.github.qavlad.adbrandomizer.services.DevicePreset>) {
-        addOperation(HistoryOperation.PresetImport(startIndex, presets))
-        println("ADB_DEBUG: Добавлена операция PresetImport: startIndex=$startIndex, count=${presets.size}")
-    }
-    
     fun addPresetDuplicate(originalIndex: Int, duplicateIndex: Int, preset: io.github.qavlad.adbrandomizer.services.DevicePreset) {
         addOperation(HistoryOperation.PresetDuplicate(originalIndex, duplicateIndex, preset))
         println("ADB_DEBUG: Добавлена операция PresetDuplicate: original=$originalIndex, duplicate=$duplicateIndex, preset=${preset.label}")
@@ -131,19 +126,10 @@ class HistoryManager(private val maxHistorySize: Int = 50) {
         return findCellById(cellId)
     }
     
-    @Suppress("unused")
-    fun getLastOperation(): HistoryOperation? = historyStack.lastOrNull()
-    
     fun isEmpty(): Boolean = historyStack.isEmpty()
     
     fun size(): Int = historyStack.size
-    
-    @Suppress("unused")
-    fun clear() {
-        historyStack.clear()
-        redoStack.clear()
-        cellIdMap.clear()
-    }
+
     
     fun onRowMoved(fromIndex: Int, toIndex: Int) {
         println("ADB_DEBUG: Row moved from $fromIndex to $toIndex - updating cellIdMap")

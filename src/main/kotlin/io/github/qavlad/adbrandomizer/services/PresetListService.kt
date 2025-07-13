@@ -4,6 +4,7 @@ import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import com.intellij.ide.util.PropertiesComponent
 import io.github.qavlad.adbrandomizer.config.PluginConfig
+import com.intellij.openapi.application.PathManager
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.Paths
@@ -18,11 +19,22 @@ object PresetListService {
     
     private val properties = PropertiesComponent.getInstance()
     private val gson = Gson()
-    private val presetsDir = Paths.get(System.getProperty("user.home"), ".adbrandomizer", "presets")
+    private val presetsDir = Paths.get(PathManager.getConfigPath(), "ADBRandomizer", "presets")
     
     init {
+        println("PresetListService: Initializing with presets directory: ${presetsDir.toAbsolutePath()}")
         // Создаем директорию для пресетов если её нет
         Files.createDirectories(presetsDir)
+        println("PresetListService: Directory created/exists: ${presetsDir.toFile().exists()}")
+        // Проверяем, есть ли сохраненные метаданные
+        val savedMetadata = properties.getValue(LISTS_METADATA_KEY)
+        if (savedMetadata.isNullOrBlank()) {
+            println("PresetListService: No saved metadata found, initializing default lists")
+            // Только если нет сохраненных метаданных, инициализируем дефолтные списки
+            initializeDefaultLists()
+        } else {
+            println("PresetListService: Found saved metadata")
+        }
     }
     
     /**
@@ -39,6 +51,7 @@ object PresetListService {
      */
     fun getAllListsMetadata(): List<ListMetadata> {
         val json = properties.getValue(LISTS_METADATA_KEY)
+        println("PresetListService: getAllListsMetadata - json present: ${!json.isNullOrBlank()}")
         return if (json.isNullOrBlank()) {
             // Инициализируем дефолтными списками
             println("PresetListService: Initializing default lists")
@@ -46,7 +59,10 @@ object PresetListService {
         } else {
             try {
                 val type = object : TypeToken<List<ListMetadata>>() {}.type
-                gson.fromJson(json, type)
+                val metadata: List<ListMetadata> = gson.fromJson(json, type)
+                println("PresetListService: Loaded ${metadata.size} lists from metadata")
+                metadata.forEach { println("PresetListService: - ${it.name} (${it.id})")}      
+                metadata
             } catch (e: Exception) {
                 println("PresetListService: Error loading metadata, initializing defaults: ${e.message}")
                 initializeDefaultLists()
@@ -148,22 +164,62 @@ object PresetListService {
      */
     fun getActivePresetList(): PresetList? {
         val activeId = getActiveListId() ?: return null
-        return loadPresetList(activeId)
+        
+        // Проверяем кэш активного списка
+        if (activeListCacheId == activeId && activeListCache != null) {
+            return activeListCache
+        }
+        
+        // Загружаем и кэшируем
+        val list = loadPresetList(activeId)
+        if (list != null) {
+            activeListCache = list
+            activeListCacheId = activeId
+        }
+        return list
     }
+    
+    // Кэш для загруженных списков, чтобы избежать повторного чтения файлов
+    private val loadedListsCache = mutableMapOf<String, PresetList>()
+    private var cacheEnabled = false
+    
+    // Кэш для активного списка
+    private var activeListCache: PresetList? = null
+    private var activeListCacheId: String? = null
     
     /**
      * Загружает список пресетов по ID
      */
     fun loadPresetList(listId: String): PresetList? {
+        // Проверяем кэш если он включен
+        if (cacheEnabled && loadedListsCache.containsKey(listId)) {
+            return loadedListsCache[listId]
+        }
+        
         return try {
             val file = presetsDir.resolve("$listId.json").toFile()
+            // Логируем только при отсутствии в кэше
+            if (!cacheEnabled) {
+                println("PresetListService: Loading preset list from: ${file.absolutePath}")
+            }
             if (file.exists()) {
                 val json = file.readText()
-                gson.fromJson(json, PresetList::class.java)
+                val presetList = gson.fromJson(json, PresetList::class.java)
+                if (!cacheEnabled) {
+                    println("PresetListService: Successfully loaded list ${presetList.name} with ${presetList.presets.size} presets")
+                }
+                // Сохраняем в кэш
+                if (cacheEnabled) {
+                    loadedListsCache[listId] = presetList
+                }
+                presetList
             } else {
+                println("PresetListService: File does not exist: ${file.absolutePath}")
                 null
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            println("PresetListService: Error loading preset list $listId: ${e.message}")
+            e.printStackTrace()
             null
         }
     }
@@ -173,7 +229,24 @@ object PresetListService {
      */
     fun savePresetList(presetList: PresetList) {
         val file = presetsDir.resolve("${presetList.id}.json").toFile()
-        file.writeText(gson.toJson(presetList))
+        println("PresetListService: Saving preset list '${presetList.name}' to: ${file.absolutePath}")
+        try {
+            // Убеждаемся, что директория существует
+            file.parentFile.mkdirs()
+            val json = gson.toJson(presetList)
+            file.writeText(json)
+            println("PresetListService: Successfully saved ${presetList.presets.size} presets")
+            
+            // Очищаем кэш для этого списка
+            loadedListsCache.remove(presetList.id)
+            if (activeListCacheId == presetList.id) {
+                activeListCache = null
+                activeListCacheId = null
+            }
+        } catch (e: Exception) {
+            println("PresetListService: Error saving preset list: ${e.message}")
+            e.printStackTrace()
+        }
     }
     
     /**
@@ -271,24 +344,22 @@ object PresetListService {
     }
     
     /**
-     * Получает все пресеты из всех списков
+     * Включает кэширование для массовых операций
      */
-    fun getAllPresetsFromAllLists(): List<Pair<String, DevicePreset>> {
-        val allPresets = mutableListOf<Pair<String, DevicePreset>>()
-        
-        getAllListsMetadata().forEach { metadata ->
-            loadPresetList(metadata.id)?.let { list ->
-                println("PresetListService: Loading presets from list '${list.name}' with ${list.presets.size} items")
-                list.presets.forEach { preset ->
-                    allPresets.add(metadata.name to preset)
-                }
-            }
-        }
-        
-        println("PresetListService: Total presets from all lists: ${allPresets.size}")
-        return allPresets
+    fun enableCache() {
+        cacheEnabled = true
+        loadedListsCache.clear()
     }
     
+    /**
+     * Отключает кэширование и очищает кэш
+     */
+    fun disableCache() {
+        cacheEnabled = false
+        loadedListsCache.clear()
+    }
+
+
     /**
      * Проверяет существование списка с таким именем
      */
@@ -296,6 +367,15 @@ object PresetListService {
         return getAllListsMetadata().any { 
             it.name.equals(name, ignoreCase = true) && it.id != excludeId
         }
+    }
+    
+    /**
+     * Очищает все кэши
+     */
+    fun clearAllCaches() {
+        loadedListsCache.clear()
+        activeListCache = null
+        activeListCacheId = null
     }
     
     /**
@@ -312,5 +392,81 @@ object PresetListService {
         val activeList = getActivePresetList() ?: return
         activeList.presets = presets.toMutableList()
         savePresetList(activeList)
+    }
+
+    
+    private const val SHOW_ALL_PRESETS_ORDER_KEY = "ADB_RANDOMIZER_SHOW_ALL_PRESETS_ORDER"
+    
+    /**
+     * Получает сохраненный порядок пресетов для режима Show all presets
+     */
+    fun getShowAllPresetsOrder(): List<String> {
+        val json = properties.getValue(SHOW_ALL_PRESETS_ORDER_KEY)
+        return if (json.isNullOrBlank()) {
+            emptyList()
+        } else {
+            try {
+                val type = object : TypeToken<List<String>>() {}.type
+                gson.fromJson(json, type)
+            } catch (_: Exception) {
+                emptyList()
+            }
+        }
+    }
+    
+    /**
+     * Сохраняет порядок пресетов для режима Show all presets
+     */
+    fun saveShowAllPresetsOrder(order: List<String>) {
+        val json = gson.toJson(order)
+        properties.setValue(SHOW_ALL_PRESETS_ORDER_KEY, json)
+    }
+
+    /**
+     * Полный сброс всех списков и пересоздание дефолтных
+     */
+    fun resetToDefaultLists() {
+        println("PresetListService: Resetting to default lists")
+        // Очищаем метаданные
+        properties.unsetValue(LISTS_METADATA_KEY)
+        properties.unsetValue(ACTIVE_LIST_KEY)
+        properties.unsetValue(SHOW_ALL_PRESETS_ORDER_KEY)
+        // Удаляем все файлы в папке presets
+        if (presetsDir.toFile().exists()) {
+            presetsDir.toFile().listFiles()?.forEach { 
+                println("PresetListService: Deleting file: ${it.name}")
+                it.delete() 
+            }
+        }
+        // Пересоздаём дефолтные списки
+        initializeDefaultLists()
+    }
+    
+    /**
+     * Проверяет и восстанавливает дефолтные списки если они не существуют
+     */
+    fun ensureDefaultListsExist() {
+        val metadata = getAllListsMetadata()
+        if (metadata.isEmpty()) {
+            println("PresetListService: No lists found, resetting to defaults")
+            resetToDefaultLists()
+            return
+        }
+        
+        // Проверяем, что все списки имеют файлы
+        var hasValidFiles = false
+        metadata.forEach { meta ->
+            val file = presetsDir.resolve("${meta.id}.json").toFile()
+            if (file.exists()) {
+                hasValidFiles = true
+            } else {
+                println("PresetListService: Missing file for list '${meta.name}' (${meta.id})")
+            }
+        }
+        
+        if (!hasValidFiles) {
+            println("PresetListService: No valid preset files found, resetting to defaults")
+            resetToDefaultLists()
+        }
     }
 }

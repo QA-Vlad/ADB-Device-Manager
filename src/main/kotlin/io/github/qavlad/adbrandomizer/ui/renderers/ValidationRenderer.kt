@@ -9,10 +9,16 @@ import io.github.qavlad.adbrandomizer.ui.components.YellowParameterBorder
 import io.github.qavlad.adbrandomizer.ui.theme.ColorScheme
 import io.github.qavlad.adbrandomizer.ui.theme.IndicatorType
 import java.awt.Component
+import java.awt.Graphics
 import javax.swing.JTable
 import javax.swing.table.DefaultTableCellRenderer
+import javax.swing.JLabel
+import javax.swing.BorderFactory
+import com.intellij.util.ui.JBUI
+import com.intellij.ui.JBColor
+import javax.swing.UIManager
 
-@Suppress("DEPRECATION")
+@Suppress("DEPRECATION", "UNUSED_PARAMETER")
 class ValidationRenderer(
     private val hoverState: () -> HoverState,
     private val getPresetAtRow: (Int) -> DevicePreset,
@@ -81,8 +87,17 @@ class ValidationRenderer(
 
         // Для остальных колонок используем стандартный рендерер
         val component = super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column)
-        component.background = cellBackground
-        component.foreground = cellForeground
+        
+        // Особая обработка для колонки "List" (колонка 6)
+        if (column == 6) {
+            // Создаем специальный компонент с иконкой и вертикальной линией
+            val listComponent = ListColumnComponent(value as? String ?: "")
+            listComponent.background = cellBackground
+            return listComponent
+        } else {
+            component.background = cellBackground
+            component.foreground = cellForeground
+        }
         border = null // Сбрасываем рамку по умолчанию
 
         // Добавляем рамку и для Label-колонки, если нужно
@@ -192,4 +207,47 @@ class ValidationRenderer(
 
         return IndicatorType.NONE
     }
+}
+
+/**
+ * Компонент для отображения колонки "List" с иконкой папки и вертикальной линией
+ */
+class ListColumnComponent(listName: String) : JLabel() {
+    init {
+        text = listName
+        // Убираем иконку - она будет только в заголовке
+        horizontalAlignment = LEFT // Выравнивание по левому краю
+        foreground = foreground?.darker()
+        font = font.deriveFont(java.awt.Font.ITALIC) // Курсив
+        isOpaque = true
+        
+        // Добавляем отступы и рамку с вертикальной линией слева
+        border = BorderFactory.createCompoundBorder(
+            VerticalLineBorder(),
+            BorderFactory.createEmptyBorder(0, JBUI.scale(8), 0, JBUI.scale(4))
+        )
+    }
+}
+
+/**
+ * Кастомная рамка с вертикальной линией слева
+ */
+class VerticalLineBorder : javax.swing.border.AbstractBorder() {
+    override fun paintBorder(c: Component, g: Graphics, x: Int, y: Int, width: Int, height: Int) {
+        val g2 = g.create()
+        try {
+            // Используем цвет разделителя из UIManager или серый по умолчанию
+            g2.color = UIManager.getColor("Separator.foreground") ?: JBColor.GRAY
+            // Рисуем толстую вертикальную линию слева
+            g2.fillRect(x, y, JBUI.scale(2), height)
+        } finally {
+            g2.dispose()
+        }
+    }
+    
+    override fun getBorderInsets(c: Component): java.awt.Insets {
+        return JBUI.insetsLeft(2)
+    }
+    
+    override fun isBorderOpaque(): Boolean = true
 }

@@ -354,15 +354,24 @@ class PresetListManagerPanel(
             }
         }
     }
+
     
     /**
-     * Получает текущий выбранный список
-     * @suppress Метод может быть использован в будущем
+     * Устанавливает состояние чекбокса "Show all presets"
      */
-    @Suppress("unused")
-    private fun getCurrentList(): PresetList? {
-        val selectedItem = listComboBox.selectedItem as? PresetListItem
-        return selectedItem?.let { PresetListService.loadPresetList(it.id) }
+    fun setShowAllPresets(enabled: Boolean) {
+        if (showAllPresetsCheckbox.isSelected != enabled) {
+            showAllPresetsCheckbox.isSelected = enabled
+        }
+    }
+    
+    /**
+     * Устанавливает состояние чекбокса "Hide duplicates"
+     */
+    fun setHideDuplicates(enabled: Boolean) {
+        if (hideDuplicatesCheckbox.isSelected != enabled) {
+            hideDuplicatesCheckbox.isSelected = enabled
+        }
     }
     
     /**

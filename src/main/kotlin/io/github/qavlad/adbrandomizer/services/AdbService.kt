@@ -290,16 +290,6 @@ object AdbService {
         }
     }
 
-    // Метод для проверки занятости порта
-    @Suppress("UNUSED")
-    private fun isPortInUse(port: Int): Boolean {
-        return try {
-            java.net.ServerSocket(port).use { false }
-        } catch (_: java.io.IOException) {
-            true
-        }
-    }
-
     fun connectWifi(@Suppress("UNUSED_PARAMETER") project: Project?, ipAddress: String, port: Int = 5555): Result<Boolean> {
         return runAdbOperation("connect to Wi-Fi device $ipAddress:$port") {
             val adbPath = AdbPathResolver.findAdbExecutable()

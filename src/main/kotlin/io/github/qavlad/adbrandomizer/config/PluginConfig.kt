@@ -56,14 +56,6 @@ object PluginConfig {
             Triple("Pixel 3a", "1080x2220", "441"),
             Triple("Generic Tablet", "1200x1920", "240")
         )
-        
-        val COMMON_DEVICES = listOf(
-            Triple("Pixel 6 Pro", "1440x3120", "512"),
-            Triple("Pixel 5", "1080x2340", "432"),
-            Triple("Pixel 4a", "1080x2340", "413"),
-            Triple("Samsung Galaxy S21", "1080x2400", "421"),
-            Triple("OnePlus 9 Pro", "1440x3216", "525")
-        )
     }
     
     // Regex Patterns

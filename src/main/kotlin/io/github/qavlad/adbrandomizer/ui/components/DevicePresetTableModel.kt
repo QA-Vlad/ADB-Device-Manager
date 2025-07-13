@@ -31,14 +31,6 @@ class DevicePresetTableModel : DefaultTableModel {
         updateRowNumbers()
     }
 
-    // Конструктор для новой версии
-    @Suppress("UNUSED")
-    constructor(columnNames: List<String>, historyManager: HistoryManager) : super() {
-        this.historyManager = historyManager
-        setColumnIdentifiers(Vector(columnNames))
-        updateRowNumbers()
-    }
-
     override fun isCellEditable(row: Int, column: Int): Boolean {
         // Запрещаем редактирование иконки "перетащить" и номера строки
         return column != 0 && column != 1
@@ -65,7 +57,7 @@ class DevicePresetTableModel : DefaultTableModel {
             isUndoOperation = false
         }
     }
-    
+
     fun redoValueAt(aValue: Any?, row: Int, column: Int) {
         isUndoOperation = true
         try {
@@ -76,8 +68,15 @@ class DevicePresetTableModel : DefaultTableModel {
     }
 
     fun getPresets(): List<DevicePreset> {
-        return dataVector.map { row ->
+        return dataVector.mapNotNull { row ->
             val rowVector = row as Vector<Any>
+            val firstColumn = rowVector.elementAtOrNull(0) as? String ?: ""
+
+            // Пропускаем строку с кнопкой
+            if (firstColumn == "+") {
+                return@mapNotNull null
+            }
+
             DevicePreset(
                 label = rowVector.elementAt(2) as? String ?: "",
                 size = rowVector.elementAt(3) as? String ?: "",
@@ -86,21 +85,23 @@ class DevicePresetTableModel : DefaultTableModel {
         }
     }
 
-    @Suppress("UNUSED")
-    fun setPresets(presets: List<DevicePreset>) {
-        // Очищаем таблицу
-        rowCount = 0
+    fun getPresetAt(row: Int): DevicePreset? {
+        if (row < 0 || row >= rowCount) return null
 
-        // Добавляем новые пресеты
-        presets.forEach { preset ->
-            addRow(createRowVector(preset))
+        val rowVector = dataVector.elementAt(row) as? Vector<Any> ?: return null
+        val firstColumn = rowVector.elementAtOrNull(0) as? String ?: ""
+
+        // Пропускаем строку с кнопкой
+        if (firstColumn == "+") {
+            return null
         }
-        updateRowNumbers()
+
+        return DevicePreset(
+            label = rowVector.elementAt(2) as? String ?: "",
+            size = rowVector.elementAt(3) as? String ?: "",
+            dpi = rowVector.elementAt(4) as? String ?: ""
+        )
     }
-
-
-
-
 
     /**
      * Находит все дубликаты пресетов по комбинации Size + DPI.
@@ -134,7 +135,7 @@ class DevicePresetTableModel : DefaultTableModel {
     override fun addRow(rowData: Vector<*>?) {
         super.addRow(rowData)
         // Не обновляем номера строк для строки с кнопкой плюсика
-        if (rowData != null && rowData.size > 0 && rowData[0] != "+") {
+        if (rowData != null && rowData.isNotEmpty() && rowData[0] != "+") {
             updateRowNumbers()
         }
     }

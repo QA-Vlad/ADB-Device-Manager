@@ -52,7 +52,7 @@ class CompactActionPanel(
             minimumSize = preferredSize
             maximumSize = preferredSize
             
-            // Минималистичная стилизация как в референсе
+            // Минималистичная стилизация
             isBorderPainted = false
             isFocusPainted = false
             isContentAreaFilled = false
