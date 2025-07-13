@@ -780,10 +780,22 @@ class SettingsDialogController(
                         val deletedCount = visibleOriginalPresets.size - updatedTablePresets.size
                         println("ADB_DEBUG:   Detected deletion of $deletedCount preset(s)")
                         
-                        // Простое сопоставление по порядку, пропуская удаленные
+                        // Находим индекс удаленного элемента путем сравнения
+                        var deletedVisibleIndex = -1
+                        for (i in visibleOriginalPresets.indices) {
+                            if (i >= updatedTablePresets.size || 
+                                visibleOriginalPresets[i].second.label != updatedTablePresets[i].label) {
+                                deletedVisibleIndex = i
+                                break
+                            }
+                        }
+                        
+                        println("ADB_DEBUG:   Deleted visible index: $deletedVisibleIndex")
+                        
+                        // Сопоставляем оставшиеся видимые элементы
                         var tableIndex = 0
                         visibleOriginalPresets.forEachIndexed { visibleIndex, (originalIndex, _) ->
-                            if (tableIndex < updatedTablePresets.size) {
+                            if (visibleIndex != deletedVisibleIndex && tableIndex < updatedTablePresets.size) {
                                 updatedPresetsMap[originalIndex] = updatedTablePresets[tableIndex]
                                 tableIndex++
                             }
@@ -863,8 +875,48 @@ class SettingsDialogController(
                     
                     // Создаем новый список
                     val newPresets = mutableListOf<DevicePreset>()
+                    
+                    // Находим удаленный элемент и его дубликаты
+                    var deletedPresetKey: String? = null
+                    var firstHiddenDuplicateIndex = -1
+                    
+                    if (updatedTablePresets.size < visibleOriginalPresets.size) {
+                        // Определяем какой элемент был удален
+                        val deletedIndices = mutableListOf<Int>()
+                        visibleOriginalPresets.forEach { (originalIndex, preset) ->
+                            if (!updatedPresetsMap.containsKey(originalIndex)) {
+                                deletedIndices.add(originalIndex)
+                                if (preset.size.isNotBlank() && preset.dpi.isNotBlank()) {
+                                    deletedPresetKey = "${preset.size}|${preset.dpi}"
+                                }
+                            }
+                        }
+                        
+                        // Если удален элемент с ключом, ищем первый скрытый дубликат
+                        if (deletedPresetKey != null) {
+                            originalPresets.forEachIndexed { index, preset ->
+                                val key = if (preset.size.isNotBlank() && preset.dpi.isNotBlank()) {
+                                    "${preset.size}|${preset.dpi}"
+                                } else {
+                                    null
+                                }
+                                
+                                if (key == deletedPresetKey && !visibleOriginalPresets.any { it.first == index }) {
+                                    firstHiddenDuplicateIndex = index
+                                    println("ADB_DEBUG:   Found first hidden duplicate at index $index: ${preset.label}")
+                                    return@forEachIndexed
+                                }
+                            }
+                        }
+                    }
+                    
+                    val usedHiddenDuplicateIndex = mutableSetOf<Int>()
+                    
                     originalPresets.forEachIndexed { index, originalPreset ->
-                        if (updatedPresetsMap.containsKey(index)) {
+                        if (usedHiddenDuplicateIndex.contains(index)) {
+                            // Этот скрытый дубликат уже был использован для замены удаленного элемента
+                            println("ADB_DEBUG:   Skipping already used hidden duplicate at index $index: ${originalPreset.label}")
+                        } else if (updatedPresetsMap.containsKey(index)) {
                             // Это был видимый пресет - берем обновленную версию
                             val updatedPreset = updatedPresetsMap[index]!!
                             newPresets.add(updatedPreset)
@@ -876,6 +928,14 @@ class SettingsDialogController(
                                 // Это был скрытый элемент - сохраняем оригинал
                                 newPresets.add(originalPreset)
                                 println("ADB_DEBUG:   Kept hidden preset at index $index: ${originalPreset.label}")
+                            } else if (firstHiddenDuplicateIndex >= 0 && !usedHiddenDuplicateIndex.contains(firstHiddenDuplicateIndex)) {
+                                // Это был видимый элемент, который удалили, и у него есть скрытый дубликат
+                                // Вставляем первый скрытый дубликат на место удаленного
+                                val hiddenDuplicate = originalPresets[firstHiddenDuplicateIndex]
+                                newPresets.add(hiddenDuplicate)
+                                println("ADB_DEBUG:   Replaced deleted preset at index $index with hidden duplicate: ${hiddenDuplicate.label}")
+                                // Помечаем, что этот дубликат уже использован
+                                usedHiddenDuplicateIndex.add(firstHiddenDuplicateIndex)
                             } else {
                                 // Это был видимый элемент, который удалили - пропускаем
                                 println("ADB_DEBUG:   Skipped deleted preset at index $index: ${originalPreset.label}")
