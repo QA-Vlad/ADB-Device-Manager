@@ -58,7 +58,9 @@ class SettingsDialogController(
     private var isHideDuplicatesMode = false
     
     // Карта для отслеживания какие пресеты были видимы в таблице при редактировании
+    // Хранит для каждого списка полный порядок элементов и индексы видимых элементов
     private val visiblePresetsSnapshot = mutableMapOf<String, List<String>>()
+    private val presetsOrderSnapshot = mutableMapOf<String, List<String>>()
 
     // Временное хранилище всех списков для режима "Show all presets"
     private val tempPresetLists = mutableMapOf<String, PresetList>()
@@ -128,6 +130,7 @@ class SettingsDialogController(
                 // В режиме скрытия дубликатов снимок нужно сохранять для корректной работы
                 if (!isShowAllPresetsMode && !isHideDuplicatesMode) {
                     visiblePresetsSnapshot.clear()
+                    presetsOrderSnapshot.clear()
                 }
                 if (::table.isInitialized) {
                     loadPresetsIntoTable()
@@ -175,6 +178,7 @@ class SettingsDialogController(
                     if (!showAll) {
                         println("ADB_DEBUG: Clearing snapshot when exiting Show all mode")
                         visiblePresetsSnapshot.clear()
+                        presetsOrderSnapshot.clear()
                     }
                 }
             },
@@ -231,6 +235,7 @@ class SettingsDialogController(
                         // Очищаем снимок при отключении фильтра дубликатов
                         if (!hideDuplicates) {
                             visiblePresetsSnapshot.clear()
+                            presetsOrderSnapshot.clear()
                         }
                     }
                 }
@@ -1139,6 +1144,7 @@ class SettingsDialogController(
         tempPresetLists.clear()
         originalPresetLists.clear()
         visiblePresetsSnapshot.clear()
+        presetsOrderSnapshot.clear()
 
         // Загружаем все списки и создаем их копии
         val allMetadata = PresetListService.getAllListsMetadata()
@@ -1272,12 +1278,28 @@ class SettingsDialogController(
                     }
 
                     // Теперь добавляем все пресеты, которых нет в сохраненном порядке
-                    // Это важно для случая, когда дубликаты были скрыты при сохранении
+                    // Важно: добавляем их в правильном порядке, сохраняя позиции внутри списков
                     tempPresetLists.values.forEach { list ->
+                        
+                        // Проходим по всем пресетам списка в их оригинальном порядке
                         list.presets.forEach { preset ->
                             val key = "${list.name}:${preset.label}:${preset.size}:${preset.dpi}"
+                            
                             if (!addedPresets.contains(key)) {
-                                allPresetsWithListNames.add(list.name to preset)
+                                // Находим позицию для вставки
+                                var insertPosition = allPresetsWithListNames.size
+                                
+                                // Ищем позицию после последнего добавленного элемента этого списка
+                                for (i in allPresetsWithListNames.indices.reversed()) {
+                                    if (allPresetsWithListNames[i].first == list.name) {
+                                        insertPosition = i + 1
+                                        break
+                                    }
+                                }
+                                
+                                // Вставляем на найденную позицию
+                                allPresetsWithListNames.add(insertPosition, list.name to preset)
+                                addedPresets.add(key)
                             }
                         }
                     }
@@ -1432,6 +1454,7 @@ class SettingsDialogController(
     private fun saveVisiblePresetsSnapshotForAllLists() {
         println("ADB_DEBUG: saveVisiblePresetsSnapshotForAllLists called")
         visiblePresetsSnapshot.clear()
+        presetsOrderSnapshot.clear()
         
         if (!isHideDuplicatesMode) {
             return
@@ -1453,9 +1476,10 @@ class SettingsDialogController(
             allLists
         }
         
-        // Проходим по всем спискам и сохраняем их видимые пресеты
+        // Проходим по всем спискам и сохраняем их видимые пресеты и полный порядок
         listsToProcess.forEach { (_, list) ->
             val visiblePresetKeys = mutableListOf<String>()
+            val allPresetKeys = mutableListOf<String>()
             val seenKeys = mutableSetOf<String>()
             
             list.presets.forEach { preset ->
@@ -1466,6 +1490,7 @@ class SettingsDialogController(
                 }
                 
                 val presetKey = "${preset.label}|${preset.size}|${preset.dpi}"
+                allPresetKeys.add(presetKey)
                 
                 // Первое вхождение каждой комбинации size|dpi считается видимым
                 if (!seenKeys.contains(key)) {
@@ -1478,6 +1503,7 @@ class SettingsDialogController(
             }
             
             visiblePresetsSnapshot[list.name] = visiblePresetKeys
+            presetsOrderSnapshot[list.name] = allPresetKeys
         }
         
         println("ADB_DEBUG: Saved snapshot for all lists:")
@@ -1495,6 +1521,7 @@ class SettingsDialogController(
         
         if (!isHideDuplicatesMode) {
             visiblePresetsSnapshot.clear()
+            presetsOrderSnapshot.clear()
             return
         }
         
@@ -2088,7 +2115,7 @@ class SettingsDialogController(
             
             // Сохраняем копии оригинальных списков
             val originalLists = mutableMapOf<String, List<DevicePreset>>()
-            tempPresetLists.forEach { (id, list) ->
+            tempPresetLists.forEach { (_, list) ->
                 originalLists[list.name] = list.presets.map { it.copy() }
             }
             
@@ -2111,7 +2138,7 @@ class SettingsDialogController(
             }
             
             // Обновляем каждый список, сохраняя скрытые элементы
-            tempPresetLists.forEach { (listId, list) ->
+            tempPresetLists.forEach { (_, list) ->
                 val originalPresets = originalLists[list.name] ?: emptyList()
                 val visibleIndices = listVisibleIndices[list.name] ?: emptyList()
                 
@@ -2131,387 +2158,139 @@ class SettingsDialogController(
                 }
                 println("ADB_DEBUG:   updated presets: ${updatedPresets.size}")
                 
-                // Создаем новый список
-                val newPresets = mutableListOf<DevicePreset>()
+                // НЕ создаем новый список - будем обновлять существующий на месте
+                // чтобы сохранить порядок элементов
                 
-                // Проверяем, было ли удаление или добавление
-                val wasDeleted = visibleSnapshot != null && updatedPresets.size < visibleSnapshot.size
-                val wasAdded = visibleSnapshot != null && updatedPresets.size > visibleSnapshot.size
-                var firstHiddenDuplicate: DevicePreset? = null
-                
-                if (wasAdded) {
-                    // Количество элементов увеличилось
-                    val addedCount = updatedPresets.size - visibleSnapshot!!.size
-                    println("ADB_DEBUG:   Addition detected - $addedCount preset(s) added")
+                // Простая логика: обновляем только видимые элементы из таблицы
+                if (visibleSnapshot != null) {
+                    // Сначала определяем, какие элементы были изменены
+                    val changedElements = mutableMapOf<String, DevicePreset>()
+                    val newVisibleKeys = mutableSetOf<String>()
                     
-                    // Проверяем если это добавление новых пустых пресетов через кнопку "+"
-                    val hasNewEmptyPresets = updatedPresets.takeLast(addedCount).any { preset ->
-                        preset.label.isBlank() && preset.size.isBlank() && preset.dpi.isBlank()
-                    }
-                    
-                    if (hasNewEmptyPresets) {
-                        println("ADB_DEBUG:   New empty preset(s) detected from '+' button")
-                        
-                        // Сохраняем все существующие пресеты
-                        newPresets.addAll(originalPresets)
-                        
-                        // Добавляем новые пресеты из таблицы
-                        val newPresetsFromTable = updatedPresets.takeLast(addedCount)
-                        newPresets.addAll(newPresetsFromTable)
-                    } else {
-                        // Это восстановление после undo или другая операция
-                        println("ADB_DEBUG:   Addition/restore detected (not from '+' button)")
-                        
-                        // Находим измененные элементы - те, которые имеют тот же размер и DPI,
-                        // но другой label (редактирование)
-                        val editedPresetsMap = mutableMapOf<String, DevicePreset>()
-                        updatedPresets.forEach { updatedPreset ->
-                            originalPresets.forEach { originalPreset ->
-                                if (originalPreset.size == updatedPreset.size && 
-                                    originalPreset.dpi == updatedPreset.dpi &&
-                                    originalPreset.label != updatedPreset.label) {
-                                    val originalKey = "${originalPreset.size}|${originalPreset.dpi}"
-                                    editedPresetsMap[originalKey] = updatedPreset
-                                }
-                            }
-                        }
-                        
-                        // Находим действительно восстановленные элементы (новые, которых не было в оригинальном списке)
-                        val restoredPresets = updatedPresets.filterIndexed { index, preset ->
-                            val presetKey = "${preset.label}|${preset.size}|${preset.dpi}"
-                            // Проверяем, что этого точного ключа не было в снимке
-                            // и что это не просто отредактированный элемент
-                            val isEdited = editedPresetsMap.values.any { edited ->
-                                edited.label == preset.label && edited.size == preset.size && edited.dpi == preset.dpi
-                            }
-                            !isEdited && index >= visibleSnapshot.size || (!visibleSnapshot.contains(presetKey) && !isEdited)
-                        }
-                        
-                        println("ADB_DEBUG:   Found ${restoredPresets.size} restored preset(s)")
-                        restoredPresets.forEach { preset ->
-                            println("ADB_DEBUG:     Restored: ${preset.label}|${preset.size}|${preset.dpi}")
-                        }
-                        
-                        // Восстанавливаем список с учетом позиций
-                        var visibleIndex = 0
-                        originalPresets.forEach { originalPreset ->
-                            val presetKey = "${originalPreset.label}|${originalPreset.size}|${originalPreset.dpi}"
-                            val sizeDpiKey = "${originalPreset.size}|${originalPreset.dpi}"
-                            
-                            // Проверяем, был ли этот элемент отредактирован
-                            val editedPreset = editedPresetsMap[sizeDpiKey]
-                            
-                            // Проверяем, является ли этот элемент восстановленным
-                            val restoredPreset = restoredPresets.find { restored ->
-                                "${restored.label}|${restored.size}|${restored.dpi}" == presetKey
-                            }
-                            
-                            when {
-                                restoredPreset != null -> {
-                                    // Этот элемент был восстановлен - добавляем его
-                                    println("ADB_DEBUG:   Inserting restored preset: $presetKey")
-                                    newPresets.add(restoredPreset)
-                                }
-                                editedPreset != null && visibleSnapshot.contains(presetKey) -> {
-                                    // Этот элемент был отредактирован - заменяем на отредактированную версию
-                                    println("ADB_DEBUG:   Replacing edited preset: $presetKey -> ${editedPreset.label}|${editedPreset.size}|${editedPreset.dpi}")
-                                    newPresets.add(editedPreset)
-                                    visibleIndex++
-                                }
-                                visibleSnapshot.contains(presetKey) && visibleIndex < updatedPresets.size -> {
-                                    // Это был видимый элемент без изменений - берем из таблицы
-                                    println("ADB_DEBUG:   Updating existing visible preset: $presetKey")
-                                    newPresets.add(updatedPresets[visibleIndex])
-                                    visibleIndex++
-                                }
-                                else -> {
-                                    // Это скрытый элемент - сохраняем оригинал
-                                    println("ADB_DEBUG:   Keeping hidden preset: $presetKey")
-                                    newPresets.add(originalPreset)
-                                }
-                            }
-                        }
-                        
-                        // Если восстановленный элемент новый (не был в оригинальном списке), добавляем в конец
-                        restoredPresets.forEach { restored ->
-                            val restoredKey = "${restored.label}|${restored.size}|${restored.dpi}"
-                            val existsInOriginal = originalPresets.any { original ->
-                                "${original.label}|${original.size}|${original.dpi}" == restoredKey
-                            }
-                            if (!existsInOriginal) {
-                                println("ADB_DEBUG:   Adding new restored preset at the end: $restoredKey")
-                                newPresets.add(restored)
-                            }
-                        }
-                    }
-                    
-                    // Обновляем снимок с новым состоянием
-                    val updatedVisibleKeys = mutableListOf<String>()
-                    val seenKeys = mutableSetOf<String>()
-                    
+                    // Собираем все видимые ключи из таблицы
                     updatedPresets.forEach { preset ->
-                        val key = if (preset.size.isNotBlank() && preset.dpi.isNotBlank()) {
-                            "${preset.size}|${preset.dpi}"
-                        } else {
-                            "unique_${preset.label}"
-                        }
-                        
-                        val presetKey = "${preset.label}|${preset.size}|${preset.dpi}"
-                        if (!seenKeys.contains(key)) {
-                            seenKeys.add(key)
-                            updatedVisibleKeys.add(presetKey)
-                        }
+                        val key = "${preset.label}|${preset.size}|${preset.dpi}"
+                        newVisibleKeys.add(key)
                     }
                     
-                    visiblePresetsSnapshot[list.name] = updatedVisibleKeys
-                    println("ADB_DEBUG:   Updated snapshot with ${updatedVisibleKeys.size} visible presets")
-                } else if (visibleSnapshot != null && !wasDeleted && visibleSnapshot.size == updatedPresets.size) {
-                    // Проверяем, есть ли восстановленные элементы (которые есть в таблице, но не в текущем списке)
-                    val currentKeys = originalPresets.map { "${it.label}|${it.size}|${it.dpi}" }.toSet()
-                    val tableKeys = updatedPresets.map { "${it.label}|${it.size}|${it.dpi}" }.toSet()
-                    val restoredKeys = tableKeys - currentKeys
-                    
-                    if (restoredKeys.isNotEmpty()) {
-                        println("ADB_DEBUG:   Found ${restoredKeys.size} restored preset(s) by key comparison")
-                        restoredKeys.forEach { key ->
-                            println("ADB_DEBUG:     Restored key: $key")
-                        }
-                        
-                        // Создаем карту восстановленных элементов
-                        val restoredPresetsMap = updatedPresets.associateBy { "${it.label}|${it.size}|${it.dpi}" }
-                        
-                        // Обрабатываем элементы с учетом восстановленных
-                        var visibleIndex = 0
-                        visibleSnapshot.forEach { snapshotKey ->
-                            if (restoredKeys.contains(snapshotKey)) {
-                                // Этот элемент был восстановлен
-                                val restoredPreset = restoredPresetsMap[snapshotKey]
-                                if (restoredPreset != null) {
-                                    println("ADB_DEBUG:   Inserting restored preset from snapshot: $snapshotKey")
-                                    newPresets.add(restoredPreset)
-                                    visibleIndex++
-                                }
-                            } else {
-                                // Ищем этот элемент в оригинальном списке
-                                val originalPreset = originalPresets.find { 
-                                    "${it.label}|${it.size}|${it.dpi}" == snapshotKey 
-                                }
-                                if (originalPreset != null && visibleIndex < updatedPresets.size) {
-                                    println("ADB_DEBUG:   Updating existing preset: $snapshotKey")
-                                    newPresets.add(updatedPresets[visibleIndex])
-                                    visibleIndex++
-                                } else if (originalPreset != null) {
-                                    println("ADB_DEBUG:   Keeping original preset: $snapshotKey")
-                                    newPresets.add(originalPreset)
-                                }
-                            }
-                        }
-                        
-                        // Добавляем скрытые элементы, которых не было в снимке
-                        originalPresets.forEach { originalPreset ->
-                            val presetKey = "${originalPreset.label}|${originalPreset.size}|${originalPreset.dpi}"
-                            if (!visibleSnapshot.contains(presetKey) && !newPresets.any { 
-                                "${it.label}|${it.size}|${it.dpi}" == presetKey 
-                            }) {
-                                println("ADB_DEBUG:   Keeping hidden preset: $presetKey")
-                                newPresets.add(originalPreset)
-                            }
-                        }
-                    } else {
-                        // Обычное обновление без восстановления
-                        println("ADB_DEBUG:   Regular update without restoration")
-                        
-                        // Создаем список обработанных видимых индексов
-                        val processedVisibleIndices = mutableSetOf<Int>()
-                        
-                        originalPresets.forEachIndexed { index, originalPreset ->
-                            val presetKey = "${originalPreset.label}|${originalPreset.size}|${originalPreset.dpi}"
-                            
-                            // Проверяем, был ли этот элемент видим в снимке
-                            val wasVisible = visibleSnapshot.contains(presetKey)
-                            
-                            if (wasVisible) {
-                                // Находим позицию в снимке
-                                val snapshotIndex = visibleSnapshot.indexOf(presetKey)
-                                
-                                if (snapshotIndex >= 0 && snapshotIndex < updatedPresets.size) {
-                                    // Берем соответствующий элемент из таблицы
-                                    val updatedPreset = updatedPresets[snapshotIndex]
-                                    println("ADB_DEBUG:   index $index was visible at snapshot position $snapshotIndex, updating: $presetKey -> ${updatedPreset.label}|${updatedPreset.size}|${updatedPreset.dpi}")
-                                    newPresets.add(updatedPreset)
-                                    processedVisibleIndices.add(snapshotIndex)
-                                } else {
-                                    // Если позиция вне границ, сохраняем оригинал
-                                    println("ADB_DEBUG:   index $index was visible but snapshot position $snapshotIndex out of bounds, keeping: $presetKey")
-                                    newPresets.add(originalPreset)
-                                }
-                            } else {
-                                // Этот пресет был скрыт - сохраняем оригинал
-                                println("ADB_DEBUG:   index $index was hidden (from snapshot), keeping: $presetKey")
-                                newPresets.add(originalPreset)
-                            }
-                        }
-                        
-                        // Проверяем, есть ли новые элементы в таблице, которых не было в оригинальном списке
-                        updatedPresets.forEachIndexed { index, updatedPreset ->
-                            if (!processedVisibleIndices.contains(index)) {
-                                val updatedKey = "${updatedPreset.label}|${updatedPreset.size}|${updatedPreset.dpi}"
-                                println("ADB_DEBUG:   Found new element at position $index (not in original list): $updatedKey")
-                                // Это может быть результат редактирования, но мы уже обработали все элементы
-                            }
-                        }
-                    }
-                } else if (wasDeleted && visibleSnapshot != null) {
-                    // Если было удаление, нужно определить какой пресет был удален
-                    println("ADB_DEBUG:   Deletion detected - need to identify deleted preset")
-                    
-                    // Создаем список обновленных ключей
-                    val updatedKeys = updatedPresets.map { "${it.label}|${it.size}|${it.dpi}" }
-                    
-                    // Находим все удаленные ключи
-                    val deletedKeys = visibleSnapshot.filter { !updatedKeys.contains(it) }
-                    println("ADB_DEBUG:   Found ${deletedKeys.size} deleted key(s)")
-                    
-                    // Определяем, какой из удаленных ключей соответствует текущему списку
-                    var deletedKey: String? = null
-                    if (deletedKeys.size == 1) {
-                        deletedKey = deletedKeys[0]
-                    } else if (deletedKeys.isNotEmpty()) {
-                        // Если удалено несколько элементов, нужно найти тот, который был в текущем списке
-                        // Создаем карту видимых элементов текущего списка из снимка
-                        val visibleKeysForCurrentList = visibleSnapshot.filter { key ->
-                            originalPresets.any { preset ->
-                                "${preset.label}|${preset.size}|${preset.dpi}" == key
-                            }
-                        }
-                        
-                        // Ищем удаленный ключ среди видимых элементов текущего списка
-                        deletedKey = deletedKeys.find { key ->
-                            visibleKeysForCurrentList.contains(key)
-                        }
-                        
-                        println("ADB_DEBUG:   Multiple deletions detected, visible keys for current list: $visibleKeysForCurrentList")
-                        println("ADB_DEBUG:   Deleted keys: $deletedKeys")
-                        println("ADB_DEBUG:   Selected deleted key for current list: $deletedKey")
-                    }
-                    
-                    println("ADB_DEBUG:   Deleted preset key: $deletedKey")
-                    
-                    // Извлекаем size и dpi из удаленного ключа
-                    val deletedKeyParts = deletedKey?.split("|")
-                    val deletedSize = deletedKeyParts?.getOrNull(1) ?: ""
-                    val deletedDpi = deletedKeyParts?.getOrNull(2) ?: ""
-                    val deletedCombination = if (deletedSize.isNotBlank() && deletedDpi.isNotBlank()) {
-                        "$deletedSize|$deletedDpi"
-                    } else null
-                    
-                    // Проверяем, есть ли еще видимые пресеты с той же комбинацией size|dpi
-                    val stillHasDuplicates = deletedCombination != null && updatedPresets.any { preset ->
-                        preset.size.isNotBlank() && preset.dpi.isNotBlank() && 
-                        "${preset.size}|${preset.dpi}" == deletedCombination
-                    }
-                    
-                    println("ADB_DEBUG:   Deleted combination: $deletedCombination, still has duplicates: $stillHasDuplicates")
-                    
-                    // Находим первый скрытый дубль для удаленной комбинации
-                    if (deletedCombination != null && !stillHasDuplicates) {
-                        originalPresets.forEach { preset ->
-                            val presetKey = "${preset.label}|${preset.size}|${preset.dpi}"
-                            val presetCombination = if (preset.size.isNotBlank() && preset.dpi.isNotBlank()) {
-                                "${preset.size}|${preset.dpi}"
-                            } else null
-                            
-                            if (!visibleSnapshot.contains(presetKey) && presetCombination == deletedCombination && firstHiddenDuplicate == null) {
-                                firstHiddenDuplicate = preset
-                                println("ADB_DEBUG:   Found hidden duplicate to reveal: $presetKey")
-                            }
-                        }
-                    }
-                    
-                    // Обрабатываем оригинальные пресеты
+                    // Определяем элементы, которые изменились (были в снимке, но теперь имеют другой ключ)
                     var visibleIndex = 0
-                    var hiddenDuplicateInserted = false
+                    visibleSnapshot.forEach { oldKey ->
+                        if (visibleIndex < updatedPresets.size) {
+                            val updatedPreset = updatedPresets[visibleIndex]
+                            val newKey = "${updatedPreset.label}|${updatedPreset.size}|${updatedPreset.dpi}"
+                            
+                            if (oldKey != newKey) {
+                                // Элемент был изменен
+                                changedElements[oldKey] = updatedPreset
+                                println("ADB_DEBUG:   Element changed: $oldKey -> $newKey")
+                            }
+                            visibleIndex++
+                        }
+                    }
                     
-                    originalPresets.forEach { originalPreset ->
-                        val presetKey = "${originalPreset.label}|${originalPreset.size}|${originalPreset.dpi}"
+                    // Теперь обновляем список, сохраняя порядок
+                    visibleIndex = 0
+                    val processedIndices = mutableSetOf<Int>()
+                    
+                    list.presets.forEachIndexed { index, preset ->
+                        val presetKey = "${preset.label}|${preset.size}|${preset.dpi}"
                         
                         when {
-                            presetKey == deletedKey -> {
-                                // Это удаленный пресет - пропускаем
-                                println("ADB_DEBUG:   Skipping deleted preset: $presetKey")
-                            }
-                            visibleSnapshot.contains(presetKey) && visibleIndex < updatedPresets.size -> {
-                                // Это видимый пресет - обновляем из таблицы
-                                println("ADB_DEBUG:   Updating visible preset: $presetKey -> ${updatedPresets[visibleIndex].label}|${updatedPresets[visibleIndex].size}|${updatedPresets[visibleIndex].dpi}")
-                                newPresets.add(updatedPresets[visibleIndex])
+                            // Если элемент был изменен
+                            changedElements.containsKey(presetKey) -> {
+                                val updatedPreset = changedElements[presetKey]!!
+                                list.presets[index] = updatedPreset.copy()
+                                processedIndices.add(index)
                                 visibleIndex++
+                                println("ADB_DEBUG:   Updated changed element at index $index: $presetKey -> ${updatedPreset.label}|${updatedPreset.size}|${updatedPreset.dpi}")
                             }
-                            originalPreset == firstHiddenDuplicate && !hiddenDuplicateInserted -> {
-                                // Это первый скрытый дубль - он должен стать видимым
-                                println("ADB_DEBUG:   Revealing hidden duplicate: $presetKey")
-                                newPresets.add(originalPreset)
-                                hiddenDuplicateInserted = true
+                            // Если элемент был видим и не изменился
+                            visibleSnapshot.contains(presetKey) && visibleIndex < updatedPresets.size -> {
+                                val updatedPreset = updatedPresets[visibleIndex]
+                                list.presets[index] = updatedPreset.copy()
+                                processedIndices.add(index)
+                                visibleIndex++
+                                println("ADB_DEBUG:   Updated visible element at index $index: $presetKey")
                             }
+                            // Если элемент был скрыт
                             else -> {
-                                // Это скрытый пресет - сохраняем как есть
-                                println("ADB_DEBUG:   Keeping hidden preset: $presetKey")
-                                newPresets.add(originalPreset)
+                                // Проверяем, не стал ли этот скрытый элемент теперь уникальным
+                                val presetCombination = if (preset.size.isNotBlank() && preset.dpi.isNotBlank()) {
+                                    "${preset.size}|${preset.dpi}"
+                                } else null
+                                
+                                // Считаем количество видимых элементов с такой же комбинацией
+                                val visibleDuplicatesCount = if (presetCombination != null) {
+                                    list.presets.count { p ->
+                                        val pKey = "${p.label}|${p.size}|${p.dpi}"
+                                        p.size.isNotBlank() && p.dpi.isNotBlank() &&
+                                        "${p.size}|${p.dpi}" == presetCombination &&
+                                        (newVisibleKeys.contains(pKey) || processedIndices.contains(list.presets.indexOf(p)))
+                                    }
+                                } else {
+                                    0
+                                }
+                                
+                                if (presetCombination != null && visibleDuplicatesCount == 0) {
+                                    // Этот скрытый элемент теперь должен стать видимым
+                                    println("ADB_DEBUG:   Revealing hidden element at index $index: $presetKey (no visible duplicates)")
+                                    // Оставляем элемент как есть - он уже на своем месте
+                                } else {
+                                    // Элемент остается скрытым
+                                    println("ADB_DEBUG:   Keeping hidden element at index $index: $presetKey")
+                                }
                             }
+                        }
+                    }
+                    
+                    // Проверяем, нужно ли добавить новые элементы (например, после нажатия кнопки "+")
+                    if (visibleIndex < updatedPresets.size) {
+                        println("ADB_DEBUG:   Adding ${updatedPresets.size - visibleIndex} new preset(s)")
+                        for (i in visibleIndex until updatedPresets.size) {
+                            list.presets.add(updatedPresets[i].copy())
                         }
                     }
                 } else {
-                    // Если снимка нет, используем стандартную логику с видимыми индексами
+                    // Если снимка нет, просто обновляем видимые элементы
                     var visibleIndex = 0
-                    val mutableVisibleIndices = visibleIndices.toMutableList()
-                    
-                    originalPresets.forEachIndexed { index, originalPreset ->
-                        if (mutableVisibleIndices.contains(index) && visibleIndex < updatedPresets.size) {
-                            // Это был видимый пресет - берем обновленную версию
-                            val updatedPreset = updatedPresets[visibleIndex]
-                            println("ADB_DEBUG:   index $index was visible, updating: ${originalPreset.label}|${originalPreset.size}|${originalPreset.dpi} -> ${updatedPreset.label}|${updatedPreset.size}|${updatedPreset.dpi}")
-                            newPresets.add(updatedPreset)
+                    originalPresets.forEachIndexed { index, _ ->
+                        if (visibleIndices.contains(index) && visibleIndex < updatedPresets.size) {
+                            list.presets[index] = updatedPresets[visibleIndex].copy()
                             visibleIndex++
-                            
-                            // Важно: если изменился ключ (size или dpi), нужно проверить изменение статуса дублей
-                            // Это будет обработано после синхронизации через checkIfDuplicateStatusChanged
-                        } else {
-                            // Это был скрытый элемент - сохраняем оригинал
-                            println("ADB_DEBUG:   index $index was hidden, keeping: ${originalPreset.label}|${originalPreset.size}|${originalPreset.dpi}")
-                            newPresets.add(originalPreset)
                         }
                     }
                 }
                 
-                // Заменяем список
-                list.presets.clear()
-                list.presets.addAll(newPresets)
                 println("ADB_DEBUG:   final list size: ${list.presets.size}")
                 
-                // Обновляем снимок после любых изменений (удаление, редактирование и т.д.)
-                if (wasDeleted || (visibleSnapshot != null && !wasAdded)) {
-                    println("ADB_DEBUG:   Updating snapshot after changes (deletion: $wasDeleted)")
-                    // Обновляем снимок для этого списка
-                    val updatedVisibleKeys = mutableListOf<String>()
-                    val seenKeys = mutableSetOf<String>()
-                    
-                    newPresets.forEach { preset ->
-                        val key = if (preset.size.isNotBlank() && preset.dpi.isNotBlank()) {
-                            "${preset.size}|${preset.dpi}"
-                        } else {
-                            "unique_${preset.label}"
-                        }
-                        
-                        val presetKey = "${preset.label}|${preset.size}|${preset.dpi}"
-                        if (!seenKeys.contains(key)) {
-                            seenKeys.add(key)
-                            updatedVisibleKeys.add(presetKey)
-                            println("ADB_DEBUG:     Updated snapshot - visible: $presetKey")
-                        }
+                // Обновляем снимок после любых изменений
+                val updatedVisibleKeys = mutableListOf<String>()
+                val seenKeys = mutableSetOf<String>()
+                
+                list.presets.forEach { preset ->
+                    val key = if (preset.size.isNotBlank() && preset.dpi.isNotBlank()) {
+                        "${preset.size}|${preset.dpi}"
+                    } else {
+                        "unique_${preset.label}"
                     }
                     
-                    visiblePresetsSnapshot[list.name] = updatedVisibleKeys
-                    println("ADB_DEBUG:   Snapshot updated for list ${list.name}, now has ${updatedVisibleKeys.size} visible presets")
+                    val presetKey = "${preset.label}|${preset.size}|${preset.dpi}"
+                    if (!seenKeys.contains(key)) {
+                        seenKeys.add(key)
+                        updatedVisibleKeys.add(presetKey)
+                    }
                 }
+                
+                visiblePresetsSnapshot[list.name] = updatedVisibleKeys
+                
+                // Обновляем также полный снимок порядка элементов
+                val fullOrder = list.presets.map { preset ->
+                    "${preset.label}|${preset.size}|${preset.dpi}"
+                }
+                presetsOrderSnapshot[list.name] = fullOrder
+                
+                println("ADB_DEBUG:   Updated snapshot with ${updatedVisibleKeys.size} visible presets")
             }
         } else {
             // В обычном режиме без скрытия дубликатов
@@ -2661,6 +2440,7 @@ class SettingsDialogController(
         // Очищаем текущие временные списки и снимки
         tempPresetLists.clear()
         visiblePresetsSnapshot.clear()
+        presetsOrderSnapshot.clear()
 
         // Восстанавливаем из сохраненных оригиналов
         originalPresetLists.forEach { (id, originalList) ->
