@@ -2299,8 +2299,11 @@ class SettingsDialogController(
                             "${preset.label}|${preset.size}|${preset.dpi}" to (index to preset)
                         }.toMap()
                         
-                        // Update existing visible elements
+                        // When elements are edited, we need to match by position in snapshot
+                        val processedListIndices = mutableSetOf<Int>()
                         val processedTableIndices = mutableSetOf<Int>()
+                        
+                        // First pass: update elements that match exactly (no edits)
                         list.presets.forEachIndexed { index, preset ->
                             val presetKey = "${preset.label}|${preset.size}|${preset.dpi}"
                             
@@ -2311,25 +2314,42 @@ class SettingsDialogController(
                                     val (tableIndex, tablePreset) = tableData
                                     list.presets[index] = tablePreset.copy()
                                     processedTableIndices.add(tableIndex)
+                                    processedListIndices.add(index)
                                     println("ADB_DEBUG:   Updated visible element at index $index: $presetKey")
                                 }
                             }
                         }
                         
-                        // Add any truly new elements (that aren't already in the list)
+                        // Second pass: handle edited elements by matching snapshot position to table position
+                        visibleSnapshot.forEachIndexed { snapshotIndex, snapshotKey ->
+                            if (snapshotIndex < updatedPresets.size) {
+                                val tablePreset = updatedPresets[snapshotIndex]
+                                val tableKey = "${tablePreset.label}|${tablePreset.size}|${tablePreset.dpi}"
+                                
+                                // If this table element wasn't processed yet, it might be an edit
+                                if (!processedTableIndices.contains(snapshotIndex) && snapshotKey != tableKey) {
+                                    // Find the original element in the list by snapshot key
+                                    val listIndex = list.presets.indexOfFirst { p ->
+                                        "${p.label}|${p.size}|${p.dpi}" == snapshotKey
+                                    }
+                                    
+                                    if (listIndex >= 0 && !processedListIndices.contains(listIndex)) {
+                                        // This is an edited element - update it
+                                        list.presets[listIndex] = tablePreset.copy()
+                                        processedTableIndices.add(snapshotIndex)
+                                        processedListIndices.add(listIndex)
+                                        println("ADB_DEBUG:   Updated edited element at index $listIndex: $snapshotKey -> $tableKey")
+                                    }
+                                }
+                            }
+                        }
+                        
+                        // Third pass: add truly new elements (that aren't edits of existing elements)
                         updatedPresets.forEachIndexed { tableIndex, preset ->
                             if (!processedTableIndices.contains(tableIndex)) {
                                 val presetKey = "${preset.label}|${preset.size}|${preset.dpi}"
-                                // Check if this element already exists in the list
-                                val existsInList = list.presets.any { p ->
-                                    "${p.label}|${p.size}|${p.dpi}" == presetKey
-                                }
-                                if (!existsInList) {
-                                    list.presets.add(preset.copy())
-                                    println("ADB_DEBUG:   Added truly new element: $presetKey")
-                                } else {
-                                    println("ADB_DEBUG:   Skipping duplicate element: $presetKey")
-                                }
+                                list.presets.add(preset.copy())
+                                println("ADB_DEBUG:   Added truly new element: $presetKey")
                             }
                         }
                     }
