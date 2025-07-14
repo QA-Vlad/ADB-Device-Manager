@@ -1472,7 +1472,7 @@ class SettingsDialogController(
 
                 // Добавляем пресеты в таблицу
                 presetsToShow.forEachIndexed { idx, preset ->
-                    tableModel.addRow(arrayOf(
+                    tableModel.addRow(arrayOf<Any>(
                         "☰",
                         idx + 1,
                         preset.label,
@@ -1581,9 +1581,7 @@ class SettingsDialogController(
         }
 
         // Если мы еще не в режиме Show all, нужно загрузить все списки
-        val listsToProcess = if (tempPresetLists.isNotEmpty()) {
-            tempPresetLists
-        } else {
+        val listsToProcess = tempPresetLists.ifEmpty {
             // Загружаем все списки для сохранения снимка
             val allLists = mutableMapOf<String, PresetList>()
             val allMetadata = PresetListService.getAllListsMetadata()
@@ -2226,7 +2224,7 @@ class SettingsDialogController(
                         val targetList = if (targetListName != null) {
                             tempPresetLists.values.find { it.name == targetListName }
                         } else {
-                            currentPresetList
+                            null
                         }
 
                         targetList?.let { list ->
