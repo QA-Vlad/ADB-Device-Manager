@@ -475,7 +475,8 @@ class SettingsDialogController(
             isShowAllPresetsMode = { isShowAllPresetsMode },
             getListNameAtRow = ::getListNameAtRow,
             onPresetDeleted = { /* Не сохраняем порядок при удалении */ },
-            deletePresetFromTempList = ::deletePresetFromTempList
+            deletePresetFromTempList = ::deletePresetFromTempList,
+            getCurrentListName = { currentPresetList?.name }
         )
 
         tableConfigurator.configure()
@@ -1108,11 +1109,9 @@ class SettingsDialogController(
     }
 
     /**
-     * Удаляет пресет из временного списка в режиме Show all presets
+     * Удаляет пресет из временного списка
      */
     fun deletePresetFromTempList(row: Int): Boolean {
-        if (!isShowAllPresetsMode) return false
-
         // В режиме скрытия дубликатов не удаляем элемент здесь,
         // чтобы syncTableChangesToTempLists мог правильно обработать удаление
         if (isHideDuplicatesMode) {
@@ -1121,16 +1120,32 @@ class SettingsDialogController(
         }
 
         val preset = getPresetAtRow(row)
-        val listName = getListNameAtRow(row) ?: return false
-
-        // Находим временный список по имени
-        val targetList = tempPresetLists.values.find { it.name == listName } ?: return false
-
-        // Удаляем пресет из временного списка
-        return targetList.presets.removeIf {
-            it.label == preset.label &&
-            it.size == preset.size &&
-            it.dpi == preset.dpi
+        
+        if (isShowAllPresetsMode) {
+            val listName = getListNameAtRow(row) ?: return false
+            // Находим временный список по имени
+            val targetList = tempPresetLists.values.find { it.name == listName } ?: return false
+            
+            // Удаляем пресет из временного списка
+            val removed = targetList.presets.removeIf {
+                it.label == preset.label &&
+                it.size == preset.size &&
+                it.dpi == preset.dpi
+            }
+            println("ADB_DEBUG: deletePresetFromTempList - removed from list $listName: $removed")
+            return removed
+        } else {
+            // В обычном режиме удаляем из текущего списка
+            if (currentPresetList != null) {
+                val removed = currentPresetList!!.presets.removeIf {
+                    it.label == preset.label &&
+                    it.size == preset.size &&
+                    it.dpi == preset.dpi
+                }
+                println("ADB_DEBUG: deletePresetFromTempList - removed from current list ${currentPresetList?.name}: $removed")
+                return removed
+            }
+            return false
         }
     }
 
@@ -1892,9 +1907,70 @@ class SettingsDialogController(
                         }?.value?.name ?: currentPresetList?.name
                     }
                 } else {
-                    currentPresetList?.name
+                    // В обычном режиме нужно найти список, из которого был удален элемент
+                    // Сначала пробуем использовать сохраненное имя списка
+                    operation.listName ?: run {
+                        // Если имя не сохранено, ищем список по характеристикам пресета
+                        tempPresetLists.entries.find { (_, list) ->
+                            // Проверяем, был ли удален элемент из этого списка
+                            // Ищем по точному совпадению или по size/dpi для дубликатов
+                            list.presets.any { p -> 
+                                p.label == operation.presetData.label &&
+                                p.size == operation.presetData.size &&
+                                p.dpi == operation.presetData.dpi
+                            } || list.presets.any { p ->
+                                p.size == operation.presetData.size &&
+                                p.dpi == operation.presetData.dpi
+                            }
+                        }?.value?.name ?: currentPresetList?.name
+                    }
                 }
                 
+                // В обычном режиме сначала восстанавливаем элемент в tempPresetLists
+                if (!isShowAllPresetsMode && listName != null) {
+                    val targetList = tempPresetLists.values.find { it.name == listName }
+                    if (targetList != null) {
+                        println("ADB_DEBUG: Before restore - tempPresetLists[$listName] has ${targetList.presets.size} elements")
+                        targetList.presets.forEach { p ->
+                            println("ADB_DEBUG:   - ${p.label} | ${p.size} | ${p.dpi}")
+                        }
+                        
+                        // Проверяем, что элемент еще не существует
+                        val alreadyExists = targetList.presets.any { p ->
+                            p.label == operation.presetData.label &&
+                            p.size == operation.presetData.size &&
+                            p.dpi == operation.presetData.dpi
+                        }
+                        
+                        if (!alreadyExists) {
+                            // Вставляем элемент в нужную позицию
+                            if (operation.rowIndex <= targetList.presets.size) {
+                                targetList.presets.add(operation.rowIndex, operation.presetData.copy())
+                                println("ADB_DEBUG: Restored preset to temp list $listName at position ${operation.rowIndex}")
+                                println("ADB_DEBUG: After restore - tempPresetLists[$listName] has ${targetList.presets.size} elements")
+                            }
+                        } else {
+                            println("ADB_DEBUG: Preset already exists in temp list $listName, skipping restore")
+                            // Если элемент уже существует и мы в текущем списке, не нужно вставлять в таблицу
+                            if (listName == currentPresetList?.name) {
+                                return
+                            }
+                        }
+                        
+                        // Если это не текущий список, переключаемся на него
+                        if (listName != currentPresetList?.name) {
+                            println("ADB_DEBUG: Switching to list $listName for undo operation")
+                            currentPresetList = targetList
+                            // Обновляем выбор в UI компоненте списков
+                            // Это вызовет onListChanged, который загрузит таблицу с уже восстановленным элементом
+                            listManagerPanel.selectListByName(targetList.name)
+                            return // Выходим, так как таблица уже обновлена через onListChanged
+                        }
+                    }
+                }
+                
+                // Если мы здесь, значит либо это режим Show all, либо мы остались в текущем списке
+                // и элемент был успешно восстановлен в tempPresetLists
                 val newRowVector = createRowVector(operation.presetData, operation.rowIndex)
                 // Если в режиме Show all, добавляем имя списка в последнюю колонку
                 if (isShowAllPresetsMode && tableModel.columnCount == 7) {
@@ -1985,14 +2061,22 @@ class SettingsDialogController(
                         }
                     } else {
                         // В обычном режиме (не Show all) также нужно правильно восстановить элемент
-                        currentPresetList?.let { list ->
+                        // Находим целевой список - либо тот, на который переключились, либо текущий
+                        val targetListName = listName ?: currentPresetList?.name
+                        val targetList = if (targetListName != null) {
+                            tempPresetLists.values.find { it.name == targetListName }
+                        } else {
+                            currentPresetList
+                        }
+                        
+                        targetList?.let { list ->
                             // Восстанавливаем элемент в правильную позицию
                             if (operation.rowIndex <= list.presets.size) {
                                 list.presets.add(operation.rowIndex, operation.presetData.copy())
-                                println("ADB_DEBUG: Restored preset to current list at position ${operation.rowIndex}")
+                                println("ADB_DEBUG: Restored preset to list ${list.name} at position ${operation.rowIndex}")
                             } else {
                                 list.presets.add(operation.presetData.copy())
-                                println("ADB_DEBUG: Restored preset to end of current list")
+                                println("ADB_DEBUG: Restored preset to end of list ${list.name}")
                             }
                             
                             // Обновляем снимок для текущего списка
@@ -2086,7 +2170,44 @@ class SettingsDialogController(
                 refreshTable()
             }
             is HistoryOperation.PresetDelete -> {
+                // В обычном режиме проверяем, нужно ли переключить список
+                if (!isShowAllPresetsMode && operation.listName != null && operation.listName != currentPresetList?.name) {
+                    println("ADB_DEBUG: performRedo - switching to list ${operation.listName} for delete operation")
+                    val targetList = tempPresetLists.values.find { it.name == operation.listName }
+                    if (targetList != null) {
+                        currentPresetList = targetList
+                        listManagerPanel.selectListByName(targetList.name)
+                        // После переключения списка таблица перезагрузится через onListChanged
+                    }
+                }
+                
                 if (operation.rowIndex < tableModel.rowCount) {
+                    // Удаляем из tempPresetLists
+                    if (!isShowAllPresetsMode) {
+                        // В обычном режиме удаляем из текущего списка
+                        currentPresetList?.let { list ->
+                            val removed = list.presets.removeIf { p ->
+                                p.label == operation.presetData.label &&
+                                p.size == operation.presetData.size &&
+                                p.dpi == operation.presetData.dpi
+                            }
+                            println("ADB_DEBUG: performRedo PresetDelete - removed from current list: $removed")
+                        }
+                    } else {
+                        // В режиме Show all удаляем из соответствующего списка
+                        operation.listName?.let { listName ->
+                            val targetList = tempPresetLists.values.find { it.name == listName }
+                            if (targetList != null) {
+                                val removed = targetList.presets.removeIf { p ->
+                                    p.label == operation.presetData.label &&
+                                    p.size == operation.presetData.size &&
+                                    p.dpi == operation.presetData.dpi
+                                }
+                                println("ADB_DEBUG: performRedo PresetDelete - removed from list $listName: $removed")
+                            }
+                        }
+                    }
+                    
                     tableModel.removeRow(operation.rowIndex)
                     refreshTable()
                 }

@@ -60,7 +60,8 @@ class TableConfigurator(
     private val isShowAllPresetsMode: () -> Boolean = { false },
     private val getListNameAtRow: (Int) -> String? = { null },
     private val onPresetDeleted: () -> Unit = { },
-    private val deletePresetFromTempList: (Int) -> Boolean = { false }
+    private val deletePresetFromTempList: (Int) -> Boolean = { false },
+    private val getCurrentListName: () -> String? = { null }
 ) {
     
     private fun isAddButtonRow(table: JTable, row: Int): Boolean {
@@ -268,7 +269,7 @@ class TableConfigurator(
                 minWidth = JBUI.scale(40)
                 maxWidth = JBUI.scale(40)
                 cellRenderer = ButtonRenderer(isShowAllPresetsMode)
-                cellEditor = ButtonEditor(table, historyManager, getPresetAtRow, isShowAllPresetsMode, getListNameAtRow, onPresetDeleted, deletePresetFromTempList)
+                cellEditor = ButtonEditor(table, historyManager, getPresetAtRow, isShowAllPresetsMode, getListNameAtRow, onPresetDeleted, deletePresetFromTempList, getCurrentListName)
                 
                 // Добавляем проверку редактируемости
                 println("ADB_DEBUG: Column 5 configured, isCellEditable check...")
@@ -331,7 +332,8 @@ private class ButtonEditor(
     private val isShowAllPresetsMode: () -> Boolean = { false },
     private val getListNameAtRow: (Int) -> String? = { null },
     private val onPresetDeleted: () -> Unit = { },
-    private val deletePresetFromTempList: (Int) -> Boolean = { false }
+    private val deletePresetFromTempList: (Int) -> Boolean = { false },
+    private val getCurrentListName: () -> String? = { null }
 ) : AbstractTableCellEditor(), TableCellEditor {
     private val button = JButton()
     private val trashIcon: Icon = Icons.loadIcon(Icons.DELETE_ICON_PATH) ?: DeleteIcon()
@@ -367,18 +369,16 @@ private class ButtonEditor(
                 println("ADB_DEBUG: ButtonEditor - Preset: ${preset.label}, ${preset.size}, ${preset.dpi}")
                 println("ADB_DEBUG: ButtonEditor - isShowAllPresetsMode: ${isShowAllPresetsMode()}")
                 
-                // В режиме Show all presets удаляем пресет из временного списка
+                // Удаляем пресет из временного списка
+                val removed = deletePresetFromTempList(modelRow)
+                println("ADB_DEBUG: ButtonEditor - Removed from temp list: $removed")
+                
                 if (isShowAllPresetsMode()) {
                     val listName = getListNameAtRow(modelRow)
                     println("ADB_DEBUG: ButtonEditor - List name at row $modelRow: $listName")
-                    if (listName != null) {
-                        // Удаляем пресет из временного списка через контроллер
-                        val removed = deletePresetFromTempList(modelRow)
-                        println("ADB_DEBUG: ButtonEditor - Removed from temp list: $removed")
-                        if (removed) {
-                            // После удаления из tempPresetLists обновляем таблицу
-                            onPresetDeleted() // Должен быть связан с loadPresetsIntoTable
-                        }
+                    if (removed) {
+                        // После удаления из tempPresetLists обновляем таблицу
+                        onPresetDeleted() // Должен быть связан с loadPresetsIntoTable
                     }
                 }
                 
@@ -390,8 +390,13 @@ private class ButtonEditor(
                     onPresetDeleted()
                 }
                 
-                // Добавляем операцию в историю с именем списка для режима Show all
-                val listName = if (isShowAllPresetsMode()) getListNameAtRow(modelRow) else null
+                // Добавляем операцию в историю с именем списка
+                // В обычном режиме берем имя текущего списка из getCurrentListName
+                val listName = if (isShowAllPresetsMode()) {
+                    getListNameAtRow(modelRow)
+                } else {
+                    getCurrentListName()
+                }
                 historyManager.addPresetDelete(modelRow, preset, listName)
             }
         }

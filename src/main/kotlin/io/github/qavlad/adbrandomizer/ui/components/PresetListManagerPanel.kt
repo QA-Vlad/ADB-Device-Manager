@@ -375,6 +375,18 @@ class PresetListManagerPanel(
     }
     
     /**
+     * Выбирает список по имени
+     */
+    fun selectListByName(listName: String) {
+        for (i in 0 until listComboBox.itemCount) {
+            if (listComboBox.getItemAt(i).name == listName) {
+                listComboBox.selectedIndex = i
+                break
+            }
+        }
+    }
+    
+    /**
      * Элемент для ComboBox
      */
     private data class PresetListItem(
