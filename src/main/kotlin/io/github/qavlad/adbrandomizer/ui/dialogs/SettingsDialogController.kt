@@ -418,10 +418,18 @@ class SettingsDialogController(
             // Создаем новый таймер для группировки обновлений
             val newTimer = javax.swing.Timer(50) {
                 if (pendingTableUpdates > 0) {
-                    println("ADB_DEBUG: TableModelListener batch update - processing $pendingTableUpdates updates")
+                    val eventType = when(e.type) {
+                        javax.swing.event.TableModelEvent.UPDATE -> "UPDATE"
+                        javax.swing.event.TableModelEvent.INSERT -> "INSERT"
+                        javax.swing.event.TableModelEvent.DELETE -> "DELETE"
+                        else -> "UNKNOWN(${e.type})"
+                    }
+                    println("ADB_DEBUG: TableModelListener batch update - processing $pendingTableUpdates updates, type: $eventType")
 
                     // Синхронизируем изменения с временными списками
-                    if (e.type == javax.swing.event.TableModelEvent.UPDATE) {
+                    // UPDATE - для изменения ячеек, DELETE - для удаления строк
+                    if (e.type == javax.swing.event.TableModelEvent.UPDATE || 
+                        e.type == javax.swing.event.TableModelEvent.DELETE) {
                         syncTableChangesToTempLists()
                     }
 
@@ -735,8 +743,9 @@ class SettingsDialogController(
             distributePresetsToTempLists()
         } else {
             // В обычном режиме - не затираем если в таблице меньше строк, чем в списке
-            if (realRowCount == 0 && currentPresetList?.presets?.isNotEmpty() == true) {
-                println("ADB_DEBUG: skip sync, table is empty but current list is not")
+            // НО в режиме скрытия дублей нужно синхронизировать даже если таблица пуста
+            if (realRowCount == 0 && currentPresetList?.presets?.isNotEmpty() == true && !isHideDuplicatesMode) {
+                println("ADB_DEBUG: skip sync, table is empty but current list is not (not in hide duplicates mode)")
                 return
             }
 
@@ -2070,16 +2079,8 @@ class SettingsDialogController(
                         }
                         
                         targetList?.let { list ->
-                            // Восстанавливаем элемент в правильную позицию
-                            if (operation.rowIndex <= list.presets.size) {
-                                list.presets.add(operation.rowIndex, operation.presetData.copy())
-                                println("ADB_DEBUG: Restored preset to list ${list.name} at position ${operation.rowIndex}")
-                            } else {
-                                list.presets.add(operation.presetData.copy())
-                                println("ADB_DEBUG: Restored preset to end of list ${list.name}")
-                            }
-                            
-                            // Обновляем снимок для текущего списка
+                            // В обычном режиме элемент уже был восстановлен выше,
+                            // здесь только обновляем снимок для текущего списка
                             val updatedVisibleKeys = mutableListOf<String>()
                             val seenKeys = mutableSetOf<String>()
                             
