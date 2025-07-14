@@ -1963,6 +1963,46 @@ class SettingsDialogController(
                 val coords = historyManager.findCellCoordinates(operation.cellId)
                 if (coords != null) {
                     tableModel.undoValueAt(operation.oldValue, coords.first, coords.second)
+                    
+                    // Синхронизируем изменение с tempPresetLists
+                    currentPresetList?.let { list ->
+                        // При включенном режиме скрытия дубликатов нужно найти правильный индекс
+                        if (isHideDuplicatesMode) {
+                            // Получаем пресет из таблицы по индексу строки
+                            val tablePreset = tableModel.getPresetAt(coords.first)
+                            if (tablePreset != null) {
+                                // Ищем соответствующий пресет в списке по старым значениям
+                                val listIndex = list.presets.indexOfFirst { preset ->
+                                    when (coords.second) {
+                                        2 -> preset.label == operation.newValue && preset.size == tablePreset.size && preset.dpi == tablePreset.dpi
+                                        3 -> preset.label == tablePreset.label && preset.size == operation.newValue && preset.dpi == tablePreset.dpi
+                                        4 -> preset.label == tablePreset.label && preset.size == tablePreset.size && preset.dpi == operation.newValue
+                                        else -> false
+                                    }
+                                }
+                                if (listIndex >= 0) {
+                                    when (coords.second) {
+                                        2 -> list.presets[listIndex].label = operation.oldValue
+                                        3 -> list.presets[listIndex].size = operation.oldValue
+                                        4 -> list.presets[listIndex].dpi = operation.oldValue
+                                    }
+                                    println("ADB_DEBUG: Updated preset in tempPresetList after undo (hide duplicates): listIndex=$listIndex, col=${coords.second}, value=${operation.oldValue}")
+                                }
+                            }
+                        } else {
+                            // В обычном режиме индексы совпадают
+                            if (coords.first < list.presets.size) {
+                                val preset = list.presets[coords.first]
+                                when (coords.second) {
+                                    2 -> preset.label = operation.oldValue
+                                    3 -> preset.size = operation.oldValue
+                                    4 -> preset.dpi = operation.oldValue
+                                }
+                                println("ADB_DEBUG: Updated preset in tempPresetList after undo: row=${coords.first}, col=${coords.second}, value=${operation.oldValue}")
+                            }
+                        }
+                    }
+                    
                     refreshTable()
                 }
             }
@@ -2308,6 +2348,46 @@ class SettingsDialogController(
                 val coords = historyManager.findCellCoordinates(operation.cellId)
                 if (coords != null) {
                     tableModel.redoValueAt(operation.newValue, coords.first, coords.second)
+                    
+                    // Синхронизируем изменение с tempPresetLists
+                    currentPresetList?.let { list ->
+                        // При включенном режиме скрытия дубликатов нужно найти правильный индекс
+                        if (isHideDuplicatesMode) {
+                            // Получаем пресет из таблицы по индексу строки
+                            val tablePreset = tableModel.getPresetAt(coords.first)
+                            if (tablePreset != null) {
+                                // Ищем соответствующий пресет в списке по старым значениям
+                                val listIndex = list.presets.indexOfFirst { preset ->
+                                    when (coords.second) {
+                                        2 -> preset.label == operation.oldValue && preset.size == tablePreset.size && preset.dpi == tablePreset.dpi
+                                        3 -> preset.label == tablePreset.label && preset.size == operation.oldValue && preset.dpi == tablePreset.dpi
+                                        4 -> preset.label == tablePreset.label && preset.size == tablePreset.size && preset.dpi == operation.oldValue
+                                        else -> false
+                                    }
+                                }
+                                if (listIndex >= 0) {
+                                    when (coords.second) {
+                                        2 -> list.presets[listIndex].label = operation.newValue
+                                        3 -> list.presets[listIndex].size = operation.newValue
+                                        4 -> list.presets[listIndex].dpi = operation.newValue
+                                    }
+                                    println("ADB_DEBUG: Updated preset in tempPresetList after redo (hide duplicates): listIndex=$listIndex, col=${coords.second}, value=${operation.newValue}")
+                                }
+                            }
+                        } else {
+                            // В обычном режиме индексы совпадают
+                            if (coords.first < list.presets.size) {
+                                val preset = list.presets[coords.first]
+                                when (coords.second) {
+                                    2 -> preset.label = operation.newValue
+                                    3 -> preset.size = operation.newValue
+                                    4 -> preset.dpi = operation.newValue
+                                }
+                                println("ADB_DEBUG: Updated preset in tempPresetList after redo: row=${coords.first}, col=${coords.second}, value=${operation.newValue}")
+                            }
+                        }
+                    }
+                    
                     refreshTable()
                 }
             }
