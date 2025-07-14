@@ -1123,10 +1123,26 @@ class SettingsDialogController(
                 allPresets.addAll(list.presets)
             }
 
-            // Получаем текущие дубликаты
-            val currentDuplicates = findDuplicatesInList(allPresets)
+            // Проверяем, есть ли в таблице элементы, которые должны быть скрыты как дубликаты
+            val seenKeys = mutableSetOf<String>()
+            for (row in 0 until tableModel.rowCount) {
+                val firstColumn = tableModel.getValueAt(row, 0) as? String ?: ""
+                if (firstColumn != "+") {
+                    val preset = tableModel.getPresetAt(row)
+                    if (preset != null && preset.size.isNotBlank() && preset.dpi.isNotBlank()) {
+                        val key = "${preset.size}|${preset.dpi}"
+                        if (seenKeys.contains(key)) {
+                            // Найден дубликат в таблице, который должен быть скрыт
+                            println("ADB_DEBUG: Found duplicate in table that should be hidden (Show all mode): $key")
+                            return true
+                        }
+                        seenKeys.add(key)
+                    }
+                }
+            }
 
-            // Сравниваем с количеством видимых строк в таблице
+            // Также проверяем количество видимых строк
+            val currentDuplicates = findDuplicatesInList(allPresets)
             val visibleRowCount = (0 until tableModel.rowCount).count { row ->
                 val firstColumn = tableModel.getValueAt(row, 0) as? String ?: ""
                 firstColumn != "+"
@@ -1140,8 +1156,26 @@ class SettingsDialogController(
             currentPresetList?.let { list ->
                 // Получаем текущие дубликаты в списке
                 val currentDuplicates = findDuplicatesInList(list.presets)
+                
+                // Проверяем, есть ли в таблице элементы, которые должны быть скрыты как дубликаты
+                val seenKeys = mutableSetOf<String>()
+                for (row in 0 until tableModel.rowCount) {
+                    val firstColumn = tableModel.getValueAt(row, 0) as? String ?: ""
+                    if (firstColumn != "+") {
+                        val preset = tableModel.getPresetAt(row)
+                        if (preset != null && preset.size.isNotBlank() && preset.dpi.isNotBlank()) {
+                            val key = "${preset.size}|${preset.dpi}"
+                            if (seenKeys.contains(key)) {
+                                // Найден дубликат в таблице, который должен быть скрыт
+                                println("ADB_DEBUG: Found duplicate in table that should be hidden: $key")
+                                return true
+                            }
+                            seenKeys.add(key)
+                        }
+                    }
+                }
 
-                // Сравниваем с количеством видимых строк в таблице
+                // Также проверяем количество видимых строк
                 val visibleRowCount = (0 until tableModel.rowCount).count { row ->
                     val firstColumn = tableModel.getValueAt(row, 0) as? String ?: ""
                     firstColumn != "+"
