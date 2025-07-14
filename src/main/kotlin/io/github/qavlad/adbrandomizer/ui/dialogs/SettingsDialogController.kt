@@ -2416,8 +2416,16 @@ class SettingsDialogController(
                         updatedPresets.forEachIndexed { tableIndex, preset ->
                             if (!processedTableIndices.contains(tableIndex)) {
                                 val presetKey = "${preset.label}|${preset.size}|${preset.dpi}"
-                                list.presets.add(preset.copy())
-                                println("ADB_DEBUG:   Added truly new element: $presetKey")
+                                // Проверяем, что такого элемента еще нет в списке
+                                val alreadyExists = list.presets.any { p ->
+                                    "${p.label}|${p.size}|${p.dpi}" == presetKey
+                                }
+                                if (!alreadyExists) {
+                                    list.presets.add(preset.copy())
+                                    println("ADB_DEBUG:   Added truly new element: $presetKey")
+                                } else {
+                                    println("ADB_DEBUG:   Skipped duplicate element: $presetKey (already exists in list)")
+                                }
                             }
                         }
                     }
