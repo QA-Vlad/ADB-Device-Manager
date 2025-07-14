@@ -2118,8 +2118,8 @@ class SettingsDialogController(
                     }
                 }
 
-                // В обычном режиме сначала восстанавливаем элемент в tempPresetLists
-                if (!isShowAllPresetsMode && listName != null) {
+                // Сначала восстанавливаем элемент в tempPresetLists
+                if (listName != null) {
                     val targetList = tempPresetLists.values.find { it.name == listName }
                     if (targetList != null) {
                         println("ADB_DEBUG: Before restore - tempPresetLists[$listName] has ${targetList.presets.size} elements")
@@ -2149,8 +2149,8 @@ class SettingsDialogController(
                             }
                         }
 
-                        // Если это не текущий список, переключаемся на него
-                        if (listName != currentPresetList?.name) {
+                        // В обычном режиме, если это не текущий список, переключаемся на него
+                        if (!isShowAllPresetsMode && listName != currentPresetList?.name) {
                             println("ADB_DEBUG: Switching to list $listName for undo operation")
                             currentPresetList = targetList
                             // Обновляем выбор в UI компоненте списков
@@ -2169,38 +2169,6 @@ class SettingsDialogController(
                     newRowVector[6] = listName ?: ""
                 }
                 tableModel.insertRow(operation.rowIndex, newRowVector)
-
-                // Восстанавливаем элемент в соответствующем списке
-                if (isShowAllPresetsMode && listName != null) {
-                    val targetList = tempPresetLists.values.find { it.name == listName }
-                    if (targetList != null) {
-                        // Определяем позицию для вставки
-                        // Нужно найти правильную позицию на основе текущих элементов в таблице
-                        var insertIndex = 0
-
-                        // Проходим по строкам таблицы до восстановленного элемента
-                        for (i in 0 until operation.rowIndex) {
-                            val rowListName = if (tableModel.columnCount > 6) {
-                                tableModel.getValueAt(i, 6) as? String
-                            } else null
-
-                            if (rowListName == listName) {
-                                insertIndex++
-                            }
-                        }
-
-                        // Вставляем элемент в список
-                        if (insertIndex <= targetList.presets.size) {
-                            targetList.presets.add(insertIndex, operation.presetData.copy())
-                            println("ADB_DEBUG: Restored preset to list $listName at position $insertIndex")
-                        } else {
-                            targetList.presets.add(operation.presetData.copy())
-                            println("ADB_DEBUG: Restored preset to end of list $listName")
-                        }
-                    } else {
-                        println("ADB_DEBUG: WARNING - Could not find target list: $listName")
-                    }
-                }
 
                 // При восстановлении удаленного элемента в режиме скрытия дублей
                 // нужно обновить снимок, чтобы включить восстановленный элемент

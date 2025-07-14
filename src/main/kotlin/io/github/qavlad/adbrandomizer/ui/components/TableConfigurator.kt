@@ -369,13 +369,19 @@ private class ButtonEditor(
                 println("ADB_DEBUG: ButtonEditor - Preset: ${preset.label}, ${preset.size}, ${preset.dpi}")
                 println("ADB_DEBUG: ButtonEditor - isShowAllPresetsMode: ${isShowAllPresetsMode()}")
                 
+                // Сохраняем имя списка ДО удаления строки из таблицы
+                val listNameForHistory = if (isShowAllPresetsMode()) {
+                    getListNameAtRow(modelRow)
+                } else {
+                    getCurrentListName()
+                }
+                println("ADB_DEBUG: ButtonEditor - List name for history: $listNameForHistory")
+                
                 // Удаляем пресет из временного списка
                 val removed = deletePresetFromTempList(modelRow)
                 println("ADB_DEBUG: ButtonEditor - Removed from temp list: $removed")
                 
                 if (isShowAllPresetsMode()) {
-                    val listName = getListNameAtRow(modelRow)
-                    println("ADB_DEBUG: ButtonEditor - List name at row $modelRow: $listName")
                     if (removed) {
                         // После удаления из tempPresetLists обновляем таблицу
                         onPresetDeleted() // Должен быть связан с loadPresetsIntoTable
@@ -391,13 +397,7 @@ private class ButtonEditor(
                 }
                 
                 // Добавляем операцию в историю с именем списка
-                // В обычном режиме берем имя текущего списка из getCurrentListName
-                val listName = if (isShowAllPresetsMode()) {
-                    getListNameAtRow(modelRow)
-                } else {
-                    getCurrentListName()
-                }
-                historyManager.addPresetDelete(modelRow, preset, listName)
+                historyManager.addPresetDelete(modelRow, preset, listNameForHistory)
             }
         }
     }
