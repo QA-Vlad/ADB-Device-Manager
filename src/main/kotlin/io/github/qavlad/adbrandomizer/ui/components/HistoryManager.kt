@@ -22,7 +22,8 @@ sealed class HistoryOperation {
     
     data class PresetDelete(
         val rowIndex: Int,
-        val presetData: io.github.qavlad.adbrandomizer.services.DevicePreset
+        val presetData: io.github.qavlad.adbrandomizer.services.DevicePreset,
+        val listName: String? = null
     ) : HistoryOperation()
     
     data class PresetMove(
@@ -77,9 +78,9 @@ class HistoryManager(private val maxHistorySize: Int = 50) {
         println("ADB_DEBUG: Добавлена операция PresetAdd: rowIndex=$rowIndex, preset=${preset.label}")
     }
     
-    fun addPresetDelete(rowIndex: Int, preset: io.github.qavlad.adbrandomizer.services.DevicePreset) {
-        addOperation(HistoryOperation.PresetDelete(rowIndex, preset))
-        println("ADB_DEBUG: Добавлена операция PresetDelete: rowIndex=$rowIndex, preset=${preset.label}")
+    fun addPresetDelete(rowIndex: Int, preset: io.github.qavlad.adbrandomizer.services.DevicePreset, listName: String? = null) {
+        addOperation(HistoryOperation.PresetDelete(rowIndex, preset, listName))
+        println("ADB_DEBUG: Добавлена операция PresetDelete: rowIndex=$rowIndex, preset=${preset.label}, listName=$listName")
     }
     
     fun addPresetMove(fromIndex: Int, toIndex: Int) {

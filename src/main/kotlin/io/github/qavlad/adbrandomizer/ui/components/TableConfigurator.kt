@@ -390,8 +390,9 @@ private class ButtonEditor(
                     onPresetDeleted()
                 }
                 
-                // Добавляем операцию в историю
-                historyManager.addPresetDelete(modelRow, preset)
+                // Добавляем операцию в историю с именем списка для режима Show all
+                val listName = if (isShowAllPresetsMode()) getListNameAtRow(modelRow) else null
+                historyManager.addPresetDelete(modelRow, preset, listName)
             }
         }
     }
