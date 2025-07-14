@@ -1876,6 +1876,38 @@ class SettingsDialogController(
                 }
                 tableModel.insertRow(operation.rowIndex, newRowVector)
                 
+                // Восстанавливаем элемент в соответствующем списке
+                if (isShowAllPresetsMode && listName != null) {
+                    val targetList = tempPresetLists.values.find { it.name == listName }
+                    if (targetList != null) {
+                        // Определяем позицию для вставки
+                        // Нужно найти правильную позицию на основе текущих элементов в таблице
+                        var insertIndex = 0
+                        
+                        // Проходим по строкам таблицы до восстановленного элемента
+                        for (i in 0 until operation.rowIndex) {
+                            val rowListName = if (tableModel.columnCount > 6) {
+                                tableModel.getValueAt(i, 6) as? String
+                            } else null
+                            
+                            if (rowListName == listName) {
+                                insertIndex++
+                            }
+                        }
+                        
+                        // Вставляем элемент в список
+                        if (insertIndex <= targetList.presets.size) {
+                            targetList.presets.add(insertIndex, operation.presetData.copy())
+                            println("ADB_DEBUG: Restored preset to list $listName at position $insertIndex")
+                        } else {
+                            targetList.presets.add(operation.presetData.copy())
+                            println("ADB_DEBUG: Restored preset to end of list $listName")
+                        }
+                    } else {
+                        println("ADB_DEBUG: WARNING - Could not find target list: $listName")
+                    }
+                }
+                
                 // При восстановлении удаленного элемента в режиме скрытия дублей
                 // нужно обновить снимок, чтобы включить восстановленный элемент
                 if (isHideDuplicatesMode && isShowAllPresetsMode) {
@@ -2252,27 +2284,52 @@ class SettingsDialogController(
                             snapshotToTableIndex[key] = index
                         }
                         
-                        // Update visible elements maintaining their positions
-                        var updatedCount = 0
+                        // First, check what elements are in table vs snapshot
+                        val tableKeys = updatedPresets.map { "${it.label}|${it.size}|${it.dpi}" }.toSet()
+                        val snapshotKeys = visibleSnapshot.toSet()
+                        val missingKeys = snapshotKeys - tableKeys
+                        
+                        // If we have missing keys from snapshot, it might be a restore operation
+                        if (missingKeys.isNotEmpty()) {
+                            println("ADB_DEBUG:   Keys missing from table (might be restore): $missingKeys")
+                        }
+                        
+                        // Create mapping of table presets for quick lookup
+                        val tablePresetsMap = updatedPresets.mapIndexed { index, preset ->
+                            "${preset.label}|${preset.size}|${preset.dpi}" to (index to preset)
+                        }.toMap()
+                        
+                        // Update existing visible elements
+                        val processedTableIndices = mutableSetOf<Int>()
                         list.presets.forEachIndexed { index, preset ->
                             val presetKey = "${preset.label}|${preset.size}|${preset.dpi}"
                             
                             if (visibleSnapshot.contains(presetKey)) {
-                                // This was a visible element
-                                val tableIndex = visibleSnapshot.indexOf(presetKey)
-                                if (tableIndex >= 0 && tableIndex < updatedPresets.size) {
-                                    list.presets[index] = updatedPresets[tableIndex].copy()
-                                    updatedCount++
+                                // This element should be visible - find it in table
+                                val tableData = tablePresetsMap[presetKey]
+                                if (tableData != null) {
+                                    val (tableIndex, tablePreset) = tableData
+                                    list.presets[index] = tablePreset.copy()
+                                    processedTableIndices.add(tableIndex)
                                     println("ADB_DEBUG:   Updated visible element at index $index: $presetKey")
                                 }
                             }
                         }
                         
-                        // Add any new elements
-                        if (updatedCount < updatedPresets.size) {
-                            for (i in updatedCount until updatedPresets.size) {
-                                list.presets.add(updatedPresets[i].copy())
-                                println("ADB_DEBUG:   Added new element: ${updatedPresets[i].label}|${updatedPresets[i].size}|${updatedPresets[i].dpi}")
+                        // Add any truly new elements (that aren't already in the list)
+                        updatedPresets.forEachIndexed { tableIndex, preset ->
+                            if (!processedTableIndices.contains(tableIndex)) {
+                                val presetKey = "${preset.label}|${preset.size}|${preset.dpi}"
+                                // Check if this element already exists in the list
+                                val existsInList = list.presets.any { p ->
+                                    "${p.label}|${p.size}|${p.dpi}" == presetKey
+                                }
+                                if (!existsInList) {
+                                    list.presets.add(preset.copy())
+                                    println("ADB_DEBUG:   Added truly new element: $presetKey")
+                                } else {
+                                    println("ADB_DEBUG:   Skipping duplicate element: $presetKey")
+                                }
                             }
                         }
                     }
