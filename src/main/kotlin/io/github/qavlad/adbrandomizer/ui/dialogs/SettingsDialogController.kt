@@ -2161,94 +2161,119 @@ class SettingsDialogController(
                 // НЕ создаем новый список - будем обновлять существующий на месте
                 // чтобы сохранить порядок элементов
                 
-                // Простая логика: обновляем только видимые элементы из таблицы
+                // Improved logic: properly handle deletions and updates
                 if (visibleSnapshot != null) {
-                    // Сначала определяем, какие элементы были изменены
-                    val changedElements = mutableMapOf<String, DevicePreset>()
-                    val newVisibleKeys = mutableSetOf<String>()
+                    println("ADB_DEBUG:   Using snapshot-based update logic")
                     
-                    // Собираем все видимые ключи из таблицы
-                    updatedPresets.forEach { preset ->
-                        val key = "${preset.label}|${preset.size}|${preset.dpi}"
-                        newVisibleKeys.add(key)
-                    }
+                    // Step 1: Determine if elements were deleted
+                    val wasDeleted = updatedPresets.size < visibleSnapshot.size
+                    println("ADB_DEBUG:   Elements deleted: $wasDeleted (snapshot: ${visibleSnapshot.size}, updated: ${updatedPresets.size})")
                     
-                    // Определяем элементы, которые изменились (были в снимке, но теперь имеют другой ключ)
-                    var visibleIndex = 0
-                    visibleSnapshot.forEach { oldKey ->
-                        if (visibleIndex < updatedPresets.size) {
-                            val updatedPreset = updatedPresets[visibleIndex]
-                            val newKey = "${updatedPreset.label}|${updatedPreset.size}|${updatedPreset.dpi}"
-                            
-                            if (oldKey != newKey) {
-                                // Элемент был изменен
-                                changedElements[oldKey] = updatedPreset
-                                println("ADB_DEBUG:   Element changed: $oldKey -> $newKey")
-                            }
-                            visibleIndex++
-                        }
-                    }
-                    
-                    // Теперь обновляем список, сохраняя порядок
-                    visibleIndex = 0
-                    val processedIndices = mutableSetOf<Int>()
-                    
-                    list.presets.forEachIndexed { index, preset ->
-                        val presetKey = "${preset.label}|${preset.size}|${preset.dpi}"
+                    if (wasDeleted) {
+                        // Handle deletion case: rebuild list maintaining hidden elements
+                        println("ADB_DEBUG:   Handling deletion case")
                         
-                        when {
-                            // Если элемент был изменен
-                            changedElements.containsKey(presetKey) -> {
-                                val updatedPreset = changedElements[presetKey]!!
-                                list.presets[index] = updatedPreset.copy()
-                                processedIndices.add(index)
-                                visibleIndex++
-                                println("ADB_DEBUG:   Updated changed element at index $index: $presetKey -> ${updatedPreset.label}|${updatedPreset.size}|${updatedPreset.dpi}")
-                            }
-                            // Если элемент был видим и не изменился
-                            visibleSnapshot.contains(presetKey) && visibleIndex < updatedPresets.size -> {
-                                val updatedPreset = updatedPresets[visibleIndex]
-                                list.presets[index] = updatedPreset.copy()
-                                processedIndices.add(index)
-                                visibleIndex++
-                                println("ADB_DEBUG:   Updated visible element at index $index: $presetKey")
-                            }
-                            // Если элемент был скрыт
-                            else -> {
-                                // Проверяем, не стал ли этот скрытый элемент теперь уникальным
-                                val presetCombination = if (preset.size.isNotBlank() && preset.dpi.isNotBlank()) {
-                                    "${preset.size}|${preset.dpi}"
-                                } else null
-                                
-                                // Считаем количество видимых элементов с такой же комбинацией
-                                val visibleDuplicatesCount = if (presetCombination != null) {
-                                    list.presets.count { p ->
-                                        val pKey = "${p.label}|${p.size}|${p.dpi}"
-                                        p.size.isNotBlank() && p.dpi.isNotBlank() &&
-                                        "${p.size}|${p.dpi}" == presetCombination &&
-                                        (newVisibleKeys.contains(pKey) || processedIndices.contains(list.presets.indexOf(p)))
-                                    }
-                                } else {
-                                    0
+                        // Create a map of current table presets for quick lookup
+                        val tablePresetsMap = updatedPresets.associateBy { 
+                            "${it.label}|${it.size}|${it.dpi}" 
+                        }
+                        
+                        // Build new list maintaining order and hidden elements
+                        val newPresets = mutableListOf<DevicePreset>()
+                        val processedTableKeys = mutableSetOf<String>()
+                        
+                        // First pass: preserve all elements that still exist in table or were hidden
+                        list.presets.forEach { preset ->
+                            val presetKey = "${preset.label}|${preset.size}|${preset.dpi}"
+                            
+                            when {
+                                // Element exists in table - use updated version
+                                tablePresetsMap.containsKey(presetKey) -> {
+                                    newPresets.add(tablePresetsMap[presetKey]!!.copy())
+                                    processedTableKeys.add(presetKey)
+                                    println("ADB_DEBUG:   Preserved visible element: $presetKey")
                                 }
-                                
-                                if (presetCombination != null && visibleDuplicatesCount == 0) {
-                                    // Этот скрытый элемент теперь должен стать видимым
-                                    println("ADB_DEBUG:   Revealing hidden element at index $index: $presetKey (no visible duplicates)")
-                                    // Оставляем элемент как есть - он уже на своем месте
-                                } else {
-                                    // Элемент остается скрытым
-                                    println("ADB_DEBUG:   Keeping hidden element at index $index: $presetKey")
+                                // Element was hidden (not in snapshot) - preserve it
+                                !visibleSnapshot.contains(presetKey) -> {
+                                    newPresets.add(preset.copy())
+                                    println("ADB_DEBUG:   Preserved hidden element: $presetKey")
+                                }
+                                // Element was visible but now deleted - check if hidden duplicate should be revealed
+                                else -> {
+                                    println("ADB_DEBUG:   Element deleted from table: $presetKey")
+                                    // Check if there's a hidden duplicate that should be revealed
+                                    val presetCombination = if (preset.size.isNotBlank() && preset.dpi.isNotBlank()) {
+                                        "${preset.size}|${preset.dpi}"
+                                    } else null
+                                    
+                                    if (presetCombination != null) {
+                                        // Find first hidden duplicate with same size|dpi
+                                        val hiddenDuplicate = list.presets.find { p ->
+                                            val pKey = "${p.label}|${p.size}|${p.dpi}"
+                                            p.size.isNotBlank() && p.dpi.isNotBlank() &&
+                                            "${p.size}|${p.dpi}" == presetCombination &&
+                                            !visibleSnapshot.contains(pKey) &&
+                                            !newPresets.any { np -> 
+                                                "${np.label}|${np.size}|${np.dpi}" == pKey 
+                                            }
+                                        }
+                                        
+                                        if (hiddenDuplicate != null) {
+                                            val hiddenKey = "${hiddenDuplicate.label}|${hiddenDuplicate.size}|${hiddenDuplicate.dpi}"
+                                            println("ADB_DEBUG:   Found hidden duplicate to reveal: $hiddenKey")
+                                            // Hidden duplicate will be added when we process it in the loop
+                                        }
+                                    }
                                 }
                             }
                         }
-                    }
-                    
-                    // Проверяем, нужно ли добавить новые элементы (например, после нажатия кнопки "+")
-                    if (visibleIndex < updatedPresets.size) {
-                        println("ADB_DEBUG:   Adding ${updatedPresets.size - visibleIndex} new preset(s)")
-                        for (i in visibleIndex until updatedPresets.size) {
-                            list.presets.add(updatedPresets[i].copy())
+                        
+                        // Second pass: add any new elements from table that weren't processed
+                        updatedPresets.forEach { preset ->
+                            val key = "${preset.label}|${preset.size}|${preset.dpi}"
+                            if (!processedTableKeys.contains(key)) {
+                                newPresets.add(preset.copy())
+                                println("ADB_DEBUG:   Added new element: $key")
+                            }
+                        }
+                        
+                        // Replace the list
+                        list.presets.clear()
+                        list.presets.addAll(newPresets)
+                        
+                    } else {
+                        // Handle update/add case: update visible elements in place
+                        println("ADB_DEBUG:   Handling update/add case")
+                        
+                        // Map snapshot indices to table indices for proper ordering
+                        val snapshotToTableIndex = mutableMapOf<String, Int>()
+                        updatedPresets.forEachIndexed { index, preset ->
+                            val key = "${preset.label}|${preset.size}|${preset.dpi}"
+                            snapshotToTableIndex[key] = index
+                        }
+                        
+                        // Update visible elements maintaining their positions
+                        var updatedCount = 0
+                        list.presets.forEachIndexed { index, preset ->
+                            val presetKey = "${preset.label}|${preset.size}|${preset.dpi}"
+                            
+                            if (visibleSnapshot.contains(presetKey)) {
+                                // This was a visible element
+                                val tableIndex = visibleSnapshot.indexOf(presetKey)
+                                if (tableIndex >= 0 && tableIndex < updatedPresets.size) {
+                                    list.presets[index] = updatedPresets[tableIndex].copy()
+                                    updatedCount++
+                                    println("ADB_DEBUG:   Updated visible element at index $index: $presetKey")
+                                }
+                            }
+                        }
+                        
+                        // Add any new elements
+                        if (updatedCount < updatedPresets.size) {
+                            for (i in updatedCount until updatedPresets.size) {
+                                list.presets.add(updatedPresets[i].copy())
+                                println("ADB_DEBUG:   Added new element: ${updatedPresets[i].label}|${updatedPresets[i].size}|${updatedPresets[i].dpi}")
+                            }
                         }
                     }
                 } else {
