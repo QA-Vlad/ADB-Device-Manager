@@ -16,14 +16,14 @@ import io.github.qavlad.adbrandomizer.ui.services.ValidationService
 import io.github.qavlad.adbrandomizer.ui.services.TableLoader
 import io.github.qavlad.adbrandomizer.ui.services.StateManager
 import io.github.qavlad.adbrandomizer.ui.services.PresetDistributor
+import io.github.qavlad.adbrandomizer.ui.services.TableColumnManager
+import io.github.qavlad.adbrandomizer.ui.services.SettingsPersistenceService
 import io.github.qavlad.adbrandomizer.ui.renderers.ValidationRenderer
-import io.github.qavlad.adbrandomizer.ui.renderers.ListColumnHeaderRenderer
 import io.github.qavlad.adbrandomizer.utils.ButtonUtils
 import io.github.qavlad.adbrandomizer.utils.PresetUpdateUtils
 import java.awt.Container
 import java.awt.event.MouseEvent
 import java.awt.event.MouseAdapter
-import java.util.*
 import javax.swing.*
 import com.intellij.openapi.application.ApplicationManager
 import javax.swing.SwingUtilities
@@ -68,12 +68,16 @@ class SettingsDialogController(
     private val tableLoader = TableLoader(duplicateManager, viewModeManager)
     private val stateManager = StateManager()
     private val presetDistributor = PresetDistributor(duplicateManager)
+    private val settingsPersistenceService = SettingsPersistenceService()
     private val componentsFactory = DialogComponentsFactory()
     private val eventHandlersInitializer = EventHandlersInitializer(this)
     private val dialogState = DialogStateManager()
     private var updateListener: (() -> Unit)? = null
     private var globalClickListener: java.awt.event.AWTEventListener? = null
     private var currentPresetList: PresetList? = null
+    
+    // Менеджер колонок (инициализируется после создания tableConfigurator)
+    private lateinit var tableColumnManager: TableColumnManager
 
     // Менеджер временных списков
     private val tempListsManager = TempListsManager()
@@ -219,6 +223,9 @@ class SettingsDialogController(
         )
 
         tableConfigurator.configure()
+        
+        // Инициализируем менеджер колонок
+        tableColumnManager = TableColumnManager(tableConfigurator)
 
         println("ADB_DEBUG: After tableConfigurator.configure() - currentPresetList: ${currentPresetList?.name}, presets: ${currentPresetList?.presets?.size}")
 
@@ -245,42 +252,9 @@ class SettingsDialogController(
      * Настройка колонок таблицы в зависимости от режима
      */
     private fun setupTableColumns() {
-        val columnNames = if (dialogState.isShowAllPresetsMode()) {
-            Vector(listOf(" ", "№", "Label", "Size (e.g., 1080x1920)", "DPI (e.g., 480)", "  ", "List"))
-        } else {
-            Vector(listOf(" ", "№", "Label", "Size (e.g., 1080x1920)", "DPI (e.g., 480)", "  "))
-        }
-        tableModel.setColumnIdentifiers(columnNames)
-
-        // Явно синхронизируем колонки JTable с TableModel
-        while (table.columnModel.columnCount > tableModel.columnCount) {
-            table.columnModel.removeColumn(table.columnModel.getColumn(table.columnModel.columnCount - 1))
-        }
-        while (table.columnModel.columnCount < tableModel.columnCount) {
-            val newColumn = javax.swing.table.TableColumn(table.columnModel.columnCount)
-            table.columnModel.addColumn(newColumn)
-        }
-
-        // Перенастраиваем свойства колонок после изменения их количества
-        reconfigureColumns()
+        tableColumnManager.setupTableColumns(table, tableModel, dialogState.isShowAllPresetsMode())
     }
 
-
-    /**
-     * Перенастраивает рендереры и редакторы колонок
-     */
-    private fun reconfigureColumns() {
-        println("ADB_DEBUG: reconfigureColumns - before, currentPresetList: ${currentPresetList?.name}, presets: ${currentPresetList?.presets?.size}")
-        // Настраиваем стандартные колонки
-        tableConfigurator.configureColumns()
-        println("ADB_DEBUG: reconfigureColumns - after configureColumns, currentPresetList: ${currentPresetList?.name}, presets: ${currentPresetList?.presets?.size}")
-
-        // Настраиваем кастомный рендерер для заголовка колонки List
-        if (table.columnModel.columnCount > 6) {
-            val listColumn = table.columnModel.getColumn(6)
-            listColumn.headerRenderer = ListColumnHeaderRenderer()
-        }
-    }
 
     /**
      * Устанавливает ссылку на панель с таблицей и кнопкой
@@ -805,8 +779,8 @@ class SettingsDialogController(
         }
 
         // В режиме Show all нужно сохранить новый порядок для правильной работы
-        if (dialogState.isShowAllPresetsMode()) {
-            saveShowAllPresetsOrder()
+        if (dialogState.isShowAllPresetsMode() && !dialogState.isHideDuplicatesMode()) {
+            settingsPersistenceService.saveShowAllPresetsOrder(tableModel)
             
             // Важно: после drag and drop нужно обновить порядок в tempPresetLists
             // чтобы снимок создавался с правильным порядком
@@ -948,29 +922,18 @@ class SettingsDialogController(
     // === Сохранение и загрузка ===
 
     fun saveSettings() {
-        if (table.isEditing) table.cellEditor.stopCellEditing()
-
-        // Сохраняем текущее состояние таблицы
-        saveCurrentTableState()
-
-        // Удаляем пустые строки из всех временных списков
-        tempListsManager.getTempLists().values.forEach { list ->
-            list.presets.removeIf { preset ->
-                preset.label.trim().isEmpty() &&
-                        preset.size.trim().isEmpty() &&
-                        preset.dpi.trim().isEmpty()
+        settingsPersistenceService.saveSettings(
+            table = table,
+            tempLists = tempListsManager.getTempLists(),
+            isShowAllPresetsMode = dialogState.isShowAllPresetsMode(),
+            onSaveCurrentTableState = { saveCurrentTableState() },
+            onSaveShowAllPresetsOrder = { 
+                // Не сохраняем порядок если включен режим скрытия дубликатов
+                if (!dialogState.isHideDuplicatesMode()) {
+                    settingsPersistenceService.saveShowAllPresetsOrder(tableModel)
+                }
             }
-        }
-
-        // Сохраняем все временные списки в файлы
-        tempListsManager.getTempLists().values.forEach { list ->
-            PresetListService.savePresetList(list)
-        }
-
-        // Сохраняем порядок для режима "Show all presets" только при сохранении
-        if (dialogState.isShowAllPresetsMode()) {
-            saveShowAllPresetsOrder()
-        }
+        )
     }
 
     // === Вспомогательные методы ===
@@ -1028,26 +991,6 @@ class SettingsDialogController(
     /**
      * Сохраняет текущий порядок пресетов в режиме Show all presets
      */
-    private fun saveShowAllPresetsOrder() {
-        // Сохраняем порядок пресетов напрямую в PresetListService
-        // Если включен режим скрытия дубликатов, не сохраняем порядок
-        if (dialogState.isHideDuplicatesMode()) {
-            PresetListService.saveShowAllPresetsOrder(emptyList())
-        } else {
-            val order = mutableListOf<String>()
-            for (row in 0 until tableModel.rowCount) {
-                // Пропускаем строку с кнопкой
-                val firstColumn = tableModel.getValueAt(row, 0) as? String ?: ""
-                if (firstColumn == "+") continue
-                
-                val listName = getListNameAtRow(row) ?: continue
-                val preset = getPresetAtRow(row)
-                val key = "$listName:${preset.label}:${preset.size}:${preset.dpi}"
-                order.add(key)
-            }
-            PresetListService.saveShowAllPresetsOrder(order)
-        }
-    }
 
     private fun setupUpdateListener() {
         updateListener = {
@@ -1076,27 +1019,18 @@ class SettingsDialogController(
      * Восстанавливает исходное состояние временных списков при отмене
      */
     fun restoreOriginalState() {
-        println("ADB_DEBUG: Restoring original state")
-
-        // Восстанавливаем из сохраненных оригиналов
-        snapshotManager.restoreSnapshots(tempListsManager.getMutableTempLists(), originalPresetLists)
-
-        // Сохраняем восстановленные списки в файлы
-        tempListsManager.getTempLists().values.forEach { list ->
-            PresetListService.savePresetList(list)
-        }
-
+        settingsPersistenceService.restoreOriginalState(
+            tempListsManager = tempListsManager,
+            originalPresetLists = originalPresetLists,
+            snapshotManager = snapshotManager
+        )
+        
         // Восстанавливаем текущий список по ID
         val currentId = currentPresetList?.id
         if (currentId != null && tempListsManager.getTempLists().containsKey(currentId)) {
             currentPresetList = tempListsManager.getTempList(currentId)
             println("ADB_DEBUG: Restored currentPresetList: ${currentPresetList?.name}, presets: ${currentPresetList?.presets?.size}")
         }
-
-        // Очищаем сохраненный порядок для "Show all presets", чтобы вернуться к исходному состоянию
-        PresetListService.saveShowAllPresetsOrder(emptyList())
-
-        println("ADB_DEBUG: Original state restored and saved to files")
     }
 
     fun dispose() {
