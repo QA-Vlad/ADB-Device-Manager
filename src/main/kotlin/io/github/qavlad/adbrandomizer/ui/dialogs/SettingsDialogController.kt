@@ -6,6 +6,7 @@ import io.github.qavlad.adbrandomizer.services.*
 import io.github.qavlad.adbrandomizer.ui.components.*
 import io.github.qavlad.adbrandomizer.ui.handlers.KeyboardHandler
 import io.github.qavlad.adbrandomizer.ui.services.DuplicateManager
+import io.github.qavlad.adbrandomizer.ui.services.TempListsManager
 import io.github.qavlad.adbrandomizer.ui.services.TableDataSynchronizer
 import io.github.qavlad.adbrandomizer.ui.services.ViewModeManager
 import io.github.qavlad.adbrandomizer.ui.services.PresetOperationsService
@@ -74,8 +75,8 @@ class SettingsDialogController(
     private var globalClickListener: java.awt.event.AWTEventListener? = null
     private var currentPresetList: PresetList? = null
 
-    // Временное хранилище всех списков для режима "Show all presets"
-    private val tempPresetLists = mutableMapOf<String, PresetList>()
+    // Менеджер временных списков
+    private val tempListsManager = TempListsManager()
 
     // Исходное состояние списков для отката при Cancel
     private val originalPresetLists = mutableMapOf<String, PresetList>()
@@ -103,7 +104,7 @@ class SettingsDialogController(
         listManagerPanel = eventHandlersInitializer.createAndInitializeListManagerPanel(
             dialogState = dialogState,
             duplicateManager = duplicateManager,
-            tempPresetLists = tempPresetLists,
+            tempListsManager = tempListsManager,
             tableWithButtonPanel = tableWithButtonPanel,
             onCurrentListChanged = { newList -> currentPresetList = newList },
             onLoadPresetsIntoTable = { loadPresetsIntoTable() },
@@ -144,8 +145,8 @@ class SettingsDialogController(
         // ВАЖНО: инициализируем временные списки ДО загрузки таблицы
         initializeTempPresetLists()
         // Гарантируем, что currentPresetList валиден
-        if (currentPresetList == null && tempPresetLists.isNotEmpty()) {
-            currentPresetList = tempPresetLists.values.first()
+        if (currentPresetList == null && tempListsManager.isNotEmpty()) {
+            currentPresetList = tempListsManager.getTempLists().values.first()
         }
 
         // Создаем слушатель модели с таймером
@@ -305,7 +306,7 @@ class SettingsDialogController(
             // В режиме "Show all presets" распределяем изменения по спискам
             presetDistributor.distributePresetsToTempLists(
                 tableModel = tableModel,
-                tempPresetLists = tempPresetLists,
+                tempPresetLists = tempListsManager.getMutableTempLists(),
                 isHideDuplicatesMode = dialogState.isHideDuplicatesMode(),
                 getListNameAtRow = ::getListNameAtRow,
                 saveVisiblePresetsSnapshotForAllLists = ::saveVisiblePresetsSnapshotForAllLists
@@ -368,7 +369,7 @@ class SettingsDialogController(
         }
         
         // Обновляем порядок в tempPresetLists
-        tempPresetLists.values.forEach { list ->
+        tempListsManager.getTempLists().values.forEach { list ->
             // Собираем пресеты этого списка из таблицы в правильном порядке
             val presetsFromTable = tableOrder
                 .filter { it.first == list.name }
@@ -419,7 +420,7 @@ class SettingsDialogController(
 
         println("ADB_DEBUG: syncTableChangesToTempLists - start, dialogState.isShowAllPresetsMode(): ${dialogState.isShowAllPresetsMode()}")
         println("ADB_DEBUG: syncTableChangesToTempLists - currentPresetList before: ${currentPresetList?.name}, presets: ${currentPresetList?.presets?.size}")
-        tempPresetLists.forEach { (k, v) -> println("ADB_DEBUG: TEMP_LIST $k: ${v.name}, presets: ${v.presets.size}") }
+        tempListsManager.getTempLists().forEach { (k, v) -> println("ADB_DEBUG: TEMP_LIST $k: ${v.name}, presets: ${v.presets.size}") }
 
         // Не синхронизируем при отключении фильтра дубликатов, если количество строк в таблице меньше количества пресетов
         // Это означает, что в таблице показаны только видимые пресеты, а синхронизация испортит скрытые
@@ -437,7 +438,7 @@ class SettingsDialogController(
         if (dialogState.isShowAllPresetsMode()) {
             presetDistributor.distributePresetsToTempLists(
                 tableModel = tableModel,
-                tempPresetLists = tempPresetLists,
+                tempPresetLists = tempListsManager.getMutableTempLists(),
                 isHideDuplicatesMode = dialogState.isHideDuplicatesMode(),
                 getListNameAtRow = ::getListNameAtRow,
                 saveVisiblePresetsSnapshotForAllLists = if (dialogState.isDragAndDropInProgress()) {
@@ -457,7 +458,7 @@ class SettingsDialogController(
         }
         
         println("ADB_DEBUG: syncTableChangesToTempLists - after, currentPresetList: ${currentPresetList?.name}, presets: ${currentPresetList?.presets?.size}")
-        tempPresetLists.forEach { (k, v) -> println("ADB_DEBUG: TEMP_LIST $k: ${v.name}, presets: ${v.presets.size}") }
+        tempListsManager.getTempLists().forEach { (k, v) -> println("ADB_DEBUG: TEMP_LIST $k: ${v.name}, presets: ${v.presets.size}") }
 
         // Проверяем, нужно ли обновить таблицу из-за изменения статуса дублей
         if (dialogState.isHideDuplicatesMode() && !dialogState.isFirstLoad() && !dialogState.isSwitchingDuplicatesFilter()) {
@@ -511,7 +512,7 @@ class SettingsDialogController(
         if (dialogState.isShowAllPresetsMode()) {
             // В режиме Show all проверяем все пресеты из всех списков
             val allPresets = mutableListOf<DevicePreset>()
-            tempPresetLists.values.forEach { list ->
+            tempListsManager.getTempLists().values.forEach { list ->
                 allPresets.addAll(list.presets)
             }
 
@@ -599,7 +600,7 @@ class SettingsDialogController(
         if (dialogState.isShowAllPresetsMode()) {
             val listName = getListNameAtRow(row) ?: return Pair(false, null)
             // Находим временный список по имени
-            val targetList = tempPresetLists.values.find { it.name == listName } ?: return Pair(false, null)
+            val targetList = tempListsManager.getTempLists().values.find { it.name == listName } ?: return Pair(false, null)
 
             // В режиме Hide Duplicates нужно найти правильный индекс в целевом списке
             if (dialogState.isHideDuplicatesMode()) {
@@ -666,21 +667,21 @@ class SettingsDialogController(
         // Проверяем, что дефолтные списки существуют
         PresetListService.ensureDefaultListsExist()
 
-        tempPresetLists.clear()
+        tempListsManager.clear()
         originalPresetLists.clear()
         duplicateManager.clearSnapshots()
         
         // Загружаем все списки через StateManager
         val loadedLists = stateManager.initializeTempPresetLists()
-        tempPresetLists.putAll(loadedLists)
+        tempListsManager.setTempLists(loadedLists)
         
         // Создаем копии для отката
-        originalPresetLists.putAll(snapshotManager.saveOriginalState(tempPresetLists))
+        originalPresetLists.putAll(snapshotManager.saveOriginalState(tempListsManager.getTempLists()))
         
         // Определяем начальный текущий список
-        currentPresetList = stateManager.determineInitialCurrentList(tempPresetLists)
+        currentPresetList = stateManager.determineInitialCurrentList(tempListsManager.getTempLists())
         
-        println("ADB_DEBUG: initializeTempPresetLists - done. Current list: ${currentPresetList?.name}, temp lists count: ${tempPresetLists.size}")
+        println("ADB_DEBUG: initializeTempPresetLists - done. Current list: ${currentPresetList?.name}, temp lists count: ${tempListsManager.size()}")
     }
 
     /**
@@ -690,7 +691,7 @@ class SettingsDialogController(
         tableLoader.loadPresetsIntoTable(
             tableModel = tableModel,
             currentPresetList = currentPresetList,
-            tempPresetLists = tempPresetLists,
+            tempPresetLists = tempListsManager.getTempLists(),
             isShowAllMode = dialogState.isShowAllPresetsMode(),
             isHideDuplicatesMode = dialogState.isHideDuplicatesMode(),
             isFirstLoad = dialogState.isFirstLoad(),
@@ -719,7 +720,7 @@ class SettingsDialogController(
      * Сохраняет снимок видимых пресетов для всех списков перед переключением в режим Show all
      */
     fun saveVisiblePresetsSnapshotForAllLists() {
-        snapshotManager.saveVisiblePresetsSnapshotForAllLists(tempPresetLists)
+        snapshotManager.saveVisiblePresetsSnapshotForAllLists(tempListsManager.getTempLists())
     }
 
     /**
@@ -834,7 +835,7 @@ class SettingsDialogController(
                     row = row,
                     tableModel = tableModel,
                     isShowAllMode = dialogState.isShowAllPresetsMode(),
-                    tempPresetLists = tempPresetLists,
+                    tempPresetLists = tempListsManager.getTempLists(),
                     currentPresetList = currentPresetList
                 )
                 if (deleted) {
@@ -953,7 +954,7 @@ class SettingsDialogController(
         saveCurrentTableState()
 
         // Удаляем пустые строки из всех временных списков
-        tempPresetLists.values.forEach { list ->
+        tempListsManager.getTempLists().values.forEach { list ->
             list.presets.removeIf { preset ->
                 preset.label.trim().isEmpty() &&
                         preset.size.trim().isEmpty() &&
@@ -962,7 +963,7 @@ class SettingsDialogController(
         }
 
         // Сохраняем все временные списки в файлы
-        tempPresetLists.values.forEach { list ->
+        tempListsManager.getTempLists().values.forEach { list ->
             PresetListService.savePresetList(list)
         }
 
@@ -1078,17 +1079,17 @@ class SettingsDialogController(
         println("ADB_DEBUG: Restoring original state")
 
         // Восстанавливаем из сохраненных оригиналов
-        snapshotManager.restoreSnapshots(tempPresetLists, originalPresetLists)
+        snapshotManager.restoreSnapshots(tempListsManager.getMutableTempLists(), originalPresetLists)
 
         // Сохраняем восстановленные списки в файлы
-        tempPresetLists.values.forEach { list ->
+        tempListsManager.getTempLists().values.forEach { list ->
             PresetListService.savePresetList(list)
         }
 
         // Восстанавливаем текущий список по ID
         val currentId = currentPresetList?.id
-        if (currentId != null && tempPresetLists.containsKey(currentId)) {
-            currentPresetList = tempPresetLists[currentId]
+        if (currentId != null && tempListsManager.getTempLists().containsKey(currentId)) {
+            currentPresetList = tempListsManager.getTempList(currentId)
             println("ADB_DEBUG: Restored currentPresetList: ${currentPresetList?.name}, presets: ${currentPresetList?.presets?.size}")
         }
 
@@ -1168,7 +1169,7 @@ class SettingsDialogController(
      */
     private fun getAllPresetsOrder(): List<String> {
         val allPresets = mutableListOf<String>()
-        tempPresetLists.values.forEach { list ->
+        tempListsManager.getTempLists().values.forEach { list ->
             list.presets.forEach { preset ->
                 allPresets.add(preset.label)
             }
@@ -1196,7 +1197,7 @@ class SettingsDialogController(
             } else {
                 currentPresetList?.let { currentList ->
                     // Используем данные из tempPresetLists, а не из currentPresetList
-                    val listFromTemp = tempPresetLists[currentList.id]
+                    val listFromTemp = tempListsManager.getTempList(currentList.id)
                     if (listFromTemp != null) {
                         val sourcePresets = presetsOverride ?: listFromTemp.presets
                         println("ADB_DEBUG: Loading presets from temp list '${listFromTemp.name}' with ${sourcePresets.size} presets")
@@ -1254,7 +1255,7 @@ class SettingsDialogController(
     private fun loadAllPresetsSync() {
         // Получаем сохраненный порядок
         val savedOrder = PresetListService.getShowAllPresetsOrder()
-        val allPresets = viewModeManager.prepareShowAllTableModel(tempPresetLists, savedOrder)
+        val allPresets = viewModeManager.prepareShowAllTableModel(tempListsManager.getTempLists(), savedOrder)
         
         if (dialogState.isHideDuplicatesMode()) {
             // Загружаем с учетом скрытых дубликатов
@@ -1365,7 +1366,7 @@ class SettingsDialogController(
     
     override fun getCurrentPresetList(): PresetList? = currentPresetList
     
-    override fun getTempPresetLists(): Map<String, PresetList> = tempPresetLists
+    override fun getTempPresetLists(): Map<String, PresetList> = tempListsManager.getTempLists()
     
     override fun isShowAllPresetsMode(): Boolean = dialogState.isShowAllPresetsMode()
     
@@ -1397,7 +1398,11 @@ class SettingsDialogController(
     }
     
     override fun syncTableChangesToTempLists() {
-        syncTableChangesToTempListsInternal()
+        if (dialogState.isShowAllPresetsMode()) {
+            syncTableChangesToTempListsInternal()
+        } else {
+            tempListsManager.syncTableChangesToTempLists(tableModel, currentPresetList, false)
+        }
     }
     
     

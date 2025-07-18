@@ -4,6 +4,7 @@ import io.github.qavlad.adbrandomizer.services.*
 import io.github.qavlad.adbrandomizer.ui.components.*
 import io.github.qavlad.adbrandomizer.services.PresetListService
 import io.github.qavlad.adbrandomizer.ui.services.DuplicateManager
+import io.github.qavlad.adbrandomizer.ui.services.TempListsManager
 
 /**
  * Инициализатор обработчиков событий для диалога настроек.
@@ -18,7 +19,7 @@ class EventHandlersInitializer(
     fun createAndInitializeListManagerPanel(
         dialogState: DialogStateManager,
         duplicateManager: DuplicateManager,
-        tempPresetLists: Map<String, PresetList>,
+        tempListsManager: TempListsManager,
         tableWithButtonPanel: TableWithAddButtonPanel?,
         onCurrentListChanged: (PresetList?) -> Unit,
         onLoadPresetsIntoTable: () -> Unit,
@@ -36,7 +37,7 @@ class EventHandlersInitializer(
                 
                 dialogState.withListSwitching {
                     // Переключаемся на временную копию нового списка
-                    val newCurrentList = tempPresetLists[presetList.id]
+                    val newCurrentList = tempListsManager.getTempList(presetList.id)
                     onCurrentListChanged(newCurrentList)
                     println("ADB_DEBUG: onListChanged - set currentPresetList to: ${newCurrentList?.name}, presets: ${newCurrentList?.presets?.size}")
                     
