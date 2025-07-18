@@ -22,7 +22,8 @@ import javax.swing.UIManager
 class ValidationRenderer(
     private val hoverState: () -> HoverState,
     private val getPresetAtRow: (Int) -> DevicePreset,
-    private val findDuplicates: () -> Map<Int, List<Int>>
+    private val findDuplicates: () -> Map<Int, List<Int>>,
+    private val validationService: io.github.qavlad.adbrandomizer.ui.services.ValidationService
 ) : DefaultTableCellRenderer() {
 
     private val duplicateInfoRenderer = DuplicateInfoRenderer()
@@ -46,11 +47,12 @@ class ValidationRenderer(
         
         val isHovered = hoverState().isTableCellHovered(row, column)
         val isSelectedCell = hoverState().isTableCellSelected(row, column)
+        val isInvalid = validationService.isCellInvalid(row, column)
 
         val cellBackground = ColorScheme.getTableCellBackground(
             isSelected = isSelectedCell,
             isHovered = isHovered,
-            isError = false
+            isError = isInvalid
         )
         var cellForeground = ColorScheme.Table.getForeground()
 

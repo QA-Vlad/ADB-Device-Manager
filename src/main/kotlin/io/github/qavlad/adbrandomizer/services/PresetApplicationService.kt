@@ -11,6 +11,14 @@ import io.github.qavlad.adbrandomizer.utils.ValidationUtils
 object PresetApplicationService {
     
     fun applyPreset(project: Project, preset: DevicePreset, setSize: Boolean, setDpi: Boolean) {
+        println("ADB_DEBUG: PresetApplicationService.applyPreset called!")
+        println("ADB_DEBUG:   preset: ${preset.label} | ${preset.size} | ${preset.dpi}")
+        println("ADB_DEBUG:   setSize: $setSize, setDpi: $setDpi")
+        println("ADB_DEBUG:   Stack trace:")
+        Thread.currentThread().stackTrace.take(15).forEach { element ->
+            println("ADB_DEBUG:     at ${element.className}.${element.methodName}(${element.fileName}:${element.lineNumber})")
+        }
+        
         object : Task.Backgroundable(project, "Applying preset") {
             override fun run(indicator: ProgressIndicator) {
                 val presetData = validateAndParsePresetData(preset, setSize, setDpi) ?: return
@@ -92,14 +100,18 @@ object PresetApplicationService {
     }
     
     private fun applyPresetToAllDevices(devices: List<IDevice>, preset: DevicePreset, presetData: PresetData, indicator: ProgressIndicator) {
+        println("ADB_DEBUG: applyPresetToAllDevices - applying to ${devices.size} devices")
         devices.forEach { device ->
+            println("ADB_DEBUG: Applying preset to device: ${device.name}")
             indicator.text = "Applying '${preset.label}' to ${device.name}..."
             
             if (presetData.width != null && presetData.height != null) {
+                println("ADB_DEBUG: Setting size: ${presetData.width}x${presetData.height}")
                 AdbService.setSize(device, presetData.width, presetData.height)
             }
             
             if (presetData.dpi != null) {
+                println("ADB_DEBUG: Setting DPI: ${presetData.dpi}")
                 AdbService.setDpi(device, presetData.dpi)
             }
         }

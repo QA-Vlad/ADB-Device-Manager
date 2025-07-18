@@ -2,8 +2,7 @@ package io.github.qavlad.adbrandomizer.ui.handlers
 
 import io.github.qavlad.adbrandomizer.ui.components.DevicePresetTableModel
 import io.github.qavlad.adbrandomizer.ui.components.HoverState
-import io.github.qavlad.adbrandomizer.ui.components.HistoryManager
-import io.github.qavlad.adbrandomizer.ui.components.HistoryOperation
+import io.github.qavlad.adbrandomizer.ui.components.CommandHistoryManager
 import java.awt.KeyEventDispatcher
 import java.awt.KeyboardFocusManager
 import java.awt.Toolkit
@@ -18,21 +17,26 @@ class KeyboardHandler(
     private val table: JTable,
     private val tableModel: DevicePresetTableModel,
     private val hoverState: () -> HoverState,
-    private val historyManager: HistoryManager,
+    private val historyManager: CommandHistoryManager,
     private val validateFields: () -> Unit,
     private val setEditingCellData: (String?, Int, Int) -> Unit,
     private val onDuplicate: (Int) -> Unit,
-    private val onUndo: (HistoryOperation) -> Unit,
-    private val onRedo: (HistoryOperation) -> Unit
+    private val forceSyncBeforeHistory: () -> Unit = {}
 ) {
     private var keyEventDispatcher: KeyEventDispatcher? = null
+    private var lastUndoTime = 0L
+    private val undoDebounceMs = 100L // Минимальный интервал между undo
 
     fun addGlobalKeyListener() {
         println("ADB_DEBUG: Adding global key listener using KeyboardFocusManager")
+        
+        // Удаляем старый dispatcher если он есть
+        removeGlobalKeyListener()
 
+        val dispatcherId = System.identityHashCode(this)
         keyEventDispatcher = KeyEventDispatcher { e ->
             if (e.id == KeyEvent.KEY_PRESSED) {
-                println("ADB_DEBUG: Global key pressed: ${e.keyCode}, isControlDown=${e.isControlDown}")
+                println("ADB_DEBUG: Global key pressed [dispatcher=$dispatcherId]: ${e.keyCode}, isControlDown=${e.isControlDown}, source=${e.source?.javaClass?.simpleName}")
                 when {
                     e.keyCode == KeyEvent.VK_C && e.isControlDown -> {
                         println("ADB_DEBUG: Ctrl+C pressed, selectedRow=${hoverState().selectedTableRow}, selectedColumn=${hoverState().selectedTableColumn}")
@@ -49,7 +53,7 @@ class KeyboardHandler(
                         }
                     }
                     e.keyCode == KeyEvent.VK_Z && e.isControlDown -> {
-                        println("ADB_DEBUG: Ctrl+Z pressed, история содержит ${historyManager.size()} записей")
+                        println("ADB_DEBUG: Ctrl+Z pressed in KeyEventDispatcher, история содержит ${historyManager.size()} записей")
 
                         if (table.isEditing) {
                             println("ADB_DEBUG: Table is in editing mode - ignoring global undo")
@@ -118,20 +122,14 @@ class KeyboardHandler(
                                 e.consume()
                             }
                             e.keyCode == KeyEvent.VK_Z && e.isControlDown -> {
-                                if (!table.isEditing) {
-                                    performUndo()
-                                    e.consume()
-                                } else {
-                                    println("ADB_DEBUG: Table is editing - local KeyListener ignoring undo")
-                                }
+                                // Обрабатывается глобальным обработчиком, игнорируем здесь
+                                println("ADB_DEBUG: Table KeyListener ignoring Ctrl+Z (handled by global)")
+                                return
                             }
                             e.keyCode == KeyEvent.VK_Y && e.isControlDown -> {
-                                if (!table.isEditing) {
-                                    performRedo()
-                                    e.consume()
-                                } else {
-                                    println("ADB_DEBUG: Table is editing - local KeyListener ignoring redo")
-                                }
+                                // Обрабатывается глобальным обработчиком, игнорируем здесь
+                                println("ADB_DEBUG: Table KeyListener ignoring Ctrl+Y (handled by global)")
+                                return
                             }
                             !e.isControlDown && !e.isAltDown -> {
                                 println("ADB_DEBUG: Checking if key should start editing: keyCode=${e.keyCode}, range check=${e.keyCode in 32..126}, F2 check=${e.keyCode == KeyEvent.VK_F2}")
@@ -174,12 +172,17 @@ class KeyboardHandler(
                 val data = clipboard.getContents(null)
 
                 if (data != null && data.isDataFlavorSupported(DataFlavor.stringFlavor)) {
-                    val oldValue = tableModel.getValueAt(hoverState().selectedTableRow, hoverState().selectedTableColumn) as? String ?: ""
+                    val row = hoverState().selectedTableRow
+                    val column = hoverState().selectedTableColumn
+                    val oldValue = tableModel.getValueAt(row, column) as? String ?: ""
                     val newValue = (data.getTransferData(DataFlavor.stringFlavor) as String).trim()
 
-                    setEditingCellData(oldValue, hoverState().selectedTableRow, hoverState().selectedTableColumn)
+                    // Добавляем команду в историю здесь
+                    if (newValue != oldValue) {
+                        historyManager.addCellEdit(row, column, oldValue, newValue)
+                    }
 
-                    tableModel.setValueAt(newValue, hoverState().selectedTableRow, hoverState().selectedTableColumn)
+                    tableModel.setValueAt(newValue, row, column)
                     println("ADB_DEBUG: Вставлено из буфера: '$newValue' (история: ${historyManager.size()})")
 
                     validateFields()
@@ -192,17 +195,26 @@ class KeyboardHandler(
     }
 
     private fun performUndo() {
-        val operation = historyManager.undoLast()
-        if (operation != null) {
-            onUndo(operation)
+        val currentTime = System.currentTimeMillis()
+        if (currentTime - lastUndoTime < undoDebounceMs) {
+            println("ADB_DEBUG: performUndo ignored - too fast (debounced)")
+            return
         }
+        lastUndoTime = currentTime
+        
+        println("ADB_DEBUG: performUndo called from KeyboardHandler")
+        
+        // Форсируем синхронизацию таблицы перед undo
+        forceSyncBeforeHistory()
+        
+        historyManager.undo()
     }
     
     private fun performRedo() {
-        val operation = historyManager.redoLast()
-        if (operation != null) {
-            onRedo(operation)
-        }
+        // Форсируем синхронизацию таблицы перед redo
+        forceSyncBeforeHistory()
+        
+        historyManager.redo()
     }
 
     private fun clearSelectedCell() {
@@ -217,6 +229,9 @@ class KeyboardHandler(
             if (oldValue.isBlank()) {
                 return
             }
+
+            // Добавляем команду в историю
+            historyManager.addCellEdit(selectedRow, selectedColumn, oldValue, "")
 
             // Устанавливаем пустое значение
             tableModel.setValueAt("", selectedRow, selectedColumn)

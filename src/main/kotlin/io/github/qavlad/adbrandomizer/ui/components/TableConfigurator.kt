@@ -8,12 +8,10 @@ import io.github.qavlad.adbrandomizer.ui.handlers.PresetTransferHandler
 import io.github.qavlad.adbrandomizer.ui.renderers.ValidationRenderer
 import java.awt.Dimension
 import java.awt.Component
-import java.awt.Font
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import javax.swing.*
 import javax.swing.table.DefaultTableCellRenderer
-import javax.swing.table.DefaultTableModel
 import javax.swing.table.TableCellEditor
 import javax.swing.table.TableCellRenderer
 import java.awt.Color
@@ -55,13 +53,10 @@ class TableConfigurator(
     private val onTableExited: () -> Unit,
     private val validationRenderer: ValidationRenderer,
     private val showContextMenu: (MouseEvent) -> Unit,
-    private val historyManager: HistoryManager,
-    private val getPresetAtRow: (Int) -> io.github.qavlad.adbrandomizer.services.DevicePreset,
     private val isShowAllPresetsMode: () -> Boolean = { false },
-    private val getListNameAtRow: (Int) -> String? = { null },
-    private val onPresetDeleted: () -> Unit = { },
-    private val deletePresetFromTempList: (Int) -> Boolean = { false },
-    private val getCurrentListName: () -> String? = { null }
+    private val onPresetDeletedFromEditor: (Int) -> Unit,
+    private val onDragStarted: () -> Unit = {},
+    private val onDragEnded: () -> Unit = {}
 ) {
     
     private fun isAddButtonRow(table: JTable, row: Int): Boolean {
@@ -75,9 +70,13 @@ class TableConfigurator(
             rowHeight = JBUI.scale(PluginConfig.UI.TABLE_ROW_HEIGHT)
             dragEnabled = true
             dropMode = DropMode.INSERT_ROWS
-            transferHandler = PresetTransferHandler { fromIndex, toIndex ->
-                onRowMoved(fromIndex, toIndex)
-            }
+            transferHandler = PresetTransferHandler(
+                onRowMoved = { fromIndex, toIndex ->
+                    onRowMoved(fromIndex, toIndex)
+                },
+                onDragStarted = onDragStarted,
+                onDragEnded = onDragEnded
+            )
             
             selectionModel.clearSelection()
             setRowSelectionAllowed(false)
@@ -195,42 +194,26 @@ class TableConfigurator(
     }
     
     fun configureColumns() {
-        table.columnModel.getColumn(0).apply {
-            minWidth = JBUI.scale(30)
-            maxWidth = JBUI.scale(30)
-            
-            // Создаем стандартный рендерер для drag-and-drop
-            val defaultRenderer = object : DefaultTableCellRenderer() {
-                init {
-                    horizontalAlignment = CENTER
-                    isOpaque = true
-                }
-                
-                // Цвета для hover эффекта
-                private val normalBackground = UIManager.getColor("Table.background")
-                private val hoverBackground = normalBackground?.brighter()
-
-                override fun getTableCellRendererComponent(table: JTable, value: Any?, isSelected: Boolean, hasFocus: Boolean, row: Int, column: Int): Component {
-                    val component = super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column)
-                    toolTipText = "Drag and drop"
-                    
-                    // Проверяем hover состояние для drag-and-drop
-                    val isHovered = hoverState().isTableCellHovered(row, column)
-                    background = if (isHovered) {
-                        hoverBackground
+        // Column 0: Drag Handle
+                table.columnModel.getColumn(0).apply {
+            preferredWidth = JBUI.scale(20)
+            minWidth = JBUI.scale(20)
+            maxWidth = JBUI.scale(20)
+            // Use a custom renderer that displays the icon based on the cell value
+            setCellRenderer { table, value, _, _, _, _ ->
+                val iconLabel = if (value == "+") "+" else "☰"
+                JLabel(iconLabel).apply {
+                    horizontalAlignment = SwingConstants.CENTER
+                    // Применяем стиль только для плюсика
+                    font = if (value == "+") {
+                        table?.font?.deriveFont(table.font.size * 1.8f)
                     } else {
-                        normalBackground
+                        table?.font
                     }
-                    
-                    // Увеличиваем размер шрифта для drag-and-drop иконки
-                    font = font.deriveFont(Font.BOLD, JBUI.scale(16).toFloat())
-                    
-                    return component
                 }
             }
-            
-            // Оборачиваем его в комбинированный рендерер
-            cellRenderer = FirstColumnCellRenderer(defaultRenderer)
+            // Make the cell not editable
+            cellEditor = null
         }
 
         table.columnModel.getColumn(1).apply {
@@ -269,7 +252,11 @@ class TableConfigurator(
                 minWidth = JBUI.scale(40)
                 maxWidth = JBUI.scale(40)
                 cellRenderer = ButtonRenderer(isShowAllPresetsMode)
-                cellEditor = ButtonEditor(table, historyManager, getPresetAtRow, isShowAllPresetsMode, getListNameAtRow, onPresetDeleted, deletePresetFromTempList, getCurrentListName)
+                cellEditor = ButtonEditor(
+                    table = table,
+                    isShowAllPresetsMode = isShowAllPresetsMode,
+                    onPresetDeletedFromEditor = onPresetDeletedFromEditor
+                )
                 
                 // Добавляем проверку редактируемости
                 println("ADB_DEBUG: Column 5 configured, isCellEditable check...")
@@ -327,13 +314,8 @@ private class ButtonRenderer(
 
 private class ButtonEditor(
     private val table: JTable,
-    private val historyManager: HistoryManager,
-    private val getPresetAtRow: (Int) -> io.github.qavlad.adbrandomizer.services.DevicePreset,
     private val isShowAllPresetsMode: () -> Boolean = { false },
-    private val getListNameAtRow: (Int) -> String? = { null },
-    private val onPresetDeleted: () -> Unit = { },
-    private val deletePresetFromTempList: (Int) -> Boolean = { false },
-    private val getCurrentListName: () -> String? = { null }
+    private val onPresetDeletedFromEditor: (Int) -> Unit
 ) : AbstractTableCellEditor(), TableCellEditor {
     private val button = JButton()
     private val trashIcon: Icon = Icons.loadIcon(Icons.DELETE_ICON_PATH) ?: DeleteIcon()
@@ -348,56 +330,11 @@ private class ButtonEditor(
         button.isContentAreaFilled = false
 
         button.addActionListener {
-            println("ADB_DEBUG: Delete button clicked in ButtonEditor")
-            println("ADB_DEBUG: isShowAllPresetsMode = ${isShowAllPresetsMode()}")
-            
-            
             val modelRow = table.convertRowIndexToModel(table.editingRow)
             fireEditingStopped()
 
             if (modelRow != -1) {
-                val model = table.model as DefaultTableModel
-                
-                // Проверяем, что это не строка с кнопкой
-                if (model.getValueAt(modelRow, 0) == "+") {
-                    return@addActionListener // Не удаляем строку с кнопкой
-                }
-                
-                // Получаем данные пресета перед удалением
-                val preset = getPresetAtRow(modelRow)
-                // println("ADB_DEBUG: ButtonEditor - Delete button clicked, row: $modelRow")
-                println("ADB_DEBUG: ButtonEditor - Preset: ${preset.label}, ${preset.size}, ${preset.dpi}")
-                println("ADB_DEBUG: ButtonEditor - isShowAllPresetsMode: ${isShowAllPresetsMode()}")
-                
-                // Сохраняем имя списка ДО удаления строки из таблицы
-                val listNameForHistory = if (isShowAllPresetsMode()) {
-                    getListNameAtRow(modelRow)
-                } else {
-                    getCurrentListName()
-                }
-                println("ADB_DEBUG: ButtonEditor - List name for history: $listNameForHistory")
-                
-                // Удаляем пресет из временного списка
-                val removed = deletePresetFromTempList(modelRow)
-                println("ADB_DEBUG: ButtonEditor - Removed from temp list: $removed")
-                
-                if (isShowAllPresetsMode()) {
-                    if (removed) {
-                        // После удаления из tempPresetLists обновляем таблицу
-                        onPresetDeleted() // Должен быть связан с loadPresetsIntoTable
-                    }
-                }
-                
-                // Удаляем строку из таблицы
-                model.removeRow(modelRow)
-                
-                // Вызываем callback для обновления порядка
-                if (isShowAllPresetsMode()) {
-                    onPresetDeleted()
-                }
-                
-                // Добавляем операцию в историю с именем списка
-                historyManager.addPresetDelete(modelRow, preset, listNameForHistory)
+                onPresetDeletedFromEditor(modelRow)
             }
         }
     }

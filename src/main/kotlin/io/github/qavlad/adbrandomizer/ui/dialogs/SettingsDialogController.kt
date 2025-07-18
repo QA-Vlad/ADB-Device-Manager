@@ -1,16 +1,25 @@
 package io.github.qavlad.adbrandomizer.ui.dialogs
 
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.util.SystemInfo
 import com.intellij.ui.table.JBTable
-import com.intellij.util.ui.JBUI
 import io.github.qavlad.adbrandomizer.services.*
 import io.github.qavlad.adbrandomizer.ui.components.*
 import io.github.qavlad.adbrandomizer.ui.handlers.KeyboardHandler
+import io.github.qavlad.adbrandomizer.ui.services.DuplicateManager
+import io.github.qavlad.adbrandomizer.ui.services.TableDataSynchronizer
+import io.github.qavlad.adbrandomizer.ui.services.ViewModeManager
+import io.github.qavlad.adbrandomizer.ui.services.PresetOperationsService
+import io.github.qavlad.adbrandomizer.ui.services.TableEventHandler
+import io.github.qavlad.adbrandomizer.ui.services.SnapshotManager
+import io.github.qavlad.adbrandomizer.ui.services.ValidationService
+import io.github.qavlad.adbrandomizer.ui.services.TableLoader
+import io.github.qavlad.adbrandomizer.ui.services.StateManager
+import io.github.qavlad.adbrandomizer.ui.services.PresetDistributor
 import io.github.qavlad.adbrandomizer.ui.renderers.ValidationRenderer
 import io.github.qavlad.adbrandomizer.ui.renderers.ListColumnHeaderRenderer
 import io.github.qavlad.adbrandomizer.utils.ButtonUtils
 import io.github.qavlad.adbrandomizer.utils.ValidationUtils
+import io.github.qavlad.adbrandomizer.utils.PresetUpdateUtils
 import io.github.qavlad.adbrandomizer.ui.theme.ColorScheme
 import java.awt.Component
 import java.awt.Container
@@ -21,7 +30,6 @@ import javax.swing.*
 import javax.swing.table.TableCellRenderer
 import com.intellij.openapi.application.ApplicationManager
 import javax.swing.SwingUtilities
-import javax.swing.table.TableColumn
 import io.github.qavlad.adbrandomizer.ui.components.TableWithAddButtonPanel
 
 /**
@@ -50,17 +58,22 @@ class SettingsDialogController(
     // Состояние
     var hoverState = HoverState.noHover()
         private set
-    val historyManager = HistoryManager()
+    val historyManager = CommandHistoryManager(this)
+    private val duplicateManager = DuplicateManager()
+    private val tableSynchronizer = TableDataSynchronizer(duplicateManager)
+    private val viewModeManager = ViewModeManager()
+    private val presetOperationsService = PresetOperationsService(historyManager)
+    private val tableEventHandler = TableEventHandler(project)
+    private val snapshotManager = SnapshotManager(duplicateManager)
+    private val validationService = ValidationService()
+    private val tableLoader = TableLoader(duplicateManager, viewModeManager)
+    private val stateManager = StateManager()
+    private val presetDistributor = PresetDistributor(duplicateManager)
     private var updateListener: (() -> Unit)? = null
     private var globalClickListener: java.awt.event.AWTEventListener? = null
     private var currentPresetList: PresetList? = null
     private var isShowAllPresetsMode = false
     private var isHideDuplicatesMode = false
-
-    // Карта для отслеживания какие пресеты были видимы в таблице при редактировании
-    // Хранит для каждого списка полный порядок элементов и индексы видимых элементов
-    private val visiblePresetsSnapshot = mutableMapOf<String, List<String>>()
-    private val presetsOrderSnapshot = mutableMapOf<String, List<String>>()
 
     // Временное хранилище всех списков для режима "Show all presets"
     private val tempPresetLists = mutableMapOf<String, PresetList>()
@@ -93,37 +106,15 @@ class SettingsDialogController(
 
     // Флаг для отслеживания активной операции undo/redo
     private var isPerformingHistoryOperation = false
-
-    /**
-     * Очищает дубликаты и пустые элементы после операций истории
-     */
-    private fun cleanupAfterHistoryOperation() {
-        currentPresetList?.let { list ->
-            // Удаляем пустые элементы-дубликаты
-            val cleanedPresets = mutableListOf<DevicePreset>()
-            val seenKeys = mutableSetOf<String>()
-
-            list.presets.forEach { preset ->
-                val key = "${preset.label}|${preset.size}|${preset.dpi}"
-
-                // Пропускаем дубликаты (кроме пустых элементов)
-                if (preset.label.isBlank() && preset.size.isBlank() && preset.dpi.isBlank()) {
-                    // Пустые элементы всегда добавляем
-                    cleanedPresets.add(preset)
-                } else if (!seenKeys.contains(key)) {
-                    seenKeys.add(key)
-                    cleanedPresets.add(preset)
-                }
-            }
-
-            // Обновляем список только если были удалены дубликаты
-            if (cleanedPresets.size != list.presets.size) {
-                println("ADB_DEBUG: cleanupAfterHistoryOperation - removed ${list.presets.size - cleanedPresets.size} duplicates")
-                list.presets.clear()
-                list.presets.addAll(cleanedPresets)
-            }
-        }
-    }
+    // Таймер для группировки обновлений таблицы
+    private var lastUpdateTimer: javax.swing.Timer? = null
+    // Счетчик ожидающих обновлений таблицы
+    private var pendingTableUpdates = 0
+    // Флаг для предотвращения обработки клика после удаления
+    private var isProcessingDelete = false
+    
+    // Флаг для отслеживания активной drag and drop операции
+    private var isDragAndDropInProgress = false
 
     /**
      * Инициализация контроллера
@@ -163,11 +154,14 @@ class SettingsDialogController(
                 // Очищаем снимок при переключении списка только если не в режиме скрытия дубликатов
                 // В режиме скрытия дубликатов снимок нужно сохранять для корректной работы
                 if (!isShowAllPresetsMode && !isHideDuplicatesMode) {
-                    visiblePresetsSnapshot.clear()
-                    presetsOrderSnapshot.clear()
+                    duplicateManager.clearSnapshots()
                 }
                 if (::table.isInitialized) {
-                    loadPresetsIntoTable()
+                    try {
+                        loadPresetsIntoTable()
+                    } finally {
+                        isSwitchingList = false
+                    }
                 }
             },
             onShowAllPresetsChanged = { showAll ->
@@ -186,13 +180,13 @@ class SettingsDialogController(
                 // ВАЖНО: Сохраняем снимок видимых пресетов ПЕРЕД переключением режима
                 // чтобы он был доступен при обработке удаления в режиме Show all
                 // Сохраняем только если снимок еще не был сохранен
-                if (showAll && isHideDuplicatesMode && !isShowAllPresetsMode && visiblePresetsSnapshot.isEmpty()) {
+                if (showAll && isHideDuplicatesMode && !isShowAllPresetsMode && !duplicateManager.hasSnapshots()) {
                     println("ADB_DEBUG: Saving snapshot before switching to Show all mode (snapshot was empty)")
-                    println("ADB_DEBUG: Current visiblePresetsSnapshot size before save: ${visiblePresetsSnapshot.size}")
+                    println("ADB_DEBUG: Current visiblePresetsSnapshot size before save: ${duplicateManager.getSnapshotsSize()}")
                     saveVisiblePresetsSnapshotForAllLists()
-                    println("ADB_DEBUG: After saving, visiblePresetsSnapshot size: ${visiblePresetsSnapshot.size}")
+                    println("ADB_DEBUG: After saving, visiblePresetsSnapshot size: ${duplicateManager.getSnapshotsSize()}")
                 } else if (showAll && isHideDuplicatesMode && !isShowAllPresetsMode) {
-                    println("ADB_DEBUG: NOT saving snapshot before Show all - already have ${visiblePresetsSnapshot.size} snapshots")
+                    println("ADB_DEBUG: NOT saving snapshot before Show all - already have ${duplicateManager.getSnapshotsSize()} snapshots")
                 }
 
                 isSwitchingMode = true
@@ -202,6 +196,8 @@ class SettingsDialogController(
                     SettingsService.setShowAllPresetsMode(showAll)
                     tableWithButtonPanel?.setAddButtonVisible(!showAll)
                     if (::table.isInitialized) {
+                        // Сначала настраиваем колонки, потом загружаем данные
+                        setupTableColumns()
                         loadPresetsIntoTable()
                     }
                 } finally {
@@ -211,12 +207,16 @@ class SettingsDialogController(
                     // Он будет пересоздан при необходимости из актуального состояния
                     if (!showAll) {
                         println("ADB_DEBUG: Clearing snapshot when exiting Show all mode")
-                        visiblePresetsSnapshot.clear()
-                        presetsOrderSnapshot.clear()
+                        duplicateManager.clearSnapshots()
                     }
                 }
             },
             onHideDuplicatesChanged = { hideDuplicates ->
+                if (isPerformingHistoryOperation) {
+                    println("ADB_DEBUG: onHideDuplicatesChanged skipped during history operation")
+                    return@PresetListManagerPanel
+                }
+
                 println("ADB_DEBUG: onHideDuplicatesChanged called with: $hideDuplicates")
 
                 // Останавливаем редактирование если оно активно
@@ -247,8 +247,8 @@ class SettingsDialogController(
                     println("ADB_DEBUG: Saving snapshot after enabling hide duplicates")
                     println("ADB_DEBUG: tempPresetLists size: ${tempPresetLists.size}")
                     saveVisiblePresetsSnapshotForAllLists()
-                    println("ADB_DEBUG: After saving snapshot, visiblePresetsSnapshot size: ${visiblePresetsSnapshot.size}")
-                    visiblePresetsSnapshot.forEach { (listName, presets) ->
+                    println("ADB_DEBUG: After saving snapshot, visiblePresetsSnapshot size: ${duplicateManager.getSnapshotsSize()}")
+                    duplicateManager.getSnapshotsDebugInfo().forEach { (listName, presets) ->
                         println("ADB_DEBUG:   Snapshot for $listName: ${presets.size} presets")
                     }
                 }
@@ -268,8 +268,7 @@ class SettingsDialogController(
                         tableModelListener?.let { tableModel.addTableModelListener(it) }
                         // Очищаем снимок при отключении фильтра дубликатов
                         if (!hideDuplicates) {
-                            visiblePresetsSnapshot.clear()
-                            presetsOrderSnapshot.clear()
+                            duplicateManager.clearSnapshots()
                         }
                     }
                 }
@@ -382,8 +381,11 @@ class SettingsDialogController(
             }
 
             override fun editCellAt(row: Int, column: Int): Boolean {
+                println("ADB_DEBUG: editCellAt called - row=$row, column=$column")
                 if (row >= 0 && column >= 0) {
-                    editingCellOldValue = tableModel.getValueAt(row, column) as? String ?: ""
+                    val oldValue = tableModel.getValueAt(row, column) as? String ?: ""
+                    println("ADB_DEBUG: editCellAt - setting editingCellOldValue='$oldValue'")
+                    editingCellOldValue = oldValue
                     editingCellRow = row
                     editingCellColumn = column
                 }
@@ -391,7 +393,13 @@ class SettingsDialogController(
             }
 
             override fun removeEditor() {
+                println("ADB_DEBUG: removeEditor called - editingCellOldValue=$editingCellOldValue, row=$editingCellRow, col=$editingCellColumn")
                 if (editingCellOldValue != null) {
+                    val newValue = tableModel.getValueAt(editingCellRow, editingCellColumn) as? String ?: ""
+                    if (newValue != editingCellOldValue) {
+                        println("ADB_DEBUG: removeEditor - adding command to history from removeEditor")
+                        historyManager.addCellEdit(editingCellRow, editingCellColumn, editingCellOldValue!!, newValue)
+                    }
                     editingCellOldValue = null
                     editingCellRow = -1
                     editingCellColumn = -1
@@ -400,12 +408,15 @@ class SettingsDialogController(
             }
 
             override fun changeSelection(rowIndex: Int, columnIndex: Int, toggle: Boolean, extend: Boolean) {
+                println("ADB_DEBUG: changeSelection called - row=$rowIndex, col=$columnIndex")
                 if (rowIndex >= 0 && columnIndex >= 0 && columnIndex in 2..4) {
                     val oldRow = selectionModel.leadSelectionIndex
                     val oldColumn = columnModel.selectionModel.leadSelectionIndex
 
                     if (oldRow != rowIndex || oldColumn != columnIndex) {
-                        editingCellOldValue = tableModel.getValueAt(rowIndex, columnIndex) as? String ?: ""
+                        val oldValue = tableModel.getValueAt(rowIndex, columnIndex) as? String ?: ""
+                        println("ADB_DEBUG: changeSelection - setting editingCellOldValue='$oldValue' (was: '$editingCellOldValue')")
+                        editingCellOldValue = oldValue
                         editingCellRow = rowIndex
                         editingCellColumn = columnIndex
                     }
@@ -430,17 +441,17 @@ class SettingsDialogController(
             currentPresetList = tempPresetLists.values.first()
         }
 
-        // Коллектор для группировки множественных событий TableModel
-        var pendingTableUpdates = 0
-        var lastUpdateTimer: javax.swing.Timer? = null
+        // Используем поля класса для pendingTableUpdates и lastUpdateTimer
 
         // Создаем слушатель модели и сохраняем ссылку
         tableModelListener = javax.swing.event.TableModelListener { e ->
+            // println("ADB_DEBUG: TableModelListener fired - type: ${e.type}, isTableUpdating: $isTableUpdating")
             if (isTableUpdating) {
                 return@TableModelListener
             }
 
             pendingTableUpdates++
+            println("ADB_DEBUG: pendingTableUpdates incremented to: $pendingTableUpdates")
 
             // Делаем локальную копию для безопасного использования
             val currentTimer = lastUpdateTimer
@@ -459,6 +470,15 @@ class SettingsDialogController(
                         else -> "UNKNOWN(${e.type})"
                     }
                     println("ADB_DEBUG: TableModelListener batch update - processing $pendingTableUpdates updates, type: $eventType")
+                    
+                    // Сохраняем состояние перед синхронизацией для команды перемещения
+                    if (isDragAndDropInProgress && isHideDuplicatesMode) {
+                        val lastCommand = historyManager.getLastCommand()
+                        if (lastCommand is io.github.qavlad.adbrandomizer.ui.commands.PresetMoveCommand) {
+                            println("ADB_DEBUG: Saving state before sync for PresetMoveCommand")
+                            lastCommand.saveStateBeforeSync()
+                        }
+                    }
 
                     // Синхронизируем изменения с временными списками
                     // UPDATE - для изменения ячеек, DELETE - для удаления строк
@@ -480,11 +500,15 @@ class SettingsDialogController(
             // Сохраняем ссылку на новый таймер
             lastUpdateTimer = newTimer
         }
+        
+        // Добавляем слушатель к модели таблицы
+        tableModel.addTableModelListener(tableModelListener)
 
         validationRenderer = ValidationRenderer(
             hoverState = { hoverState },
             getPresetAtRow = ::getPresetAtRow,
-            findDuplicates = { tableModel.findDuplicates() }
+            findDuplicates = { tableModel.findDuplicates() },
+            validationService = validationService
         )
 
         keyboardHandler = KeyboardHandler(
@@ -499,8 +523,7 @@ class SettingsDialogController(
                 editingCellColumn = column
             },
             onDuplicate = ::duplicatePreset,
-            onUndo = ::performUndo,
-            onRedo = ::performRedo
+            forceSyncBeforeHistory = ::forceSyncBeforeHistoryOperation
         )
 
         tableConfigurator = TableConfigurator(
@@ -512,13 +535,26 @@ class SettingsDialogController(
             onTableExited = ::handleTableExit,
             validationRenderer = validationRenderer,
             showContextMenu = ::showContextMenu,
-            historyManager = historyManager,
-            getPresetAtRow = ::getPresetAtRow,
             isShowAllPresetsMode = { isShowAllPresetsMode },
-            getListNameAtRow = ::getListNameAtRow,
-            onPresetDeleted = { /* Не сохраняем порядок при удалении */ },
-            deletePresetFromTempList = ::deletePresetFromTempList,
-            getCurrentListName = { currentPresetList?.name }
+            onPresetDeletedFromEditor = ::deletePresetFromEditor,
+            onDragStarted = { 
+                println("ADB_DEBUG: Drag and drop started, setting isDragAndDropInProgress = true")
+                isDragAndDropInProgress = true 
+            },
+            onDragEnded = { 
+                println("ADB_DEBUG: Drag and drop ended, isDragAndDropInProgress remains true")
+                // В режиме скрытия дубликатов сохраняем полное состояние всех списков
+                val orderAfter = if (isHideDuplicatesMode) {
+                    getAllPresetsOrder()
+                } else {
+                    tableModel.getPresets().map { it.label }
+                }
+                historyManager.updateLastMoveCommandOrderAfter(orderAfter)
+                
+                // Состояние после операции будет сохранено после синхронизации в syncTableChangesToTempLists
+                
+                // Не сбрасываем флаг здесь - он будет сброшен после обработки всех обновлений
+            }
         )
 
         tableConfigurator.configure()
@@ -548,75 +584,26 @@ class SettingsDialogController(
      * Настройка колонок таблицы в зависимости от режима
      */
     private fun setupTableColumns() {
-        // Сохраняем текущее состояние флага
-        val wasUpdating = isTableUpdating
-        if (!wasUpdating) {
-            isTableUpdating = true
+        val columnNames = if (isShowAllPresetsMode) {
+            Vector(listOf(" ", "№", "Label", "Size (e.g., 1080x1920)", "DPI (e.g., 480)", "  ", "List"))
+        } else {
+            Vector(listOf(" ", "№", "Label", "Size (e.g., 1080x1920)", "DPI (e.g., 480)", "  "))
         }
-        try {
-            val currentColumnCount = table.columnModel.columnCount
-            println("ADB_DEBUG: setupTableColumns - current column count: $currentColumnCount, isShowAllPresetsMode: $isShowAllPresetsMode")
-            println("ADB_DEBUG: setupTableColumns - currentPresetList before: ${currentPresetList?.name}, presets: ${currentPresetList?.presets?.size}")
+        tableModel.setColumnIdentifiers(columnNames)
 
-            // Отладка: выводим текущие колонки
-            for (i in 0 until currentColumnCount) {
-                println("ADB_DEBUG: Before setup - Column $i: ${table.columnModel.getColumn(i).headerValue}")
-            }
-
-            if (isShowAllPresetsMode) {
-                // Обновляем заголовок модели
-                val columnNames = Vector(listOf(" ", "№", "Label", "Size (e.g., 1080x1920)", "DPI (e.g., 480)", "  ", "List"))
-                tableModel.setColumnIdentifiers(columnNames)
-                println("ADB_DEBUG: Set model column count to: ${tableModel.columnCount}")
-
-                // Удаляем все лишние колонки сначала
-                while (table.columnModel.columnCount > tableModel.columnCount) {
-                    val lastIndex = table.columnModel.columnCount - 1
-                    println("ADB_DEBUG: Removing extra column $lastIndex: ${table.columnModel.getColumn(lastIndex).headerValue}")
-                    table.columnModel.removeColumn(table.columnModel.getColumn(lastIndex))
-                }
-
-                // Теперь добавляем недостающие колонки
-                if (table.columnModel.columnCount < tableModel.columnCount) {
-                    for (i in table.columnModel.columnCount until tableModel.columnCount) {
-                        val column = TableColumn(i)
-                        column.headerValue = tableModel.getColumnName(i)
-                        if (i == 6) { // Колонка List
-                            column.preferredWidth = JBUI.scale(150)
-                            column.minWidth = JBUI.scale(100)
-                        }
-                        table.columnModel.addColumn(column)
-                        println("ADB_DEBUG: Added column $i: ${column.headerValue}")
-                    }
-                }
-
-                println("ADB_DEBUG: After setup - column count: ${table.columnModel.columnCount}")
-
-                // Перенастраиваем все колонки
-                reconfigureColumns()
-            } else {
-                // Обновляем заголовок модели обратно
-                val columnNames = Vector(listOf(" ", "№", "Label", "Size (e.g., 1080x1920)", "DPI (e.g., 480)", "  "))
-                println("ADB_DEBUG: Before setColumnIdentifiers - currentPresetList: ${currentPresetList?.name}, presets: ${currentPresetList?.presets?.size}")
-                tableModel.setColumnIdentifiers(columnNames)
-                println("ADB_DEBUG: After setColumnIdentifiers - currentPresetList: ${currentPresetList?.name}, presets: ${currentPresetList?.presets?.size}")
-
-                // Удаляем лишние колонки
-                while (table.columnModel.columnCount > tableModel.columnCount) {
-                    table.columnModel.removeColumn(table.columnModel.getColumn(table.columnModel.columnCount - 1))
-                }
-                println("ADB_DEBUG: Removed extra columns, new column count: ${table.columnModel.columnCount}")
-
-                // Перенастраиваем все колонки
-                reconfigureColumns()
-            }
-        } finally {
-            // Сбрасываем флаг только если мы его установили
-            if (!wasUpdating) {
-                isTableUpdating = false
-            }
+        // Явно синхронизируем колонки JTable с TableModel
+        while (table.columnModel.columnCount > tableModel.columnCount) {
+            table.columnModel.removeColumn(table.columnModel.getColumn(table.columnModel.columnCount - 1))
         }
+        while (table.columnModel.columnCount < tableModel.columnCount) {
+            val newColumn = javax.swing.table.TableColumn(table.columnModel.columnCount)
+            table.columnModel.addColumn(newColumn)
+        }
+
+        // Перенастраиваем свойства колонок после изменения их количества
+        reconfigureColumns()
     }
+
 
     /**
      * Перенастраивает рендереры и редакторы колонок
@@ -656,7 +643,13 @@ class SettingsDialogController(
 
         if (isShowAllPresetsMode) {
             // В режиме "Show all presets" распределяем изменения по спискам
-            distributePresetsToTempLists()
+            presetDistributor.distributePresetsToTempLists(
+                tableModel = tableModel,
+                tempPresetLists = tempPresetLists,
+                isHideDuplicatesMode = isHideDuplicatesMode,
+                getListNameAtRow = ::getListNameAtRow,
+                saveVisiblePresetsSnapshotForAllLists = ::saveVisiblePresetsSnapshotForAllLists
+            )
         } else {
             // В обычном режиме обновляем только текущий список
             currentPresetList?.let { list ->
@@ -666,40 +659,14 @@ class SettingsDialogController(
                     val originalPresets = list.presets.map { it.copy() }
 
                     // Определяем какие индексы были видимы в таблице
-                    val visibleIndices = mutableListOf<Int>()
-                    val seenKeys = mutableSetOf<String>()
-
-                    originalPresets.forEachIndexed { index, preset ->
-                        val key = if (preset.size.isNotBlank() && preset.dpi.isNotBlank()) {
-                            "${preset.size}|${preset.dpi}"
-                        } else {
-                            "unique_$index"
-                        }
-
-                        if (!seenKeys.contains(key)) {
-                            seenKeys.add(key)
-                            visibleIndices.add(index)
-                        }
-                    }
+                    val visibleIndices = findVisibleIndices(originalPresets)
 
                     // Получаем обновленные пресеты из таблицы
                     // Включаем все пресеты, даже полностью пустые (для поддержки кнопки "+")
                     val updatedTablePresets = tableModel.getPresets()
 
                     // Создаем новый список, обновляя только видимые элементы
-                    val newPresets = mutableListOf<DevicePreset>()
-                    var tableIndex = 0
-
-                    originalPresets.forEachIndexed { index, originalPreset ->
-                        if (visibleIndices.contains(index) && tableIndex < updatedTablePresets.size) {
-                            // Это был видимый пресет - берем обновленную версию из таблицы
-                            newPresets.add(updatedTablePresets[tableIndex])
-                            tableIndex++
-                        } else {
-                            // Это был скрытый дубликат - сохраняем как есть
-                            newPresets.add(originalPreset)
-                        }
-                    }
+                    val newPresets = PresetUpdateUtils.updatePresetsWithVisibleIndices(originalPresets, visibleIndices, updatedTablePresets)
 
                     // Заменяем список
                     list.presets.clear()
@@ -715,49 +682,98 @@ class SettingsDialogController(
     }
 
     /**
+     * Принудительная синхронизация перед операциями истории
+     */
+    fun forceSyncBeforeHistoryOperation() {
+        println("ADB_DEBUG: forceSyncBeforeHistoryOperation called")
+        println("ADB_DEBUG:   pendingTableUpdates = $pendingTableUpdates")
+        println("ADB_DEBUG:   lastUpdateTimer = $lastUpdateTimer")
+        
+        // Останавливаем все таймеры
+        lastUpdateTimer?.stop()
+        
+        // Выполняем синхронизацию немедленно
+        if (pendingTableUpdates > 0) {
+            println("ADB_DEBUG: Forcing sync of $pendingTableUpdates pending updates")
+            syncTableChangesToTempLists()
+            pendingTableUpdates = 0
+        } else {
+            println("ADB_DEBUG: No pending updates to sync")
+        }
+    }
+    
+    /**
+     * Синхронизирует изменения из таблицы с временными списками после drag and drop
+     * Используется только для обновления порядка элементов без перезагрузки таблицы
+     */
+    private fun syncTableChangesToTempListsAfterDragDrop() {
+        if (!isShowAllPresetsMode || !isHideDuplicatesMode) {
+            return
+        }
+        
+        println("ADB_DEBUG: syncTableChangesToTempListsAfterDragDrop - updating order from table")
+        
+        // Собираем текущий порядок из таблицы
+        val tableOrder = mutableListOf<Pair<String, DevicePreset>>()
+        for (i in 0 until tableModel.rowCount) {
+            val listName = getListNameAtRow(i) ?: continue
+            val preset = getPresetAtRow(i)
+            tableOrder.add(listName to preset)
+        }
+        
+        // Обновляем порядок в tempPresetLists
+        tempPresetLists.values.forEach { list ->
+            // Собираем пресеты этого списка из таблицы в правильном порядке
+            val presetsFromTable = tableOrder
+                .filter { it.first == list.name }
+                .map { it.second }
+            
+            // Также нужно сохранить скрытые дубликаты
+            val visibleKeys = presetsFromTable.map { "${it.label}|${it.size}|${it.dpi}" }.toSet()
+            val hiddenPresets = list.presets.filter { preset ->
+                val key = "${preset.label}|${preset.size}|${preset.dpi}"
+                !visibleKeys.contains(key)
+            }
+            
+            // Обновляем список: сначала видимые в новом порядке, потом скрытые
+            list.presets.clear()
+            list.presets.addAll(presetsFromTable.map { it.copy() })
+            list.presets.addAll(hiddenPresets)
+            
+            println("ADB_DEBUG:   Updated list ${list.name} with ${presetsFromTable.size} visible + ${hiddenPresets.size} hidden presets")
+        }
+    }
+    
+    /**
      * Синхронизирует изменения из таблицы с временными списками
      */
     private fun syncTableChangesToTempLists() {
-        if (isTableUpdating) {
-            println("ADB_DEBUG: syncTableChangesToTempLists: isTableUpdating=true, skip (global)")
+        println("ADB_DEBUG: syncTableChangesToTempLists called")
+        println("ADB_DEBUG: Current call stack:")
+        Thread.currentThread().stackTrace.take(10).forEach { element ->
+            println("ADB_DEBUG:   at ${element.className}.${element.methodName}(${element.fileName}:${element.lineNumber})")
+        }
+        
+        val context = TableDataSynchronizer.SyncContext(
+            isTableUpdating = isTableUpdating,
+            isSwitchingMode = isSwitchingMode,
+            isSwitchingList = isSwitchingList,
+            isSwitchingDuplicatesFilter = isSwitchingDuplicatesFilter,
+            isPerformingHistoryOperation = isPerformingHistoryOperation,
+            isFirstLoad = isFirstLoad,
+            isShowAllPresetsMode = isShowAllPresetsMode,
+            isHideDuplicatesMode = isHideDuplicatesMode
+        )
+        
+        val syncCheck = tableSynchronizer.canSync(context)
+        if (!syncCheck.canSync) {
+            println("ADB_DEBUG: syncTableChangesToTempLists: ${syncCheck.reason}, skip")
             return
         }
-
-        // Не синхронизируем во время переключения режимов
-        if (isSwitchingMode) {
-            println("ADB_DEBUG: syncTableChangesToTempLists: isSwitchingMode=true, skip")
-            return
-        }
-
-        // Не синхронизируем во время переключения списков
-        if (isSwitchingList) {
-            println("ADB_DEBUG: syncTableChangesToTempLists: isSwitchingList=true, skip")
-            return
-        }
-
-        // Не синхронизируем во время переключения фильтра дубликатов
-        if (isSwitchingDuplicatesFilter) {
-            println("ADB_DEBUG: syncTableChangesToTempLists: isSwitchingDuplicatesFilter=true, skip")
-            return
-        }
-
-        // Не синхронизируем во время выполнения операций истории (undo/redo)
-        if (isPerformingHistoryOperation) {
-            println("ADB_DEBUG: syncTableChangesToTempLists: isPerformingHistoryOperation=true, skip")
-            return
-        }
-
-
 
         println("ADB_DEBUG: syncTableChangesToTempLists - start, isShowAllPresetsMode: $isShowAllPresetsMode")
         println("ADB_DEBUG: syncTableChangesToTempLists - currentPresetList before: ${currentPresetList?.name}, presets: ${currentPresetList?.presets?.size}")
         tempPresetLists.forEach { (k, v) -> println("ADB_DEBUG: TEMP_LIST $k: ${v.name}, presets: ${v.presets.size}") }
-
-        // Не синхронизируем во время первой загрузки и во время фильтрации дубликатов
-        if (isFirstLoad || isSwitchingDuplicatesFilter) {
-            println("ADB_DEBUG: skip sync - first load or switching duplicates filter")
-            return
-        }
 
         // Не синхронизируем при отключении фильтра дубликатов, если количество строк в таблице меньше количества пресетов
         // Это означает, что в таблице показаны только видимые пресеты, а синхронизация испортит скрытые
@@ -772,296 +788,28 @@ class SettingsDialogController(
             }
         }
 
-        // Проверяем количество строк без строки с кнопкой
-        val realRowCount = (0 until tableModel.rowCount).count { row ->
-            val firstColumn = tableModel.getValueAt(row, 0) as? String ?: ""
-            firstColumn != "+"
-        }
-
         if (isShowAllPresetsMode) {
-            // В режиме "Show all presets" — очищаем все списки и распределяем по таблице
-            distributePresetsToTempLists()
-        } else {
-            // В обычном режиме - не затираем если в таблице меньше строк, чем в списке
-            // НО в режиме скрытия дублей нужно синхронизировать даже если таблица пуста
-            if (realRowCount == 0 && currentPresetList?.presets?.isNotEmpty() == true && !isHideDuplicatesMode) {
-                println("ADB_DEBUG: skip sync, table is empty but current list is not (not in hide duplicates mode)")
-                return
-            }
-
-            val tablePresets = tableModel.getPresets()
-            currentPresetList?.let { list ->
-                // Получаем снимок видимых пресетов для текущего списка
-                val visibleSnapshot = visiblePresetsSnapshot[list.name]
-
-                if (isHideDuplicatesMode) {
-                    // В режиме скрытия дубликатов нужно правильно обновить видимые элементы
-                    // и сохранить скрытые дубликаты
-                    val originalPresets = list.presets.map { it.copy() }
-
-                    // Получаем обновленные пресеты из таблицы
-                    // Включаем все пресеты, даже полностью пустые (для поддержки кнопки "+")
-                    val updatedTablePresets = tablePresets
-
-                    println("ADB_DEBUG: syncTableChangesToTempLists - hide duplicates mode")
-                    println("ADB_DEBUG:   original presets count: ${originalPresets.size}")
-                    println("ADB_DEBUG:   updated table presets count: ${updatedTablePresets.size}")
-
-                    // Определяем видимые пресеты в оригинальном списке
-                    val visibleOriginalPresets = mutableListOf<Pair<Int, DevicePreset>>()
-                    val seenKeys = mutableSetOf<String>()
-
-                    originalPresets.forEachIndexed { index, preset ->
-                        val key = if (preset.size.isNotBlank() && preset.dpi.isNotBlank()) {
-                            "${preset.size}|${preset.dpi}"
-                        } else {
-                            "unique_$index"
-                        }
-
-                        if (!seenKeys.contains(key)) {
-                            seenKeys.add(key)
-                            visibleOriginalPresets.add(index to preset)
-                        }
-                    }
-
-                    println("ADB_DEBUG:   visible original presets count: ${visibleOriginalPresets.size}")
-
-                    // Создаем карту для сопоставления старых видимых пресетов с новыми
-                    val updatedPresetsMap = mutableMapOf<Int, DevicePreset>()
-
-                    // Если количество видимых пресетов уменьшилось, значит был удален элемент
-                    if (updatedTablePresets.size < visibleOriginalPresets.size) {
-                        // Находим какой пресет был удален
-                        val deletedCount = visibleOriginalPresets.size - updatedTablePresets.size
-                        println("ADB_DEBUG:   Detected deletion of $deletedCount preset(s)")
-
-                        // Находим индекс удаленного элемента путем сравнения
-                        var deletedVisibleIndex = -1
-                        for (i in visibleOriginalPresets.indices) {
-                            if (i >= updatedTablePresets.size ||
-                                visibleOriginalPresets[i].second.label != updatedTablePresets[i].label) {
-                                deletedVisibleIndex = i
-                                break
-                            }
-                        }
-
-                        println("ADB_DEBUG:   Deleted visible index: $deletedVisibleIndex")
-
-                        // Сопоставляем оставшиеся видимые элементы
-                        var tableIndex = 0
-                        visibleOriginalPresets.forEachIndexed { visibleIndex, (originalIndex, _) ->
-                            if (visibleIndex != deletedVisibleIndex && tableIndex < updatedTablePresets.size) {
-                                updatedPresetsMap[originalIndex] = updatedTablePresets[tableIndex]
-                                tableIndex++
-                            }
-                        }
-                    } else if (updatedTablePresets.size > visibleOriginalPresets.size) {
-                        // Количество элементов увеличилось
-                        val addedCount = updatedTablePresets.size - visibleOriginalPresets.size
-                        println("ADB_DEBUG:   Detected addition of $addedCount preset(s)")
-
-                        // Проверяем если это добавление новых пустых пресетов через кнопку "+"
-                        // Пустые пресеты могут быть в любом месте таблицы, не только в конце
-                        val emptyPresetsInTable = updatedTablePresets.filter { preset ->
-                            preset.label.isBlank() && preset.size.isBlank() && preset.dpi.isBlank()
-                        }
-                        val hasNewEmptyPresets = emptyPresetsInTable.isNotEmpty()
-
-                        if (hasNewEmptyPresets) {
-                            println("ADB_DEBUG:   ${emptyPresetsInTable.size} empty preset(s) detected in table")
-
-                            // Создаем новый список, сохраняя скрытые элементы и обновляя видимые
-                            val newPresets = mutableListOf<DevicePreset>()
-                            var tableIndex = 0
-
-                            // Получаем индексы видимых элементов из visibleOriginalPresets
-                            val visibleIndices = visibleOriginalPresets.map { it.first }.toSet()
-
-                            // Сначала обрабатываем существующие элементы
-                            originalPresets.forEachIndexed { index, originalPreset ->
-                                if (visibleIndices.contains(index) && tableIndex < updatedTablePresets.size) {
-                                    // Это видимый элемент - берем из таблицы
-                                    newPresets.add(updatedTablePresets[tableIndex])
-                                    tableIndex++
-                                } else {
-                                    // Это скрытый дубликат - сохраняем оригинал
-                                    newPresets.add(originalPreset)
-                                }
-                            }
-
-                            // Добавляем оставшиеся элементы из таблицы (новые пустые пресеты)
-                            while (tableIndex < updatedTablePresets.size) {
-                                newPresets.add(updatedTablePresets[tableIndex])
-                                tableIndex++
-                            }
-
-                            // Заменяем список
-                            list.presets.clear()
-                            list.presets.addAll(newPresets)
-
-                            println("ADB_DEBUG:   Updated list now has ${list.presets.size} presets")
-                        } else {
-                            // Это восстановление после undo или другая операция
-                            println("ADB_DEBUG:   Addition/restore detected (not from '+' button)")
-
-                            // НЕ изменяем список здесь - он уже был обновлен в performUndo
-                            // Просто перезагружаем таблицу
-                            println("ADB_DEBUG:   List already updated by performUndo, just reload table")
-
-                            // Заново загружаем таблицу, чтобы отобразить правильный набор видимых элементов
-                            SwingUtilities.invokeLater {
-                                tableModelListener?.let { tableModel.removeTableModelListener(it) }
-                                isTableUpdating = true
-                                try {
-                                    loadPresetsIntoTable()
-                                } finally {
-                                    isTableUpdating = false
-                                    tableModelListener?.let { tableModel.addTableModelListener(it) }
-                                }
-                            }
-                        }
-                        return // Выходим, так как таблица будет перезагружена
-                    } else {
-                        // Обычное обновление без удаления или добавления
-                        visibleOriginalPresets.forEachIndexed { index, (originalIndex, _) ->
-                            if (index < updatedTablePresets.size) {
-                                updatedPresetsMap[originalIndex] = updatedTablePresets[index]
-                            }
-                        }
-                    }
-
-                    // Создаем новый список
-                    val newPresets = mutableListOf<DevicePreset>()
-
-                    // Находим удаленный элемент и его дубликаты
-                    var deletedPresetKey: String? = null
-                    var firstHiddenDuplicateIndex = -1
-
-                    if (updatedTablePresets.size < visibleOriginalPresets.size) {
-                        // Определяем какой элемент был удален
-                        val deletedIndices = mutableListOf<Int>()
-                        visibleOriginalPresets.forEach { (originalIndex, preset) ->
-                            if (!updatedPresetsMap.containsKey(originalIndex)) {
-                                deletedIndices.add(originalIndex)
-                                if (preset.size.isNotBlank() && preset.dpi.isNotBlank()) {
-                                    deletedPresetKey = "${preset.size}|${preset.dpi}"
-                                }
-                            }
-                        }
-
-                        // Если удален элемент с ключом, ищем ВСЕ скрытые дубликаты
-                        val allHiddenDuplicatesIndices = mutableListOf<Int>()
-                        if (deletedPresetKey != null) {
-                            originalPresets.forEachIndexed { index, preset ->
-                                val key = if (preset.size.isNotBlank() && preset.dpi.isNotBlank()) {
-                                    "${preset.size}|${preset.dpi}"
-                                } else {
-                                    null
-                                }
-
-                                if (key == deletedPresetKey && !visibleOriginalPresets.any { it.first == index }) {
-                                    allHiddenDuplicatesIndices.add(index)
-                                    println("ADB_DEBUG:   Found hidden duplicate at index $index: ${preset.label}")
-                                }
-                            }
-                            if (allHiddenDuplicatesIndices.isNotEmpty()) {
-                                firstHiddenDuplicateIndex = allHiddenDuplicatesIndices.first()
-                                println("ADB_DEBUG:   Total hidden duplicates found: ${allHiddenDuplicatesIndices.size}")
-                            }
-                        }
-                    }
-
-                    // Сначала собираем все индексы, которые должны быть в итоговом списке
-                    val finalPresetIndices = mutableListOf<Int>()
-                    val skippedIndices = mutableSetOf<Int>()
-
-                    originalPresets.forEachIndexed { index, originalPreset ->
-                        val wasVisible = visibleOriginalPresets.any { it.first == index }
-                        val isInUpdatedMap = updatedPresetsMap.containsKey(index)
-
-                        println("ADB_DEBUG:   Processing index $index: ${originalPreset.label}, wasVisible=$wasVisible, isInUpdatedMap=$isInUpdatedMap")
-
-                        if (isInUpdatedMap) {
-                            // Это видимый пресет, который остался в таблице
-                            finalPresetIndices.add(index)
-                        } else if (!wasVisible) {
-                            // Это скрытый пресет - всегда сохраняем
-                            finalPresetIndices.add(index)
-                        } else {
-                            // Это был видимый пресет, который удалили
-                            skippedIndices.add(index)
-                        }
-                    }
-
-                    // Если были удалены видимые элементы и есть скрытые дубликаты,
-                    // то первый скрытый дубликат должен стать видимым
-                    if (skippedIndices.isNotEmpty() && firstHiddenDuplicateIndex >= 0) {
-                        // Убираем первый скрытый дубликат из итогового списка,
-                        // так как он станет видимым вместо удаленного
-                        // Но НЕ делаем этого, если этот дубликат уже в таблице
-                        if (!updatedPresetsMap.containsKey(firstHiddenDuplicateIndex)) {
-                            // Ничего не делаем - дубликат уже в finalPresetIndices
-                            println("ADB_DEBUG:   First hidden duplicate at index $firstHiddenDuplicateIndex will become visible")
-                        }
-                    }
-
-                    // Теперь собираем итоговый список
-                    finalPresetIndices.forEach { index ->
-                        if (updatedPresetsMap.containsKey(index)) {
-                            // Берем обновленную версию из таблицы
-                            val updatedPreset = updatedPresetsMap[index]!!
-                            newPresets.add(updatedPreset)
-                            println("ADB_DEBUG:   Added updated preset from index $index: ${updatedPreset.label}")
-                        } else {
-                            // Берем оригинальную версию
-                            val originalPreset = originalPresets[index]
-                            newPresets.add(originalPreset)
-                            println("ADB_DEBUG:   Added original preset from index $index: ${originalPreset.label}")
-                        }
-                    }
-
-                    // Заменяем список
-                    list.presets.clear()
-                    list.presets.addAll(newPresets)
+            presetDistributor.distributePresetsToTempLists(
+                tableModel = tableModel,
+                tempPresetLists = tempPresetLists,
+                isHideDuplicatesMode = isHideDuplicatesMode,
+                getListNameAtRow = ::getListNameAtRow,
+                saveVisiblePresetsSnapshotForAllLists = if (isDragAndDropInProgress) {
+                    // Не создаем новый снимок во время drag and drop
+                    {}
                 } else {
-                    // В обычном режиме без скрытия дубликатов
-                    // Проверяем, есть ли снимок скрытых дубликатов
-                    if (visibleSnapshot != null && !isFirstLoad && !isSwitchingDuplicatesFilter) {
-                        // Если есть снимок, значит дубликаты были скрыты ранее
-                        val originalPresets = list.presets.map { it.copy() }
-                        val updatedTablePresets = tablePresets.filter { preset ->
-                            preset.label.isNotBlank() || preset.size.isNotBlank() || preset.dpi.isNotBlank()
-                        }
-
-                        // Создаем новый список с учетом снимка
-                        val newPresets = mutableListOf<DevicePreset>()
-                        var tableIndex = 0
-
-                        originalPresets.forEach { originalPreset ->
-                            val presetKey = "${originalPreset.label}|${originalPreset.size}|${originalPreset.dpi}"
-                            if (visibleSnapshot.contains(presetKey) && tableIndex < updatedTablePresets.size) {
-                                // Этот пресет был видим - обновляем из таблицы
-                                newPresets.add(updatedTablePresets[tableIndex])
-                                tableIndex++
-                            } else {
-                                // Этот пресет был скрыт - сохраняем оригинал
-                                newPresets.add(originalPreset)
-                            }
-                        }
-
-                        // Заменяем список
-                        list.presets.clear()
-                        list.presets.addAll(newPresets)
-                    } else {
-                        // Обычное обновление без скрытых дубликатов
-                        list.presets.clear()
-                        // Включаем все пресеты, даже полностью пустые (для поддержки кнопки "+")
-                        list.presets.addAll(tablePresets)
-                    }
+                    ::saveVisiblePresetsSnapshotForAllLists
+                }
+            )
+        } else {
+            currentPresetList?.let { list ->
+                // Всегда используем tableSynchronizer для корректной синхронизации
+                tableSynchronizer.syncCurrentList(tableModel, list, context) {
+                    loadPresetsIntoTable()
                 }
             }
         }
-
+        
         println("ADB_DEBUG: syncTableChangesToTempLists - after, currentPresetList: ${currentPresetList?.name}, presets: ${currentPresetList?.presets?.size}")
         tempPresetLists.forEach { (k, v) -> println("ADB_DEBUG: TEMP_LIST $k: ${v.name}, presets: ${v.presets.size}") }
 
@@ -1070,44 +818,43 @@ class SettingsDialogController(
             // В режиме Show all всегда проверяем изменение статуса дублей
             // так как дубликаты могут быть в разных списках
             // Также всегда обновляем если был вызван distributePresetsToTempLists (в режиме Show all)
+            // НО не во время drag and drop операции
             if (isShowAllPresetsMode) {
-                println("ADB_DEBUG: In Show all mode with hide duplicates, always reload table after sync")
-                // Перезагружаем таблицу для отображения изменений
-                SwingUtilities.invokeLater {
-                    // Временно отключаем слушатель модели, чтобы избежать рекурсии
-                    tableModelListener?.let { tableModel.removeTableModelListener(it) }
-
-                    isTableUpdating = true
-                    try {
-                        loadPresetsIntoTable()
-                    } finally {
-                        isTableUpdating = false
-                        // Возвращаем слушатель на место
-                        tableModelListener?.let { tableModel.addTableModelListener(it) }
-                    }
+                println("ADB_DEBUG: In Show all mode with hide duplicates, isDragAndDropInProgress = $isDragAndDropInProgress")
+                if (!isDragAndDropInProgress) {
+                    println("ADB_DEBUG: Reloading table after sync")
+                    // Перезагружаем таблицу для отображения изменений
+                    reloadTableWithoutListeners()
+                } else {
+                    println("ADB_DEBUG: Skipping table reload - drag and drop in progress")
+                    // Флаг будет сброшен в конце метода
                 }
             } else if (checkIfDuplicateStatusChanged()) {
                 println("ADB_DEBUG: Duplicate status changed after edit, reloading table")
                 // Перезагружаем таблицу для отображения изменений
-                SwingUtilities.invokeLater {
-                    // Временно отключаем слушатель модели, чтобы избежать рекурсии
-                    tableModelListener?.let { tableModel.removeTableModelListener(it) }
-
-                    isTableUpdating = true
-                    try {
-                        loadPresetsIntoTable()
-                    } finally {
-                        isTableUpdating = false
-                        // Возвращаем слушатель на место
-                        tableModelListener?.let { tableModel.addTableModelListener(it) }
-                    }
-                }
+                reloadTableWithoutListeners()
             }
         }
 
         // Обновляем снимок видимых пресетов после синхронизации
         if (isHideDuplicatesMode) {
             saveVisiblePresetsSnapshot()
+        }
+
+        // Сбрасываем флаг drag and drop после всех операций
+        if (isDragAndDropInProgress) {
+            // Сохраняем состояние после операции для режима Hide Duplicates
+            if (isHideDuplicatesMode) {
+                val lastCommand = historyManager.getLastCommand()
+                if (lastCommand is io.github.qavlad.adbrandomizer.ui.commands.PresetMoveCommand) {
+                    lastCommand.saveStateAfter()
+                }
+            }
+            
+            SwingUtilities.invokeLater {
+                println("ADB_DEBUG: Setting isDragAndDropInProgress = false after sync")
+                isDragAndDropInProgress = false
+            }
         }
     }
 
@@ -1130,7 +877,7 @@ class SettingsDialogController(
                 if (firstColumn != "+") {
                     val preset = tableModel.getPresetAt(row)
                     if (preset != null && preset.size.isNotBlank() && preset.dpi.isNotBlank()) {
-                        val key = "${preset.size}|${preset.dpi}"
+                        val key = createPresetKey(preset)
                         if (seenKeys.contains(key)) {
                             // Найден дубликат в таблице, который должен быть скрыт
                             println("ADB_DEBUG: Found duplicate in table that should be hidden (Show all mode): $key")
@@ -1164,7 +911,7 @@ class SettingsDialogController(
                     if (firstColumn != "+") {
                         val preset = tableModel.getPresetAt(row)
                         if (preset != null && preset.size.isNotBlank() && preset.dpi.isNotBlank()) {
-                            val key = "${preset.size}|${preset.dpi}"
+                            val key = createPresetKey(preset)
                             if (seenKeys.contains(key)) {
                                 // Найден дубликат в таблице, который должен быть скрыт
                                 println("ADB_DEBUG: Found duplicate in table that should be hidden: $key")
@@ -1194,61 +941,74 @@ class SettingsDialogController(
      * @return количество дубликатов (не считая первое вхождение)
      */
     private fun findDuplicatesInList(presets: List<DevicePreset>): Set<Int> {
-        val seen = mutableSetOf<String>()
-        val duplicateIndices = mutableSetOf<Int>()
-
-        presets.forEachIndexed { index, preset ->
-            if (preset.size.isNotBlank() && preset.dpi.isNotBlank()) {
-                val key = "${preset.size}|${preset.dpi}"
-                if (seen.contains(key)) {
-                    duplicateIndices.add(index)
-                } else {
-                    seen.add(key)
-                }
-            }
-        }
-
-        return duplicateIndices
+        return duplicateManager.findDuplicateIndices(presets)
     }
 
     /**
      * Удаляет пресет из временного списка
+     * @return Pair<Boolean, Int?> - успешность удаления и реальный индекс в списке (если отличается от row)
      */
-    fun deletePresetFromTempList(row: Int): Boolean {
-        // В режиме скрытия дубликатов не удаляем элемент здесь,
-        // чтобы syncTableChangesToTempLists мог правильно обработать удаление
-        if (isHideDuplicatesMode) {
-            println("ADB_DEBUG: deletePresetFromTempList - skipping deletion in hide duplicates mode")
-            return true // Возвращаем true, чтобы продолжить обработку
-        }
-
+    fun deletePresetFromTempList(row: Int): Pair<Boolean, Int?> {
         val preset = getPresetAtRow(row)
 
         if (isShowAllPresetsMode) {
-            val listName = getListNameAtRow(row) ?: return false
+            val listName = getListNameAtRow(row) ?: return Pair(false, null)
             // Находим временный список по имени
-            val targetList = tempPresetLists.values.find { it.name == listName } ?: return false
+            val targetList = tempPresetLists.values.find { it.name == listName } ?: return Pair(false, null)
 
-            // Удаляем пресет из временного списка
+            // В режиме Hide Duplicates нужно найти правильный индекс в целевом списке
+            if (isHideDuplicatesMode) {
+                // Находим все пресеты в списке, которые соответствуют удаляемому
+                val matchingIndices = targetList.presets.mapIndexedNotNull { index, p ->
+                    if (p.size == preset.size && p.dpi == preset.dpi) index else null
+                }
+                
+                // Удаляем первый найденный пресет с такими size и dpi
+                if (matchingIndices.isNotEmpty()) {
+                    val indexToRemove = matchingIndices.first()
+                    val removedPreset = targetList.presets.removeAt(indexToRemove)
+                    println("ADB_DEBUG: deletePresetFromTempList - removed preset '${removedPreset.label}' from list $listName at index $indexToRemove (hide duplicates mode)")
+                    return Pair(true, indexToRemove)
+                }
+                return Pair(false, null)
+            }
+
+            // В обычном режиме удаляем по точному совпадению
             val removed = targetList.presets.removeIf {
                 it.label == preset.label &&
                         it.size == preset.size &&
                         it.dpi == preset.dpi
             }
             println("ADB_DEBUG: deletePresetFromTempList - removed from list $listName: $removed")
-            return removed
+            return Pair(removed, null)
         } else {
             // В обычном режиме удаляем из текущего списка
             if (currentPresetList != null) {
-                val removed = currentPresetList!!.presets.removeIf {
-                    it.label == preset.label &&
-                            it.size == preset.size &&
-                            it.dpi == preset.dpi
+                // В режиме Hide Duplicates нужно учитывать, что в таблице показаны не все пресеты
+                if (isHideDuplicatesMode) {
+                    // Находим индексы видимых пресетов
+                    val duplicateIndices = duplicateManager.findDuplicateIndices(currentPresetList!!.presets)
+                    val visibleIndices = currentPresetList!!.presets.indices.filter { !duplicateIndices.contains(it) }
+                    
+                    // Проверяем, что row в пределах видимых пресетов
+                    if (row < visibleIndices.size) {
+                        val actualIndex = visibleIndices[row]
+                        val removedPreset = currentPresetList!!.presets.removeAt(actualIndex)
+                        println("ADB_DEBUG: deletePresetFromTempList - removed preset '${removedPreset.label}' from current list at index $actualIndex (hide duplicates mode)")
+                        return Pair(true, actualIndex)
+                    }
+                    return Pair(false, null)
                 }
-                println("ADB_DEBUG: deletePresetFromTempList - removed from current list ${currentPresetList?.name}: $removed")
-                return removed
+                
+                // В обычном режиме удаляем по индексу, чтобы не удалить несколько одинаковых
+                if (row >= 0 && row < currentPresetList!!.presets.size) {
+                    val removedPreset = currentPresetList!!.presets.removeAt(row)
+                    println("ADB_DEBUG: deletePresetFromTempList - removed preset '${removedPreset.label}' from current list at index $row")
+                    return Pair(true, null)
+                }
+                return Pair(false, null)
             }
-            return false
+            return Pair(false, null)
         }
     }
 
@@ -1263,69 +1023,18 @@ class SettingsDialogController(
 
         tempPresetLists.clear()
         originalPresetLists.clear()
-        visiblePresetsSnapshot.clear()
-        presetsOrderSnapshot.clear()
-
-        // Загружаем все списки и создаем их копии
-        val allMetadata = PresetListService.getAllListsMetadata()
-        println("ADB_DEBUG: Found ${allMetadata.size} lists")
-
-        // Включаем кэш для массовой загрузки
-        PresetListService.enableCache()
-        try {
-            allMetadata.forEach { metadata ->
-                val list = PresetListService.loadPresetList(metadata.id)
-                if (list != null) {
-                    // Создаем глубокую копию списка для работы
-                    val copyList = PresetList(
-                        id = list.id,
-                        name = list.name,
-                        presets = list.presets.map { preset ->
-                            DevicePreset(
-                                label = preset.label,
-                                size = preset.size,
-                                dpi = preset.dpi
-                            )
-                        }.toMutableList()
-                    )
-                    tempPresetLists[list.id] = copyList
-
-                    // Создаем еще одну копию для сохранения исходного состояния
-                    val originalList = PresetList(
-                        id = list.id,
-                        name = list.name,
-                        presets = list.presets.map { preset ->
-                            DevicePreset(
-                                label = preset.label,
-                                size = preset.size,
-                                dpi = preset.dpi
-                            )
-                        }.toMutableList()
-                    )
-                    originalPresetLists[list.id] = originalList
-                }
-            }
-        } finally {
-            // Выключаем кэш после массовой загрузки
-            PresetListService.disableCache()
-        }
-
-        // Получаем активный список из сервиса
-        val activeList = PresetListService.getActivePresetList()
-        println("ADB_DEBUG: Active list from service: ${activeList?.name}, id: ${activeList?.id}")
-
-        // Находим соответствующий временный список
-        if (activeList != null) {
-            currentPresetList = tempPresetLists[activeList.id]
-            println("ADB_DEBUG: Set currentPresetList to temp list: ${currentPresetList?.name}, presets: ${currentPresetList?.presets?.size}")
-        }
-
-        // Если currentPresetList все еще null (нет активного списка), выбираем первый список
-        if (currentPresetList == null && tempPresetLists.isNotEmpty()) {
-            currentPresetList = tempPresetLists.values.first()
-            println("ADB_DEBUG: Set currentPresetList to first available: ${currentPresetList?.name}")
-        }
-
+        duplicateManager.clearSnapshots()
+        
+        // Загружаем все списки через StateManager
+        val loadedLists = stateManager.initializeTempPresetLists()
+        tempPresetLists.putAll(loadedLists)
+        
+        // Создаем копии для отката
+        originalPresetLists.putAll(snapshotManager.saveOriginalState(tempPresetLists))
+        
+        // Определяем начальный текущий список
+        currentPresetList = stateManager.determineInitialCurrentList(tempPresetLists)
+        
         println("ADB_DEBUG: initializeTempPresetLists - done. Current list: ${currentPresetList?.name}, temp lists count: ${tempPresetLists.size}")
     }
 
@@ -1333,301 +1042,39 @@ class SettingsDialogController(
      * Загружает пресеты в таблицу в зависимости от текущего режима
      */
     private fun loadPresetsIntoTable() {
-        println("ADB_DEBUG: loadPresetsIntoTable - currentPresetList: ${currentPresetList?.name}, isShowAllPresetsMode: $isShowAllPresetsMode")
-        println("ADB_DEBUG: loadPresetsIntoTable - currentPresetList size: ${currentPresetList?.presets?.size}")
-        println("ADB_DEBUG: loadPresetsIntoTable - isSwitchingMode: $isSwitchingMode")
-        println("ADB_DEBUG: loadPresetsIntoTable - isSwitchingDuplicatesFilter: $isSwitchingDuplicatesFilter")
-
-        // Сохраняем снимок видимых пресетов перед обновлением таблицы
-        // только если мы уже в режиме скрытия дубликатов и не переключаемся
-        if (isHideDuplicatesMode && !isSwitchingDuplicatesFilter && !isFirstLoad) {
-            saveVisiblePresetsSnapshot()
-        }
-
-        // При переключении из Show all в обычный режим, убедимся что мы используем правильные данные
-        if (!isShowAllPresetsMode && currentPresetList != null) {
-            println("ADB_DEBUG: Loading presets from current list: ${currentPresetList?.name}")
-            tempPresetLists[currentPresetList?.id]?.let { tempList ->
-                println("ADB_DEBUG: Temp list has ${tempList.presets.size} presets")
-                tempList.presets.forEach { preset ->
-                    println("ADB_DEBUG: - ${preset.label} | ${preset.size} | ${preset.dpi}")
-                }
-            }
-        }
-
-        // Устанавливаем флаг блокировки обновлений только если он еще не установлен
-        val wasTableUpdating = isTableUpdating
-        if (!wasTableUpdating) {
-            isTableUpdating = true
-        }
-
-        try {
-            // Сначала настраиваем колонки в зависимости от режима
-            setupTableColumns()
-
-            tableModel.rowCount = 0
-
-            if (isShowAllPresetsMode) {
-                // В режиме "Show all presets" собираем все пресеты со всех списков
-                val allPresetsWithListNames = mutableListOf<Pair<String, DevicePreset>>()
-
-                // Если есть сохраненный порядок, используем его
-                val savedOrder = PresetListService.getShowAllPresetsOrder()
-                if (savedOrder.isNotEmpty()) {
-                    // Сначала загружаем пресеты в сохраненном порядке
-                    val addedPresets = mutableSetOf<String>()
-
-                    savedOrder.forEach { key ->
-                        val parts = key.split(":")
-                        if (parts.size >= 4) {
-                            val listName = parts[0]
-                            val label = parts[1]
-                            val size = parts[2]
-                            val dpi = parts[3]
-
-                            // Находим соответствующий пресет
-                            tempPresetLists.values.find { it.name == listName }?.let { list ->
-                                list.presets.find { preset ->
-                                    preset.label == label && preset.size == size && preset.dpi == dpi
-                                }?.let { preset ->
-                                    allPresetsWithListNames.add(listName to preset)
-                                    addedPresets.add(key)
-                                }
-                            }
-                        }
-                    }
-
-                    // Теперь добавляем все пресеты, которых нет в сохраненном порядке
-                    // Важно: добавляем их в правильном порядке, сохраняя позиции внутри списков
-                    tempPresetLists.values.forEach { list ->
-
-                        // Проходим по всем пресетам списка в их оригинальном порядке
-                        list.presets.forEach { preset ->
-                            val key = "${list.name}:${preset.label}:${preset.size}:${preset.dpi}"
-
-                            if (!addedPresets.contains(key)) {
-                                // Находим позицию для вставки
-                                var insertPosition = allPresetsWithListNames.size
-
-                                // Ищем позицию после последнего добавленного элемента этого списка
-                                for (i in allPresetsWithListNames.indices.reversed()) {
-                                    if (allPresetsWithListNames[i].first == list.name) {
-                                        insertPosition = i + 1
-                                        break
-                                    }
-                                }
-
-                                // Вставляем на найденную позицию
-                                allPresetsWithListNames.add(insertPosition, list.name to preset)
-                                addedPresets.add(key)
-                            }
-                        }
-                    }
-                } else {
-                    // Если сохраненного порядка нет, используем обычный порядок
-                    tempPresetLists.values.forEach { list ->
-                        list.presets.forEach { preset ->
-                            allPresetsWithListNames.add(list.name to preset)
-                        }
-                    }
-                }
-
-                // Фильтруем дубликаты если включена галка "Hide duplicates"
-                val presetsToShow = if (isHideDuplicatesMode) {
-                    val duplicatesToHide = findGlobalDuplicates(allPresetsWithListNames)
-                    allPresetsWithListNames.filterIndexed { index, (_, preset) ->
-                        val key = "${preset.size}|${preset.dpi}#$index"
-                        !duplicatesToHide.contains(key)
-                    }
-                } else {
-                    allPresetsWithListNames
-                }
-
-                // Добавляем пресеты в таблицу
-                presetsToShow.forEachIndexed { idx, (listName, preset) ->
-                    val rowVector = Vector<Any>()
-                    rowVector.add("☰")
-                    rowVector.add(idx + 1)
-                    rowVector.add(preset.label)
-                    rowVector.add(preset.size)
-                    rowVector.add(preset.dpi)
-                    rowVector.add("Delete")
-                    rowVector.add(listName) // Добавляем имя списка в колонку List
-                    tableModel.addRow(rowVector)
-                }
-            } else {
-                // В обычном режиме загружаем только текущий список
-                val presets = currentPresetList?.presets ?: emptyList()
-
-                // Фильтруем дубликаты если включена галка "Hide duplicates"
-                val presetsToShow = if (isHideDuplicatesMode) {
-                    val duplicatesToHide = findLocalDuplicates(presets)
-                    presets.filterIndexed { index, preset ->
-                        val key = "${preset.size}|${preset.dpi}#$index"
-                        !duplicatesToHide.contains(key)
-                    }
-                } else {
-                    presets
-                }
-
-                // Добавляем пресеты в таблицу
-                presetsToShow.forEachIndexed { idx, preset ->
-                    tableModel.addRow(arrayOf<Any>(
-                        "☰",
-                        idx + 1,
-                        preset.label,
-                        preset.size,
-                        preset.dpi,
-                        "Delete"
-                    ))
-                }
-            }
-
-            // Добавляем строку с кнопкой только в обычном режиме
-            if (!isShowAllPresetsMode) {
-                addButtonRow()
-            }
-
-            println("ADB_DEBUG: loadPresetsIntoTable - loaded ${tableModel.rowCount} rows")
-
-            // При переключении списка временно устанавливаем флаг первой загрузки
-            if (isSwitchingList && !isFirstLoad) {
-                SwingUtilities.invokeLater {
-                    // Сбрасываем после полной загрузки таблицы
-                    isSwitchingList = false
-                }
-            }
-        } finally {
-            isTableUpdating = false
-        }
+        tableLoader.loadPresetsIntoTable(
+            tableModel = tableModel,
+            currentPresetList = currentPresetList,
+            tempPresetLists = tempPresetLists,
+            isShowAllMode = isShowAllPresetsMode,
+            isHideDuplicatesMode = isHideDuplicatesMode,
+            isFirstLoad = isFirstLoad,
+            isSwitchingList = isSwitchingList,
+            isSwitchingMode = isSwitchingMode,
+            isSwitchingDuplicatesFilter = isSwitchingDuplicatesFilter,
+            onTableUpdating = { updating -> isTableUpdating = updating },
+            onAddButtonRow = { addButtonRow() }
+        )
     }
 
     /**
      * Добавляет специальную строку с кнопкой добавления
      */
     private fun addButtonRow() {
-        val buttonRowVector = Vector<Any>()
-        buttonRowVector.add("+") // Специальный маркер для рендерера
-        buttonRowVector.add("") // Пустой номер
-        buttonRowVector.add("") // Пустой label
-        buttonRowVector.add("") // Пустой size
-        buttonRowVector.add("") // Пустой dpi
-        buttonRowVector.add("") // Пустая кнопка удаления
-
-        // Добавляем пустое значение для колонки List если модель имеет 7 колонок
-        if (tableModel.columnCount == 7) {
-            buttonRowVector.add("")
-        }
-
-        tableModel.addRow(buttonRowVector)
-        // Теперь обновляем номера строк для всех строк кроме строки с кнопкой
+        tableLoader.addButtonRow(tableModel, isShowAllPresetsMode)
         tableModel.updateRowNumbers()
     }
 
-    /**
-     * Находит дубликаты среди пресетов по размеру и DPI
-     * Возвращает Set ключей, которые нужно скрыть (все дубликаты кроме первого)
-     */
-    private fun findDuplicates(items: List<Pair<Int, DevicePreset>>): Set<String> {
-        val seen = mutableSetOf<String>()
-        val duplicatesToHide = mutableSetOf<String>()
-
-        items.forEach { (index, preset) ->
-            if (preset.size.isNotBlank() && preset.dpi.isNotBlank()) {
-                val key = "${preset.size}|${preset.dpi}"
-                if (seen.contains(key)) {
-                    // Это дубликат - добавляем в список для скрытия с индексом
-                    duplicatesToHide.add("$key#$index")
-                } else {
-                    // Первое вхождение - запоминаем
-                    seen.add(key)
-                }
-            }
-        }
-
-        return duplicatesToHide
-    }
 
     /**
      * Находит дубликаты в глобальном списке пресетов
      */
-    private fun findGlobalDuplicates(allPresets: List<Pair<String, DevicePreset>>): Set<String> {
-        val indexedPresets = allPresets.withIndex().map { (index, presetPair) ->
-            index to presetPair.second
-        }
-        return findDuplicates(indexedPresets)
-    }
-
-    /**
-     * Находит дубликаты в локальном списке пресетов
-     */
-    private fun findLocalDuplicates(presets: List<DevicePreset>): Set<String> {
-        val indexedPresets = presets.withIndex().map { (index, preset) ->
-            index to preset
-        }
-        return findDuplicates(indexedPresets)
-    }
 
     /**
      * Сохраняет снимок видимых пресетов для всех списков перед переключением в режим Show all
      */
     private fun saveVisiblePresetsSnapshotForAllLists() {
-        println("ADB_DEBUG: saveVisiblePresetsSnapshotForAllLists called")
-        visiblePresetsSnapshot.clear()
-        presetsOrderSnapshot.clear()
-
-        if (!isHideDuplicatesMode) {
-            return
-        }
-
-        // Если мы еще не в режиме Show all, нужно загрузить все списки
-        val listsToProcess = tempPresetLists.ifEmpty {
-            // Загружаем все списки для сохранения снимка
-            val allLists = mutableMapOf<String, PresetList>()
-            val allMetadata = PresetListService.getAllListsMetadata()
-            allMetadata.forEach { metadata ->
-                val list = PresetListService.loadPresetList(metadata.id)
-                if (list != null) {
-                    allLists[list.id] = list
-                }
-            }
-            allLists
-        }
-
-        // Проходим по всем спискам и сохраняем их видимые пресеты и полный порядок
-        listsToProcess.forEach { (_, list) ->
-            val visiblePresetKeys = mutableListOf<String>()
-            val allPresetKeys = mutableListOf<String>()
-            val seenKeys = mutableSetOf<String>()
-
-            list.presets.forEach { preset ->
-                val key = if (preset.size.isNotBlank() && preset.dpi.isNotBlank()) {
-                    "${preset.size}|${preset.dpi}"
-                } else {
-                    "unique_${preset.label}"
-                }
-
-                val presetKey = "${preset.label}|${preset.size}|${preset.dpi}"
-                allPresetKeys.add(presetKey)
-
-                // Первое вхождение каждой комбинации size|dpi считается видимым
-                if (!seenKeys.contains(key)) {
-                    seenKeys.add(key)
-                    visiblePresetKeys.add(presetKey)
-                    println("ADB_DEBUG:   ${list.name} - visible: $presetKey")
-                } else {
-                    println("ADB_DEBUG:   ${list.name} - hidden duplicate: $presetKey")
-                }
-            }
-
-            visiblePresetsSnapshot[list.name] = visiblePresetKeys
-            presetsOrderSnapshot[list.name] = allPresetKeys
-        }
-
-        println("ADB_DEBUG: Saved snapshot for all lists:")
-        visiblePresetsSnapshot.forEach { (listName, presets) ->
-            println("ADB_DEBUG:   $listName: ${presets.size} visible presets")
-        }
+        snapshotManager.saveVisiblePresetsSnapshotForAllLists(tempPresetLists)
     }
 
     /**
@@ -1635,116 +1082,33 @@ class SettingsDialogController(
      * Используется для корректного сопоставления при отключении фильтра дубликатов
      */
     private fun saveVisiblePresetsSnapshot() {
-        println("ADB_DEBUG: saveVisiblePresetsSnapshot called, isHideDuplicatesMode=$isHideDuplicatesMode")
-
-        if (!isHideDuplicatesMode) {
-            visiblePresetsSnapshot.clear()
-            presetsOrderSnapshot.clear()
-            return
-        }
-
-        if (isShowAllPresetsMode) {
-            // В режиме Show all, если снимок уже сохранен saveVisiblePresetsSnapshotForAllLists,
-            // не перезаписываем его
-            if (visiblePresetsSnapshot.isNotEmpty()) {
-                println("ADB_DEBUG: Snapshot already exists in Show all mode, not overwriting")
-                println("ADB_DEBUG: Current snapshot has ${visiblePresetsSnapshot.size} lists")
-                return
-            }
-
-            // В режиме Show all проходим по всем строкам таблицы
-            val listVisiblePresets = mutableMapOf<String, MutableList<String>>()
-
-            for (i in 0 until tableModel.rowCount) {
-                val firstColumn = tableModel.getValueAt(i, 0) as? String ?: ""
-                if (firstColumn == "+") continue
-
-                val listName = getListNameAtRow(i) ?: continue
-                val preset = getPresetAtRow(i)
-
-                if (preset.label.isBlank() && preset.size.isBlank() && preset.dpi.isBlank()) {
-                    continue
-                }
-
-                val presetKey = "${preset.label}|${preset.size}|${preset.dpi}"
-                listVisiblePresets.getOrPut(listName) { mutableListOf() }.add(presetKey)
-            }
-
-            // Сохраняем снимок
-            listVisiblePresets.forEach { (listName, presetKeys) ->
-                visiblePresetsSnapshot[listName] = presetKeys.toList()
-            }
-        } else {
-            // В обычном режиме сохраняем только для текущего списка
-            currentPresetList?.let { list ->
-                val visiblePresetKeys = mutableListOf<String>()
-
-                println("ADB_DEBUG: Saving snapshot for list: ${list.name}")
-
-                for (i in 0 until tableModel.rowCount) {
-                    val firstColumn = tableModel.getValueAt(i, 0) as? String ?: ""
-                    if (firstColumn == "+") continue
-
-                    val preset = getPresetAtRow(i)
-
-                    if (preset.label.isBlank() && preset.size.isBlank() && preset.dpi.isBlank()) {
-                        continue
-                    }
-
-                    val presetKey = "${preset.label}|${preset.size}|${preset.dpi}"
-                    println("ADB_DEBUG:   Adding to snapshot: $presetKey")
-                    visiblePresetKeys.add(presetKey)
-                }
-
-                visiblePresetsSnapshot[list.name] = visiblePresetKeys
-            }
-        }
-
-        println("ADB_DEBUG: Saved visible presets snapshot:")
-        visiblePresetsSnapshot.forEach { (listName, presets) ->
-            println("ADB_DEBUG:   $listName: ${presets.size} visible presets")
-            presets.forEach { preset ->
-                println("ADB_DEBUG:     - $preset")
-            }
-        }
+        snapshotManager.saveVisiblePresetsSnapshot(currentPresetList)
     }
 
     // === Обработчики событий ===
 
     fun handleCellClick(row: Int, column: Int, clickCount: Int) {
+        // Проверяем флаг удаления
+        if (isProcessingDelete) {
+            println("ADB_DEBUG: handleCellClick ignored - delete in progress")
+            return
+        }
+        
         if (row >= 0 && column >= 0) {
-            // Проверяем, является ли это строкой с кнопкой
-            val isButtonRow = if (row < tableModel.rowCount) {
-                tableModel.getValueAt(row, 0) == "+"
-            } else {
-                false
-            }
-
-            // Не позволяем выбирать строку с кнопкой
-            if (isButtonRow) {
-                return
-            }
-
-            val oldSelectedRow = hoverState.selectedTableRow
-            val oldSelectedColumn = hoverState.selectedTableColumn
-
-            val newSelectedColumn = if (column in 2..4) column else -1
-            hoverState = hoverState.withTableSelection(row, newSelectedColumn)
-
-            if (oldSelectedRow >= 0 && oldSelectedColumn >= 0) {
-                val oldRect = table.getCellRect(oldSelectedRow, oldSelectedColumn, false)
-                table.repaint(oldRect)
-            }
-
-            val newRect = table.getCellRect(row, column, false)
-            table.repaint(newRect)
-
-            table.requestFocus()
-
-            if (clickCount == 2 && column in 2..4) {
-                table.editCellAt(row, column)
-                table.editorComponent?.requestFocus()
-            }
+            tableEventHandler.handleCellClick(
+                table = table,
+                tableModel = tableModel,
+                row = row,
+                column = column,
+                clickCount = clickCount,
+                onApplyPreset = { preset, setSize, setDpi ->
+                    if (project != null) {
+                        PresetApplicationService.applyPreset(project, preset, setSize, setDpi)
+                        refreshTable()
+                    }
+                },
+                onAddNewPreset = { addNewPreset() }
+            )
         } else {
             val oldSelectedRow = hoverState.selectedTableRow
             val oldSelectedColumn = hoverState.selectedTableColumn
@@ -1775,7 +1139,9 @@ class SettingsDialogController(
     }
 
     fun onRowMoved(fromIndex: Int, toIndex: Int) {
-        historyManager.addPresetMove(fromIndex, toIndex)
+        val orderAfter = tableModel.getPresets().map { it.label }
+
+        historyManager.addPresetMove(fromIndex, toIndex, orderAfter)
         historyManager.onRowMoved(fromIndex, toIndex)
 
         if (hoverState.selectedTableRow == fromIndex) {
@@ -1792,695 +1158,135 @@ class SettingsDialogController(
             }
         }
 
-        // Не сохраняем порядок при перемещении - только при Save
-
-        refreshTable()
+        // В режиме Show all нужно сохранить новый порядок для правильной работы
+        if (isShowAllPresetsMode) {
+            saveShowAllPresetsOrder()
+            
+            // Важно: после drag and drop нужно обновить порядок в tempPresetLists
+            // чтобы снимок создавался с правильным порядком
+            if (isHideDuplicatesMode) {
+                // Синхронизируем tempPresetLists с актуальным состоянием таблицы
+                syncTableChangesToTempListsAfterDragDrop()
+                // Теперь создаем снимок с правильным порядком
+                saveVisiblePresetsSnapshotForAllLists()
+            }
+        }
+        
+        // Не вызываем refreshTable() так как перемещение уже выполнено в таблице
     }
 
     fun showContextMenu(e: MouseEvent) {
-        val row = table.rowAtPoint(e.point)
-        if (row == -1) return
-
-        // Проверяем, что это не строка с кнопкой
-        if (row >= 0 && row < tableModel.rowCount) {
-            val firstColumnValue = tableModel.getValueAt(row, 0)
-            if (firstColumnValue == "+") {
-                return // Не показываем контекстное меню для строки с кнопкой
-            }
-        }
-
-        val preset = getPresetAtRow(row)
-        val popupMenu = JPopupMenu()
-
-        // В режиме "Show all presets" не показываем опцию дублирования
-        if (!isShowAllPresetsMode) {
-            val shortcut = if (SystemInfo.isMac) "Cmd+D" else "Ctrl+D"
-            val duplicateItem = JMenuItem("Duplicate ($shortcut)")
-            duplicateItem.addActionListener {
-                duplicatePreset(row)
-            }
-            popupMenu.add(duplicateItem)
-            popupMenu.addSeparator()
-        }
-
-        if (preset.dpi.isNotBlank()) {
-            val applyDpiItem = JMenuItem("Apply DPI only (${preset.dpi})")
-            applyDpiItem.addActionListener {
-                applyPresetFromRow(row, setSize = false, setDpi = true)
-            }
-            popupMenu.add(applyDpiItem)
-        }
-
-        if (preset.size.isNotBlank()) {
-            val applySizeItem = JMenuItem("Apply Size only (${preset.size})")
-            applySizeItem.addActionListener {
-                applyPresetFromRow(row, setSize = true, setDpi = false)
-            }
-            popupMenu.add(applySizeItem)
-        }
-
-        if (preset.dpi.isNotBlank() && preset.size.isNotBlank()) {
-            val applyBothItem = JMenuItem("Apply Size and DPI")
-            applyBothItem.addActionListener {
-                applyPresetFromRow(row, setSize = true, setDpi = true)
-            }
-            popupMenu.add(applyBothItem)
-        }
-
-        if (popupMenu.componentCount > 0) {
-            popupMenu.show(e.component, e.x, e.y)
-        }
+        tableEventHandler.showContextMenu(
+            e = e,
+            table = table,
+            tableModel = tableModel,
+            isShowAllMode = isShowAllPresetsMode,
+            canUndo = historyManager.canUndo(),
+            canRedo = historyManager.canRedo(),
+            onDuplicate = { row -> duplicatePreset(row) },
+            onDelete = { row -> 
+                val deleted = presetOperationsService.deletePreset(
+                    row = row,
+                    tableModel = tableModel,
+                    isShowAllMode = isShowAllPresetsMode,
+                    tempPresetLists = tempPresetLists,
+                    currentPresetList = currentPresetList
+                )
+                if (deleted) {
+                    refreshTable()
+                }
+            },
+            onUndo = { historyManager.undo() },
+            onRedo = { historyManager.redo() }
+        )
     }
 
     // === Действия с пресетами ===
 
-    fun addNewPreset() {
-        // Запрещаем добавление в режиме "Show all presets"
-        if (isShowAllPresetsMode) {
-            JOptionPane.showMessageDialog(
-                table,
-                "Cannot add presets in 'Show all presets' mode.\nPlease switch to a specific list.",
-                "Action Not Available",
-                JOptionPane.INFORMATION_MESSAGE
-            )
-            return
-        }
+    private fun deletePresetFromEditor(row: Int) {
+        println("ADB_DEBUG: deletePresetFromEditor called for row: $row")
+        val model = table.model as? javax.swing.table.DefaultTableModel ?: return
 
+        if (row != -1) {
+            // Проверяем, что это не строка с кнопкой
+            if (model.getValueAt(row, 0) == "+") {
+                return // Не удаляем строку с кнопкой
+            }
 
+            // Устанавливаем флаг для предотвращения обработки клика
+            isProcessingDelete = true
 
-        // Удаляем строку с кнопкой, если она есть
-        val lastRowIndex = tableModel.rowCount - 1
-        if (lastRowIndex >= 0 && tableModel.getValueAt(lastRowIndex, 0) == "+") {
-            tableModel.removeRow(lastRowIndex)
-        }
+            // Получаем данные пресета перед удалением для истории
+            val preset = getPresetAtRow(row)
+            val listNameForHistory = if (isShowAllPresetsMode) {
+                getListNameAtRow(row)
+            } else {
+                currentPresetList?.name
+            }
 
-        val newRowIndex = tableModel.rowCount
-        val newPreset = DevicePreset("", "", "")
-        val newRowVector = createRowVector(newPreset, newRowIndex + 1)
+            // Удаляем пресет из временного списка (source of truth)
+            val (removed, actualIndex) = deletePresetFromTempList(row)
 
-        // Добавляем новую строку и строку с кнопкой одновременно
-        tableModel.addRow(newRowVector)
-        addButtonRow()
+            if (removed) {
+                // Добавляем операцию в историю с реальным индексом если он отличается
+                historyManager.addPresetDelete(row, preset, listNameForHistory, actualIndex)
 
-        historyManager.addPresetAdd(newRowIndex, newPreset)
+                // Перезагружаем таблицу из источника правды
+                loadPresetsIntoTable()
+            }
 
-        SwingUtilities.invokeLater {
-            hoverState = hoverState.withTableSelection(newRowIndex, 2)
-            table.scrollRectToVisible(table.getCellRect(newRowIndex, 2, true))
-            table.editCellAt(newRowIndex, 2)
-            table.editorComponent?.requestFocus()
-            table.repaint()
-
-            // Обновляем позицию кнопки с задержкой и принудительным скроллом
+            // Сбрасываем флаг после небольшой задержки, чтобы клик не обработался повторно
             SwingUtilities.invokeLater {
-                tableWithButtonPanel?.updateButtonPosition(forceScroll = true)
+                isProcessingDelete = false
             }
         }
+    }
+
+    fun addNewPreset() {
+        presetOperationsService.addNewPreset(
+            tableModel = tableModel,
+            table = table,
+            isShowAllMode = isShowAllPresetsMode,
+            isHideDuplicatesMode = isHideDuplicatesMode,
+            currentListName = currentPresetList?.name,
+            onPresetAdded = { newRowIndex ->
+                addButtonRow()
+                
+                SwingUtilities.invokeLater {
+                    hoverState = hoverState.withTableSelection(newRowIndex, 2)
+                    table.scrollRectToVisible(table.getCellRect(newRowIndex, 2, true))
+                    table.editCellAt(newRowIndex, 2)
+                    table.editorComponent?.requestFocus()
+                    table.repaint()
+
+                    // Обновляем позицию кнопки с задержкой и принудительным скроллом
+                    SwingUtilities.invokeLater {
+                        tableWithButtonPanel?.updateButtonPosition(forceScroll = true)
+                    }
+                }
+            }
+        )
     }
 
 
     fun duplicatePreset(row: Int) {
-        if (row < 0 || row >= tableModel.rowCount) return
-
-        // Проверяем, что это не строка с кнопкой
-        val firstColumnValue = tableModel.getValueAt(row, 0)
-        if (firstColumnValue == "+") {
-            return // Не дублируем строку с кнопкой
-        }
-
-        // Запрещаем дублирование в режиме "Show all presets"
-        if (isShowAllPresetsMode) {
-            JOptionPane.showMessageDialog(
-                table,
-                "Cannot duplicate presets in 'Show all presets' mode.\nPlease switch to a specific list.",
-                "Action Not Available",
-                JOptionPane.INFORMATION_MESSAGE
-            )
-            return
-        }
-
-        // Если включен режим скрытия дублей, сначала отключаем его
-        if (isHideDuplicatesMode) {
-            listManagerPanel.setHideDuplicates(false)
-        }
-
-        val originalPreset = getPresetAtRow(row)
-        val newPreset = originalPreset.copy(label = "${originalPreset.label} (copy)")
-
-        val insertIndex = row + 1
-        val newRowVector = createRowVector(newPreset, 0)
-        tableModel.insertRow(insertIndex, newRowVector)
-
-        SwingUtilities.invokeLater {
-            table.scrollRectToVisible(table.getCellRect(insertIndex, 0, true))
-            hoverState = hoverState.withTableSelection(insertIndex, 2)
-            table.editCellAt(insertIndex, 2)
-            table.editorComponent?.requestFocusInWindow()
-            table.repaint()
-        }
-
-        historyManager.addPresetDuplicate(row, insertIndex, originalPreset)
-    }
-
-    private fun applyPresetFromRow(row: Int, setSize: Boolean, setDpi: Boolean) {
-        if (project != null) {
-            val currentPreset = getPresetAtRow(row)
-            PresetApplicationService.applyPreset(project, currentPreset, setSize, setDpi)
-            refreshTable()
-        }
-    }
-
-    // === Undo/Redo ===
-
-    fun performUndo(operation: HistoryOperation) {
-        // Устанавливаем флаг, что выполняется операция истории
-        isPerformingHistoryOperation = true
-        try {
-            performUndoInternal(operation)
-        } finally {
-            isPerformingHistoryOperation = false
-        }
-    }
-
-    private fun performUndoInternal(operation: HistoryOperation) {
-        // Временно отключаем слушатель для предотвращения двойной синхронизации
-        tableModelListener?.let { tableModel.removeTableModelListener(it) }
-
-        try {
-            performUndoOperation(operation)
-        } finally {
-            // Восстанавливаем слушатель
-            tableModelListener?.let { tableModel.addTableModelListener(it) }
-
-            // После операции очищаем дубликаты и синхронизируем
-            cleanupAfterHistoryOperation()
-            
-            // Если включен режим скрытия дубликатов, перезагружаем таблицу
-            if (isHideDuplicatesMode) {
-                SwingUtilities.invokeLater {
-                    isTableUpdating = true
-                    try {
-                        loadPresetsIntoTable()
-                    } finally {
-                        isTableUpdating = false
-                    }
-                }
+        val duplicated = presetOperationsService.duplicatePreset(
+            row = row,
+            tableModel = tableModel,
+            table = table,
+            isShowAllMode = isShowAllPresetsMode,
+            isHideDuplicatesMode = isHideDuplicatesMode,
+            onDuplicatesFilterToggle = { enabled ->
+                listManagerPanel.setHideDuplicates(enabled)
             }
-        }
-    }
-
-    private fun performUndoOperation(operation: HistoryOperation) {
-        when (operation) {
-            is HistoryOperation.CellEdit -> {
-                val coords = historyManager.findCellCoordinates(operation.cellId)
-                if (coords != null) {
-                    tableModel.undoValueAt(operation.oldValue, coords.first, coords.second)
-                    
-                    // Синхронизируем изменение с tempPresetLists
-                    currentPresetList?.let { list ->
-                        // При включенном режиме скрытия дубликатов нужно найти правильный индекс
-                        if (isHideDuplicatesMode) {
-                            // Получаем пресет из таблицы по индексу строки
-                            val tablePreset = tableModel.getPresetAt(coords.first)
-                            if (tablePreset != null) {
-                                // Ищем соответствующий пресет в списке по старым значениям
-                                val listIndex = list.presets.indexOfFirst { preset ->
-                                    when (coords.second) {
-                                        2 -> preset.label == operation.newValue && preset.size == tablePreset.size && preset.dpi == tablePreset.dpi
-                                        3 -> preset.label == tablePreset.label && preset.size == operation.newValue && preset.dpi == tablePreset.dpi
-                                        4 -> preset.label == tablePreset.label && preset.size == tablePreset.size && preset.dpi == operation.newValue
-                                        else -> false
-                                    }
-                                }
-                                if (listIndex >= 0) {
-                                    when (coords.second) {
-                                        2 -> list.presets[listIndex].label = operation.oldValue
-                                        3 -> list.presets[listIndex].size = operation.oldValue
-                                        4 -> list.presets[listIndex].dpi = operation.oldValue
-                                    }
-                                    println("ADB_DEBUG: Updated preset in tempPresetList after undo (hide duplicates): listIndex=$listIndex, col=${coords.second}, value=${operation.oldValue}")
-                                }
-                            }
-                        } else {
-                            // В обычном режиме индексы совпадают
-                            if (coords.first < list.presets.size) {
-                                val preset = list.presets[coords.first]
-                                when (coords.second) {
-                                    2 -> preset.label = operation.oldValue
-                                    3 -> preset.size = operation.oldValue
-                                    4 -> preset.dpi = operation.oldValue
-                                }
-                                println("ADB_DEBUG: Updated preset in tempPresetList after undo: row=${coords.first}, col=${coords.second}, value=${operation.oldValue}")
-                            }
-                        }
-                    }
-                    
-                    refreshTable()
-                }
-            }
-            is HistoryOperation.PresetAdd -> {
-                if (operation.rowIndex < tableModel.rowCount) {
-                    // Удаляем из tempPresetLists если это пустой элемент
-                    currentPresetList?.let { list ->
-                        if (operation.rowIndex < list.presets.size) {
-                            val preset = list.presets[operation.rowIndex]
-                            // Если элемент пустой - удаляем его из списка
-                            if (preset.label.isBlank() && preset.size.isBlank() && preset.dpi.isBlank()) {
-                                list.presets.removeAt(operation.rowIndex)
-                                println("ADB_DEBUG: Removed empty preset from tempPresetList at index ${operation.rowIndex}")
-                            }
-                        }
-                    }
-                    
-                    tableModel.removeRow(operation.rowIndex)
-                    refreshTable()
-                }
-            }
-            is HistoryOperation.PresetDelete -> {
-                // Определяем к какому списку принадлежит восстанавливаемый пресет
-                val listName = if (isShowAllPresetsMode) {
-                    // Сначала используем сохраненное имя списка из операции
-                    operation.listName ?: run {
-                        // Если имя списка не сохранено, пытаемся найти его
-                        val listNameFromTable = if (operation.rowIndex < tableModel.rowCount && tableModel.columnCount > 6) {
-                            // Если есть элементы после удаленной строки, берем список из следующей строки того же списка
-                            var foundListName: String? = null
-                            for (i in operation.rowIndex until tableModel.rowCount) {
-                                val rowListName = tableModel.getValueAt(i, 6) as? String
-                                if (!rowListName.isNullOrBlank()) {
-                                    foundListName = rowListName
-                                    break
-                                }
-                            }
-                            // Если не нашли после, ищем перед удаленной строкой
-                            if (foundListName == null && operation.rowIndex > 0) {
-                                for (i in operation.rowIndex - 1 downTo 0) {
-                                    val rowListName = tableModel.getValueAt(i, 6) as? String
-                                    if (!rowListName.isNullOrBlank()) {
-                                        foundListName = rowListName
-                                        break
-                                    }
-                                }
-                            }
-                            foundListName
-                        } else {
-                            null
-                        }
-
-                        // Если не нашли в таблице, ищем в списках по характеристикам пресета
-                        listNameFromTable ?: tempPresetLists.entries.find { (_, list) ->
-                            // Ищем список, где может быть такой пресет (включая скрытые дубли)
-                            list.presets.any { p ->
-                                (p.size == operation.presetData.size && p.dpi == operation.presetData.dpi) ||
-                                        (p.label == operation.presetData.label)
-                            }
-                        }?.value?.name ?: currentPresetList?.name
-                    }
-                } else {
-                    // В обычном режиме нужно найти список, из которого был удален элемент
-                    // Сначала пробуем использовать сохраненное имя списка
-                    operation.listName ?: run {
-                        // Если имя не сохранено, ищем список по характеристикам пресета
-                        tempPresetLists.entries.find { (_, list) ->
-                            // Проверяем, был ли удален элемент из этого списка
-                            // Ищем по точному совпадению или по size/dpi для дубликатов
-                            list.presets.any { p ->
-                                p.label == operation.presetData.label &&
-                                        p.size == operation.presetData.size &&
-                                        p.dpi == operation.presetData.dpi
-                            } || list.presets.any { p ->
-                                p.size == operation.presetData.size &&
-                                        p.dpi == operation.presetData.dpi
-                            }
-                        }?.value?.name ?: currentPresetList?.name
-                    }
-                }
-
-                // Сначала восстанавливаем элемент в tempPresetLists
-                if (listName != null) {
-                    val targetList = tempPresetLists.values.find { it.name == listName }
-                    if (targetList != null) {
-                        println("ADB_DEBUG: Before restore - tempPresetLists[$listName] has ${targetList.presets.size} elements")
-                        targetList.presets.forEach { p ->
-                            println("ADB_DEBUG:   - ${p.label} | ${p.size} | ${p.dpi}")
-                        }
-
-                        // Проверяем, что элемент еще не существует
-                        val alreadyExists = targetList.presets.any { p ->
-                            p.label == operation.presetData.label &&
-                                    p.size == operation.presetData.size &&
-                                    p.dpi == operation.presetData.dpi
-                        }
-
-                        if (!alreadyExists) {
-                            // Вставляем элемент в нужную позицию
-                            if (operation.rowIndex <= targetList.presets.size) {
-                                targetList.presets.add(operation.rowIndex, operation.presetData.copy())
-                                println("ADB_DEBUG: Restored preset to temp list $listName at position ${operation.rowIndex}")
-                                println("ADB_DEBUG: After restore - tempPresetLists[$listName] has ${targetList.presets.size} elements")
-                            }
-                        } else {
-                            println("ADB_DEBUG: Preset already exists in temp list $listName, skipping restore")
-                            // Если элемент уже существует и мы в текущем списке, не нужно вставлять в таблицу
-                            if (listName == currentPresetList?.name) {
-                                return
-                            }
-                        }
-
-                        // В обычном режиме, если это не текущий список, переключаемся на него
-                        if (!isShowAllPresetsMode && listName != currentPresetList?.name) {
-                            println("ADB_DEBUG: Switching to list $listName for undo operation")
-                            currentPresetList = targetList
-                            // Обновляем выбор в UI компоненте списков
-                            // Это вызовет onListChanged, который загрузит таблицу с уже восстановленным элементом
-                            listManagerPanel.selectListByName(targetList.name)
-                            return // Выходим, так как таблица уже обновлена через onListChanged
-                        }
-                    }
-                }
-
-                // Если мы здесь, значит либо это режим Show all, либо мы остались в текущем списке
-                // и элемент был успешно восстановлен в tempPresetLists
-                val newRowVector = createRowVector(operation.presetData, operation.rowIndex)
-                // Если в режиме Show all, добавляем имя списка в последнюю колонку
-                if (isShowAllPresetsMode && tableModel.columnCount == 7) {
-                    newRowVector[6] = listName ?: ""
-                }
-                tableModel.insertRow(operation.rowIndex, newRowVector)
-
-                // При восстановлении удаленного элемента в режиме скрытия дублей
-                // нужно обновить снимок, чтобы включить восстановленный элемент
-                if (isHideDuplicatesMode) {
-                    println("ADB_DEBUG: Undo PresetDelete - updating snapshot after restore (isShowAllPresetsMode=$isShowAllPresetsMode)")
-
-                    if (isShowAllPresetsMode) {
-                        println("ADB_DEBUG: Looking for list name: $listName")
-                        println("ADB_DEBUG: Snapshot contains key? ${visiblePresetsSnapshot.containsKey(listName)}")
-                        println("ADB_DEBUG: All snapshot keys: ${visiblePresetsSnapshot.keys}")
-
-                        if (listName != null) {
-                            val targetList = tempPresetLists.values.find { it.name == listName }
-                            if (targetList != null) {
-                                // Пересоздаем снимок на основе актуального состояния списка
-                                // а не таблицы, чтобы учесть все скрытые элементы
-                                val updatedVisibleKeys = mutableListOf<String>()
-                                val seenKeys = mutableSetOf<String>()
-
-                                targetList.presets.forEach { preset ->
-                                    val key = if (preset.size.isNotBlank() && preset.dpi.isNotBlank()) {
-                                        "${preset.size}|${preset.dpi}"
-                                    } else {
-                                        "unique_${preset.label}"
-                                    }
-
-                                    val presetKey = "${preset.label}|${preset.size}|${preset.dpi}"
-
-                                    // Первое вхождение каждой комбинации size|dpi считается видимым
-                                    if (!seenKeys.contains(key)) {
-                                        seenKeys.add(key)
-                                        updatedVisibleKeys.add(presetKey)
-                                    }
-                                }
-
-                                visiblePresetsSnapshot[listName] = updatedVisibleKeys
-
-                                // Также обновляем полный порядок элементов
-                                val fullOrder = targetList.presets.map { preset ->
-                                    "${preset.label}|${preset.size}|${preset.dpi}"
-                                }
-                                presetsOrderSnapshot[listName] = fullOrder
-
-                                println("ADB_DEBUG: Updated snapshot for $listName after undo:")
-                                println("ADB_DEBUG:   Visible keys: $updatedVisibleKeys")
-                                println("ADB_DEBUG:   Full order: $fullOrder")
-                            } else {
-                                println("ADB_DEBUG: WARNING - Could not find target list for snapshot update: $listName")
-                            }
-                        }
-                    } else {
-                        // В обычном режиме (не Show all) также нужно правильно восстановить элемент
-                        // Находим целевой список - либо тот, на который переключились, либо текущий
-                        val targetListName = listName ?: currentPresetList?.name
-                        val targetList = if (targetListName != null) {
-                            tempPresetLists.values.find { it.name == targetListName }
-                        } else {
-                            null
-                        }
-
-                        targetList?.let { list ->
-                            // В обычном режиме элемент уже был восстановлен выше,
-                            // здесь только обновляем снимок для текущего списка
-                            val updatedVisibleKeys = mutableListOf<String>()
-                            val seenKeys = mutableSetOf<String>()
-
-                            list.presets.forEach { preset ->
-                                val key = if (preset.size.isNotBlank() && preset.dpi.isNotBlank()) {
-                                    "${preset.size}|${preset.dpi}"
-                                } else {
-                                    "unique_${preset.label}"
-                                }
-
-                                val presetKey = "${preset.label}|${preset.size}|${preset.dpi}"
-
-                                // Первое вхождение каждой комбинации size|dpi считается видимым
-                                if (!seenKeys.contains(key)) {
-                                    seenKeys.add(key)
-                                    updatedVisibleKeys.add(presetKey)
-                                }
-                            }
-
-                            visiblePresetsSnapshot[list.name] = updatedVisibleKeys
-
-                            // Также обновляем полный порядок элементов
-                            val fullOrder = list.presets.map { preset ->
-                                "${preset.label}|${preset.size}|${preset.dpi}"
-                            }
-                            presetsOrderSnapshot[list.name] = fullOrder
-
-                            println("ADB_DEBUG: Updated snapshot for ${list.name} after undo in non-Show all mode:")
-                            println("ADB_DEBUG:   Visible keys: $updatedVisibleKeys")
-                            println("ADB_DEBUG:   Full order: $fullOrder")
-                            println("ADB_DEBUG:   Total presets in list: ${list.presets.size}")
-                        }
-                    }
-                }
-
-                refreshTable()
-            }
-            is HistoryOperation.PresetMove -> {
-                tableModel.moveRow(operation.toIndex, operation.toIndex, operation.fromIndex)
-                historyManager.onRowMoved(operation.toIndex, operation.fromIndex)
-                refreshTable()
-            }
-            is HistoryOperation.PresetImport -> {
-                val endIndex = operation.startIndex + operation.importedPresets.size - 1
-                for (i in endIndex downTo operation.startIndex) {
-                    if (i < tableModel.rowCount) {
-                        tableModel.removeRow(i)
-                    }
-                }
-                refreshTable()
-            }
-            is HistoryOperation.PresetDuplicate -> {
-                if (operation.duplicateIndex < tableModel.rowCount) {
-                    // Удаляем строку из таблицы
-                    tableModel.removeRow(operation.duplicateIndex)
-
-                    // Удаляем дублированный пресет из временного списка
-                    currentPresetList?.let { list ->
-                        val duplicatePreset = operation.presetData.copy(label = "${operation.presetData.label} (copy)")
-                        list.presets.remove(duplicatePreset)
-                        println("ADB_DEBUG: Removed duplicate preset from temp list: ${duplicatePreset.label}")
-                    }
-
-                    // В режиме скрытия дублей нужно перезагрузить таблицу,
-                    // чтобы правильно отобразить изменения
-                    if (isHideDuplicatesMode) {
-                        loadPresetsIntoTable()
-                    } else {
-                        refreshTable()
-                    }
-                }
-            }
-        }
-    }
-
-    fun performRedo(operation: HistoryOperation) {
-        // Устанавливаем флаг, что выполняется операция истории
-        isPerformingHistoryOperation = true
-        try {
-            performRedoInternal(operation)
-        } finally {
-            isPerformingHistoryOperation = false
-        }
-    }
-
-    private fun performRedoInternal(operation: HistoryOperation) {
-        // Временно отключаем слушатель для предотвращения двойной синхронизации
-        tableModelListener?.let { tableModel.removeTableModelListener(it) }
-
-        try {
-            performRedoOperation(operation)
-        } finally {
-            // Восстанавливаем слушатель
-            tableModelListener?.let { tableModel.addTableModelListener(it) }
-
-            // После операции очищаем дубликаты и синхронизируем
-            cleanupAfterHistoryOperation()
-            
-            // Если включен режим скрытия дубликатов, перезагружаем таблицу
-            if (isHideDuplicatesMode) {
-                SwingUtilities.invokeLater {
-                    isTableUpdating = true
-                    try {
-                        loadPresetsIntoTable()
-                    } finally {
-                        isTableUpdating = false
-                    }
-                }
-            }
-        }
-    }
-
-    private fun performRedoOperation(operation: HistoryOperation) {
-        when (operation) {
-            is HistoryOperation.CellEdit -> {
-                val coords = historyManager.findCellCoordinates(operation.cellId)
-                if (coords != null) {
-                    tableModel.redoValueAt(operation.newValue, coords.first, coords.second)
-                    
-                    // Синхронизируем изменение с tempPresetLists
-                    currentPresetList?.let { list ->
-                        // При включенном режиме скрытия дубликатов нужно найти правильный индекс
-                        if (isHideDuplicatesMode) {
-                            // Получаем пресет из таблицы по индексу строки
-                            val tablePreset = tableModel.getPresetAt(coords.first)
-                            if (tablePreset != null) {
-                                // Ищем соответствующий пресет в списке по старым значениям
-                                val listIndex = list.presets.indexOfFirst { preset ->
-                                    when (coords.second) {
-                                        2 -> preset.label == operation.oldValue && preset.size == tablePreset.size && preset.dpi == tablePreset.dpi
-                                        3 -> preset.label == tablePreset.label && preset.size == operation.oldValue && preset.dpi == tablePreset.dpi
-                                        4 -> preset.label == tablePreset.label && preset.size == tablePreset.size && preset.dpi == operation.oldValue
-                                        else -> false
-                                    }
-                                }
-                                if (listIndex >= 0) {
-                                    when (coords.second) {
-                                        2 -> list.presets[listIndex].label = operation.newValue
-                                        3 -> list.presets[listIndex].size = operation.newValue
-                                        4 -> list.presets[listIndex].dpi = operation.newValue
-                                    }
-                                    println("ADB_DEBUG: Updated preset in tempPresetList after redo (hide duplicates): listIndex=$listIndex, col=${coords.second}, value=${operation.newValue}")
-                                }
-                            }
-                        } else {
-                            // В обычном режиме индексы совпадают
-                            if (coords.first < list.presets.size) {
-                                val preset = list.presets[coords.first]
-                                when (coords.second) {
-                                    2 -> preset.label = operation.newValue
-                                    3 -> preset.size = operation.newValue
-                                    4 -> preset.dpi = operation.newValue
-                                }
-                                println("ADB_DEBUG: Updated preset in tempPresetList after redo: row=${coords.first}, col=${coords.second}, value=${operation.newValue}")
-                            }
-                        }
-                    }
-                    
-                    refreshTable()
-                }
-            }
-            is HistoryOperation.PresetAdd -> {
-                // Добавляем элемент в tempPresetLists если это пустой элемент
-                currentPresetList?.let { list ->
-                    val preset = operation.presetData
-                    // Если элемент пустой - добавляем его в список
-                    if (preset.label.isBlank() && preset.size.isBlank() && preset.dpi.isBlank()) {
-                        if (operation.rowIndex <= list.presets.size) {
-                            list.presets.add(operation.rowIndex, preset.copy())
-                            println("ADB_DEBUG: Added empty preset to tempPresetList at index ${operation.rowIndex}")
-                        }
-                    }
-                }
-                
-                val newRowVector = createRowVector(operation.presetData, 0)
-                tableModel.insertRow(operation.rowIndex, newRowVector)
-                refreshTable()
-            }
-            is HistoryOperation.PresetDelete -> {
-                // В обычном режиме проверяем, нужно ли переключить список
-                if (!isShowAllPresetsMode && operation.listName != null && operation.listName != currentPresetList?.name) {
-                    println("ADB_DEBUG: performRedo - switching to list ${operation.listName} for delete operation")
-                    val targetList = tempPresetLists.values.find { it.name == operation.listName }
-                    if (targetList != null) {
-                        currentPresetList = targetList
-                        listManagerPanel.selectListByName(targetList.name)
-                        // После переключения списка таблица перезагрузится через onListChanged
-                    }
-                }
-
-                if (operation.rowIndex < tableModel.rowCount) {
-                    // Удаляем из tempPresetLists
-                    if (!isShowAllPresetsMode) {
-                        // В обычном режиме удаляем из текущего списка
-                        currentPresetList?.let { list ->
-                            val removed = list.presets.removeIf { p ->
-                                p.label == operation.presetData.label &&
-                                        p.size == operation.presetData.size &&
-                                        p.dpi == operation.presetData.dpi
-                            }
-                            println("ADB_DEBUG: performRedo PresetDelete - removed from current list: $removed")
-                        }
-                    } else {
-                        // В режиме Show all удаляем из соответствующего списка
-                        operation.listName?.let { listName ->
-                            val targetList = tempPresetLists.values.find { it.name == listName }
-                            if (targetList != null) {
-                                val removed = targetList.presets.removeIf { p ->
-                                    p.label == operation.presetData.label &&
-                                            p.size == operation.presetData.size &&
-                                            p.dpi == operation.presetData.dpi
-                                }
-                                println("ADB_DEBUG: performRedo PresetDelete - removed from list $listName: $removed")
-                            }
-                        }
-                    }
-
-                    tableModel.removeRow(operation.rowIndex)
-                    refreshTable()
-                }
-            }
-            is HistoryOperation.PresetMove -> {
-                tableModel.moveRow(operation.fromIndex, operation.fromIndex, operation.toIndex)
-                historyManager.onRowMoved(operation.fromIndex, operation.toIndex)
-                refreshTable()
-            }
-            is HistoryOperation.PresetImport -> {
-                for ((index, preset) in operation.importedPresets.withIndex()) {
-                    val newRowVector = createRowVector(preset, 0)
-                    tableModel.insertRow(operation.startIndex + index, newRowVector)
-                }
-                refreshTable()
-            }
-            is HistoryOperation.PresetDuplicate -> {
-                val newPreset = operation.presetData.copy(label = "${operation.presetData.label} (copy)")
-                val newRowVector = createRowVector(newPreset, 0)
-                tableModel.insertRow(operation.duplicateIndex, newRowVector)
-
-                // Добавляем дублированный пресет во временный список
-                currentPresetList?.let { list ->
-                    list.presets.add(operation.duplicateIndex, newPreset)
-                    println("ADB_DEBUG: Added duplicate preset to temp list: ${newPreset.label}")
-                }
-
-                // В режиме скрытия дублей нужно перезагрузить таблицу,
-                // чтобы правильно отобразить изменения
-                if (isHideDuplicatesMode) {
-                    loadPresetsIntoTable()
-                } else {
-                    refreshTable()
-                }
+        )
+        
+        if (duplicated) {
+            SwingUtilities.invokeLater {
+                val insertIndex = row + 1
+                table.scrollRectToVisible(table.getCellRect(insertIndex, 0, true))
+                hoverState = hoverState.withTableSelection(insertIndex, 2)
+                table.repaint()
             }
         }
     }
@@ -2493,19 +1299,7 @@ class SettingsDialogController(
             return
         }
 
-        var allValid = true
-        for (i in 0 until tableModel.rowCount) {
-            // Пропускаем строку с кнопкой
-            val firstColumn = tableModel.getValueAt(i, 0) as? String ?: ""
-            if (firstColumn == "+") {
-                continue
-            }
-
-            val size = tableModel.getValueAt(i, 3) as? String ?: ""
-            val dpi = tableModel.getValueAt(i, 4) as? String ?: ""
-            if (size.isNotBlank() && !ValidationUtils.isValidSizeFormat(size)) allValid = false
-            if (dpi.isNotBlank() && !ValidationUtils.isValidDpi(dpi)) allValid = false
-        }
+        val allValid = validationService.validateAllFields(tableModel)
         dialog.isOKActionEnabled = allValid
         table.repaint()
     }
@@ -2538,327 +1332,6 @@ class SettingsDialogController(
         }
     }
 
-    /**
-     * Распределяет пресеты из таблицы по временным спискам в режиме Show all presets
-     */
-    private fun distributePresetsToTempLists() {
-        if (isHideDuplicatesMode) {
-            // Проверяем наличие снимка и создаем его при необходимости
-            if (visiblePresetsSnapshot.isEmpty()) {
-                println("ADB_DEBUG: distributePresetsToTempLists - snapshot is empty, creating from current state")
-                saveVisiblePresetsSnapshotForAllLists()
-            }
-
-            // В режиме скрытия дубликатов используем снимок видимых пресетов
-            // Сначала определяем какие пресеты должны остаться видимыми
-            val listVisibleIndices = mutableMapOf<String, MutableList<Int>>()
-
-            tempPresetLists.forEach { (listId, list) ->
-                val visibleIndices = mutableListOf<Int>()
-                val seenKeys = mutableSetOf<String>()
-
-                list.presets.forEachIndexed { index, preset ->
-                    val key = if (preset.size.isNotBlank() && preset.dpi.isNotBlank()) {
-                        "${preset.size}|${preset.dpi}"
-                    } else {
-                        "unique_${listId}_$index"
-                    }
-
-                    if (!seenKeys.contains(key)) {
-                        seenKeys.add(key)
-                        visibleIndices.add(index)
-                    }
-                }
-
-                listVisibleIndices[list.name] = visibleIndices
-            }
-
-            // Сохраняем копии оригинальных списков
-            val originalLists = mutableMapOf<String, List<DevicePreset>>()
-            tempPresetLists.forEach { (_, list) ->
-                originalLists[list.name] = list.presets.map { it.copy() }
-            }
-
-            // Собираем обновленные данные из таблицы по спискам
-            // Собираем обновленные данные из таблицы
-            val updatedPresetsPerList = mutableMapOf<String, MutableList<DevicePreset>>()
-
-            for (i in 0 until tableModel.rowCount) {
-                val firstColumn = tableModel.getValueAt(i, 0) as? String ?: ""
-                if (firstColumn == "+") continue
-
-                val listName = getListNameAtRow(i) ?: continue
-                val preset = tableModel.getPresetAt(i) ?: continue
-
-                if (preset.label.isBlank() && preset.size.isBlank() && preset.dpi.isBlank()) {
-                    continue
-                }
-
-                updatedPresetsPerList.getOrPut(listName) { mutableListOf() }.add(preset)
-            }
-
-            // Обновляем каждый список, сохраняя скрытые элементы
-            tempPresetLists.forEach { (_, list) ->
-                val originalPresets = originalLists[list.name] ?: emptyList()
-                val visibleIndices = listVisibleIndices[list.name] ?: emptyList()
-
-                // Используем снимок видимых пресетов если он есть
-                val visibleSnapshot = visiblePresetsSnapshot[list.name]
-                val updatedPresets = updatedPresetsPerList[list.name] ?: emptyList()
-
-                println("ADB_DEBUG: distributePresetsToTempLists - list: ${list.name}")
-                println("ADB_DEBUG:   original presets: ${originalPresets.size}")
-                println("ADB_DEBUG:   visible indices: $visibleIndices")
-                println("ADB_DEBUG:   visible snapshot size: ${visibleSnapshot?.size ?: "none"}")
-                if (visibleSnapshot != null) {
-                    println("ADB_DEBUG:   visible snapshot content:")
-                    visibleSnapshot.forEach { key ->
-                        println("ADB_DEBUG:     - $key")
-                    }
-                }
-                println("ADB_DEBUG:   updated presets: ${updatedPresets.size}")
-
-                // НЕ создаем новый список - будем обновлять существующий на месте
-                // чтобы сохранить порядок элементов
-
-                // Improved logic: properly handle deletions and updates
-                if (visibleSnapshot != null) {
-                    println("ADB_DEBUG:   Using snapshot-based update logic")
-
-                    // Step 1: Determine if elements were deleted
-                    val wasDeleted = updatedPresets.size < visibleSnapshot.size
-                    println("ADB_DEBUG:   Elements deleted: $wasDeleted (snapshot: ${visibleSnapshot.size}, updated: ${updatedPresets.size})")
-
-                    if (wasDeleted) {
-                        // Handle deletion case: rebuild list maintaining hidden elements
-                        println("ADB_DEBUG:   Handling deletion case")
-
-                        // Create a map of current table presets for quick lookup
-                        val tablePresetsMap = updatedPresets.associateBy {
-                            "${it.label}|${it.size}|${it.dpi}"
-                        }
-
-                        // Build new list maintaining order and hidden elements
-                        val newPresets = mutableListOf<DevicePreset>()
-                        val processedTableKeys = mutableSetOf<String>()
-
-                        // First pass: preserve all elements that still exist in table or were hidden
-                        list.presets.forEach { preset ->
-                            val presetKey = "${preset.label}|${preset.size}|${preset.dpi}"
-
-                            when {
-                                // Element exists in table - use updated version
-                                tablePresetsMap.containsKey(presetKey) -> {
-                                    newPresets.add(tablePresetsMap[presetKey]!!.copy())
-                                    processedTableKeys.add(presetKey)
-                                    println("ADB_DEBUG:   Preserved visible element: $presetKey")
-                                }
-                                // Element was hidden (not in snapshot) - preserve it
-                                !visibleSnapshot.contains(presetKey) -> {
-                                    newPresets.add(preset.copy())
-                                    println("ADB_DEBUG:   Preserved hidden element: $presetKey")
-                                }
-                                // Element was visible but now deleted - check if hidden duplicate should be revealed
-                                else -> {
-                                    println("ADB_DEBUG:   Element deleted from table: $presetKey")
-                                    // Check if there's a hidden duplicate that should be revealed
-                                    val presetCombination = if (preset.size.isNotBlank() && preset.dpi.isNotBlank()) {
-                                        "${preset.size}|${preset.dpi}"
-                                    } else null
-
-                                    if (presetCombination != null) {
-                                        // Find first hidden duplicate with same size|dpi
-                                        val hiddenDuplicate = list.presets.find { p ->
-                                            val pKey = "${p.label}|${p.size}|${p.dpi}"
-                                            p.size.isNotBlank() && p.dpi.isNotBlank() &&
-                                                    "${p.size}|${p.dpi}" == presetCombination &&
-                                                    !visibleSnapshot.contains(pKey) &&
-                                                    !newPresets.any { np ->
-                                                        "${np.label}|${np.size}|${np.dpi}" == pKey
-                                                    }
-                                        }
-
-                                        if (hiddenDuplicate != null) {
-                                            val hiddenKey = "${hiddenDuplicate.label}|${hiddenDuplicate.size}|${hiddenDuplicate.dpi}"
-                                            println("ADB_DEBUG:   Found hidden duplicate to reveal: $hiddenKey")
-                                            // Hidden duplicate will be added when we process it in the loop
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        // Second pass: add any new elements from table that weren't processed
-                        updatedPresets.forEach { preset ->
-                            val key = "${preset.label}|${preset.size}|${preset.dpi}"
-                            if (!processedTableKeys.contains(key)) {
-                                newPresets.add(preset.copy())
-                                println("ADB_DEBUG:   Added new element: $key")
-                            }
-                        }
-
-                        // Replace the list
-                        list.presets.clear()
-                        list.presets.addAll(newPresets)
-
-                    } else {
-                        // Handle update/add case: update visible elements in place
-                        println("ADB_DEBUG:   Handling update/add case")
-
-                        // Map snapshot indices to table indices for proper ordering
-                        val snapshotToTableIndex = mutableMapOf<String, Int>()
-                        updatedPresets.forEachIndexed { index, preset ->
-                            val key = "${preset.label}|${preset.size}|${preset.dpi}"
-                            snapshotToTableIndex[key] = index
-                        }
-
-                        // First, check what elements are in table vs snapshot
-                        val tableKeys = updatedPresets.map { "${it.label}|${it.size}|${it.dpi}" }.toSet()
-                        val snapshotKeys = visibleSnapshot.toSet()
-                        val missingKeys = snapshotKeys - tableKeys
-
-                        // If we have missing keys from snapshot, it might be a restore operation
-                        if (missingKeys.isNotEmpty()) {
-                            println("ADB_DEBUG:   Keys missing from table (might be restore): $missingKeys")
-                        }
-
-                        // Create mapping of table presets for quick lookup
-                        val tablePresetsMap = updatedPresets.mapIndexed { index, preset ->
-                            "${preset.label}|${preset.size}|${preset.dpi}" to (index to preset)
-                        }.toMap()
-
-                        // When elements are edited, we need to match by position in snapshot
-                        val processedListIndices = mutableSetOf<Int>()
-                        val processedTableIndices = mutableSetOf<Int>()
-
-                        // First pass: update elements that match exactly (no edits)
-                        list.presets.forEachIndexed { index, preset ->
-                            val presetKey = "${preset.label}|${preset.size}|${preset.dpi}"
-
-                            if (visibleSnapshot.contains(presetKey)) {
-                                // This element should be visible - find it in table
-                                val tableData = tablePresetsMap[presetKey]
-                                if (tableData != null) {
-                                    val (tableIndex, tablePreset) = tableData
-                                    list.presets[index] = tablePreset.copy()
-                                    processedTableIndices.add(tableIndex)
-                                    processedListIndices.add(index)
-                                    println("ADB_DEBUG:   Updated visible element at index $index: $presetKey")
-                                }
-                            }
-                        }
-
-                        // Second pass: handle edited elements by matching snapshot position to table position
-                        visibleSnapshot.forEachIndexed { snapshotIndex, snapshotKey ->
-                            if (snapshotIndex < updatedPresets.size) {
-                                val tablePreset = updatedPresets[snapshotIndex]
-                                val tableKey = "${tablePreset.label}|${tablePreset.size}|${tablePreset.dpi}"
-
-                                // If this table element wasn't processed yet, it might be an edit
-                                if (!processedTableIndices.contains(snapshotIndex) && snapshotKey != tableKey) {
-                                    // Find the original element in the list by snapshot key
-                                    val listIndex = list.presets.indexOfFirst { p ->
-                                        "${p.label}|${p.size}|${p.dpi}" == snapshotKey
-                                    }
-
-                                    if (listIndex >= 0 && !processedListIndices.contains(listIndex)) {
-                                        // This is an edited element - update it
-                                        list.presets[listIndex] = tablePreset.copy()
-                                        processedTableIndices.add(snapshotIndex)
-                                        processedListIndices.add(listIndex)
-                                        println("ADB_DEBUG:   Updated edited element at index $listIndex: $snapshotKey -> $tableKey")
-                                    }
-                                }
-                            }
-                        }
-
-                        // Third pass: add truly new elements (that aren't edits of existing elements)
-                        updatedPresets.forEachIndexed { tableIndex, preset ->
-                            if (!processedTableIndices.contains(tableIndex)) {
-                                val presetKey = "${preset.label}|${preset.size}|${preset.dpi}"
-                                // Проверяем, что такого элемента еще нет в списке
-                                val alreadyExists = list.presets.any { p ->
-                                    "${p.label}|${p.size}|${p.dpi}" == presetKey
-                                }
-                                if (!alreadyExists) {
-                                    list.presets.add(preset.copy())
-                                    println("ADB_DEBUG:   Added truly new element: $presetKey")
-                                } else {
-                                    println("ADB_DEBUG:   Skipped duplicate element: $presetKey (already exists in list)")
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    // Если снимка нет, просто обновляем видимые элементы
-                    var visibleIndex = 0
-                    originalPresets.forEachIndexed { index, _ ->
-                        if (visibleIndices.contains(index) && visibleIndex < updatedPresets.size) {
-                            list.presets[index] = updatedPresets[visibleIndex].copy()
-                            visibleIndex++
-                        }
-                    }
-                }
-
-                println("ADB_DEBUG:   final list size: ${list.presets.size}")
-
-                // Обновляем снимок после любых изменений
-                val updatedVisibleKeys = mutableListOf<String>()
-                val seenKeys = mutableSetOf<String>()
-
-                list.presets.forEach { preset ->
-                    val key = if (preset.size.isNotBlank() && preset.dpi.isNotBlank()) {
-                        "${preset.size}|${preset.dpi}"
-                    } else {
-                        "unique_${preset.label}"
-                    }
-
-                    val presetKey = "${preset.label}|${preset.size}|${preset.dpi}"
-                    if (!seenKeys.contains(key)) {
-                        seenKeys.add(key)
-                        updatedVisibleKeys.add(presetKey)
-                    }
-                }
-
-                visiblePresetsSnapshot[list.name] = updatedVisibleKeys
-
-                // Обновляем также полный снимок порядка элементов
-                val fullOrder = list.presets.map { preset ->
-                    "${preset.label}|${preset.size}|${preset.dpi}"
-                }
-                presetsOrderSnapshot[list.name] = fullOrder
-
-                println("ADB_DEBUG:   Updated snapshot with ${updatedVisibleKeys.size} visible presets")
-            }
-        } else {
-            // В обычном режиме без скрытия дубликатов
-            // Проверяем, вызывается ли это сразу после отключения Hide duplicates
-            if (isSwitchingDuplicatesFilter) {
-                println("ADB_DEBUG: distributePresetsToTempLists - called after switching Hide duplicates off, skipping")
-                // Не делаем ничего - данные уже синхронизированы
-                return
-            }
-
-            // Обычная логика для режима Show all без Hide duplicates
-            tempPresetLists.values.forEach { it.presets.clear() }
-
-            for (i in 0 until tableModel.rowCount) {
-                val firstColumn = tableModel.getValueAt(i, 0) as? String ?: ""
-                if (firstColumn == "+") continue
-
-                val listName = getListNameAtRow(i) ?: continue
-                val preset = tableModel.getPresetAt(i) ?: continue
-
-                if (preset.label.isBlank() && preset.size.isBlank() && preset.dpi.isBlank()) {
-                    continue
-                }
-
-                val targetList = tempPresetLists.values.find { it.name == listName }
-                targetList?.presets?.add(preset)
-            }
-        }
-    }
-
     // === Вспомогательные методы ===
 
     fun addHoverEffectToDialogButtons(container: Container) {
@@ -2888,9 +1361,9 @@ class SettingsDialogController(
         }
 
         return DevicePreset(
-            label = tableModel.getValueAt(row, 2) as? String ?: "",
-            size = tableModel.getValueAt(row, 3) as? String ?: "",
-            dpi = tableModel.getValueAt(row, 4) as? String ?: ""
+            label = tableModel.getValueAt(row, 2) as String,
+            size = tableModel.getValueAt(row, 3) as String,
+            dpi = tableModel.getValueAt(row, 4) as String
         )
     }
 
@@ -2903,14 +1376,6 @@ class SettingsDialogController(
         return null
     }
 
-    private fun createRowVector(preset: DevicePreset, rowNumber: Int = 0): Vector<Any> {
-        val vector = DevicePresetTableModel.createRowVector(preset, rowNumber)
-        // Добавляем пустое значение для колонки List если модель имеет 7 колонок
-        if (isShowAllPresetsMode && tableModel.columnCount == 7) {
-            vector.add(currentPresetList?.name ?: "")
-        }
-        return vector
-    }
 
     private fun refreshTable() {
         SwingUtilities.invokeLater {
@@ -2923,27 +1388,24 @@ class SettingsDialogController(
      * Сохраняет текущий порядок пресетов в режиме Show all presets
      */
     private fun saveShowAllPresetsOrder() {
+        // Сохраняем порядок пресетов напрямую в PresetListService
         // Если включен режим скрытия дубликатов, не сохраняем порядок
-        // так как в таблице показаны не все пресеты
         if (isHideDuplicatesMode) {
-            // Очищаем сохраненный порядок, чтобы при следующей загрузке
-            // использовался обычный порядок со всеми пресетами
             PresetListService.saveShowAllPresetsOrder(emptyList())
-            return
+        } else {
+            val order = mutableListOf<String>()
+            for (row in 0 until tableModel.rowCount) {
+                // Пропускаем строку с кнопкой
+                val firstColumn = tableModel.getValueAt(row, 0) as? String ?: ""
+                if (firstColumn == "+") continue
+                
+                val listName = getListNameAtRow(row) ?: continue
+                val preset = getPresetAtRow(row)
+                val key = "$listName:${preset.label}:${preset.size}:${preset.dpi}"
+                order.add(key)
+            }
+            PresetListService.saveShowAllPresetsOrder(order)
         }
-
-        val order = mutableListOf<String>()
-        for (row in 0 until tableModel.rowCount) {
-            // Пропускаем строку с кнопкой
-            val firstColumn = tableModel.getValueAt(row, 0) as? String ?: ""
-            if (firstColumn == "+") continue
-
-            val listName = getListNameAtRow(row) ?: continue
-            val preset = getPresetAtRow(row)
-            val key = "$listName:${preset.label}:${preset.size}:${preset.dpi}"
-            order.add(key)
-        }
-        PresetListService.saveShowAllPresetsOrder(order)
     }
 
     private fun setupUpdateListener() {
@@ -2975,25 +1437,12 @@ class SettingsDialogController(
     fun restoreOriginalState() {
         println("ADB_DEBUG: Restoring original state")
 
-        // Очищаем текущие временные списки и снимки
-        tempPresetLists.clear()
-        visiblePresetsSnapshot.clear()
-        presetsOrderSnapshot.clear()
-
         // Восстанавливаем из сохраненных оригиналов
-        originalPresetLists.forEach { (id, originalList) ->
-            val restoredList = PresetList(
-                id = originalList.id,
-                name = originalList.name,
-                presets = originalList.presets.map { preset ->
-                    DevicePreset(
-                        label = preset.label,
-                        size = preset.size,
-                        dpi = preset.dpi
-                    )
-                }.toMutableList()
-            )
-            tempPresetLists[id] = restoredList
+        snapshotManager.restoreSnapshots(tempPresetLists, originalPresetLists)
+
+        // Сохраняем восстановленные списки в файлы
+        tempPresetLists.values.forEach { list ->
+            PresetListService.savePresetList(list)
         }
 
         // Восстанавливаем текущий список по ID
@@ -3006,7 +1455,7 @@ class SettingsDialogController(
         // Очищаем сохраненный порядок для "Show all presets", чтобы вернуться к исходному состоянию
         PresetListService.saveShowAllPresetsOrder(emptyList())
 
-        println("ADB_DEBUG: Original state restored")
+        println("ADB_DEBUG: Original state restored and saved to files")
     }
 
     fun dispose() {
@@ -3016,6 +1465,15 @@ class SettingsDialogController(
         // Удаляем глобальный обработчик кликов
         globalClickListener?.let {
             java.awt.Toolkit.getDefaultToolkit().removeAWTEventListener(it)
+        }
+    }
+
+    /**
+     * Обновляет выбор в выпадающем списке в соответствии с текущим состоянием
+     */
+    fun updateSelectedListInUI() {
+        currentPresetList?.let {
+            listManagerPanel.selectListByName(it.name)
         }
     }
 
@@ -3063,5 +1521,289 @@ class SettingsDialogController(
 
         addListenersRecursive(container)
         println("ADB_DEBUG: Added click listeners to $listenerCount components")
+    }
+    
+    // === Методы для доступа команд к приватным полям ===
+    
+    /**
+     * Предоставляет доступ к текущему списку пресетов для команд
+     */
+    internal fun getCurrentPresetListForCommands(): PresetList? = currentPresetList
+    
+    /**
+     * Предоставляет доступ к временным спискам пресетов для команд
+     */
+    internal fun getTempPresetListsForCommands(): Map<String, PresetList> = tempPresetLists
+    
+    /**
+     * Предоставляет доступ к режиму показа всех пресетов для команд
+     */
+    internal fun getIsShowAllPresetsModeForCommands(): Boolean = isShowAllPresetsMode
+    
+    /**
+     * Предоставляет доступ к режиму скрытия дубликатов для команд
+     */
+    internal fun getIsHideDuplicatesModeForCommands(): Boolean = isHideDuplicatesMode
+    
+    /**
+     * Устанавливает флаг обновления таблицы для команд
+     */
+    internal fun setIsTableUpdatingForCommands(value: Boolean) {
+        println("ADB_DEBUG: setIsTableUpdatingForCommands: $value")
+        isTableUpdating = value
+    }
+    
+    /**
+     * Устанавливает флаг выполнения операции истории для команд
+     */
+    internal fun setIsPerformingHistoryOperationForCommands(value: Boolean) {
+        println("ADB_DEBUG: setIsPerformingHistoryOperationForCommands: $value")
+        isPerformingHistoryOperation = value
+    }
+    
+
+    /**
+     * Предоставляет доступ к модели таблицы для команд
+     */
+    internal fun getTableModelForCommands(): DevicePresetTableModel? = tableModel
+    
+    /**
+     * Синхронизирует изменения таблицы с временными списками для команд
+     */
+    internal fun syncTableChangesToTempListsForCommands() {
+        syncTableChangesToTempLists()
+    }
+    
+    /**
+     * Получает полный порядок всех пресетов из всех списков
+     */
+    private fun getAllPresetsOrder(): List<String> {
+        val allPresets = mutableListOf<String>()
+        tempPresetLists.values.forEach { list ->
+            list.presets.forEach { preset ->
+                allPresets.add(preset.label)
+            }
+        }
+        return allPresets
+    }
+    
+
+    /**
+     * Устанавливает текущий список пресетов (для команд)
+     */
+    internal fun setCurrentPresetListForCommands(list: PresetList) {
+        currentPresetList = list
+    }
+    
+    /**
+     * Обновляет таблицу (для команд)
+     */
+    internal fun refreshTableForCommands() {
+        refreshTable()
+    }
+    
+    /**
+     * Загружает пресеты в таблицу (для команд)
+     */
+    internal fun loadPresetsIntoTableForCommands(presets: List<DevicePreset>?) {
+        // Для команд используем синхронную загрузку, чтобы избежать проблем с последовательными undo
+        loadPresetsIntoTableSync(presets)
+    }
+    
+    /**
+     * Синхронно загружает все пресеты для режима Show All (для команд)
+     */
+    private fun loadAllPresetsSyncForCommands() {
+        // Получаем сохраненный порядок
+        val savedOrder = PresetListService.getShowAllPresetsOrder()
+        val allPresets = viewModeManager.prepareShowAllTableModel(tempPresetLists, savedOrder)
+        
+        if (isHideDuplicatesMode) {
+            // Загружаем с учетом скрытых дубликатов
+            val duplicateKeys = findGlobalDuplicateKeys(allPresets)
+            val processedKeys = mutableSetOf<String>()
+            
+            allPresets.forEach { presetPair ->
+                val listName = presetPair.first
+                val preset = presetPair.second
+                val key = createPresetKey(preset)
+                val isEmptyPreset = preset.label.isBlank() && preset.size.isBlank() && preset.dpi.isBlank()
+                
+                val shouldSkip = when {
+                    isEmptyPreset -> false
+                    key in duplicateKeys && key in processedKeys -> true
+                    else -> false
+                }
+                
+                if (!shouldSkip) {
+                    if (key in duplicateKeys) {
+                        processedKeys.add(key)
+                    }
+                    val rowData = DevicePresetTableModel.createRowVector(preset, tableModel.rowCount + 1)
+                    rowData.add(listName)
+                    tableModel.addRow(rowData)
+                }
+            }
+        } else {
+            // Загружаем все пресеты
+            allPresets.forEach { presetPair ->
+                val listName = presetPair.first
+                val preset = presetPair.second
+                val rowData = DevicePresetTableModel.createRowVector(preset, tableModel.rowCount + 1)
+                rowData.add(listName)
+                tableModel.addRow(rowData)
+            }
+        }
+        
+        // Обновляем номера строк
+        tableModel.updateRowNumbers()
+    }
+    
+    /**
+     * Находит глобальные дубликаты во всех списках
+     */
+    private fun findGlobalDuplicateKeys(allPresets: List<Pair<String, DevicePreset>>): Set<String> {
+        val keyCount = mutableMapOf<String, Int>()
+        
+        allPresets.forEach { presetPair ->
+            val preset = presetPair.second
+            if (preset.size.isNotBlank() && preset.dpi.isNotBlank()) {
+                val key = createPresetKey(preset)
+                keyCount[key] = keyCount.getOrDefault(key, 0) + 1
+            }
+        }
+        
+        return keyCount.filter { it.value > 1 }.keys.toSet()
+    }
+    
+    /**
+     * Синхронно загружает пресеты в таблицу (без invokeLater)
+     */
+    private fun loadPresetsIntoTableSync(presetsOverride: List<DevicePreset>? = null) {
+        println("ADB_DEBUG: loadPresetsIntoTableSync() - Start, presetsOverride: ${presetsOverride?.size}")
+        println("ADB_DEBUG: isShowAllPresetsMode: $isShowAllPresetsMode")
+        println("ADB_DEBUG: isHideDuplicatesMode: $isHideDuplicatesMode")
+        
+        isTableUpdating = true
+        try {
+            // Очищаем таблицу
+            while (tableModel.rowCount > 0) {
+                tableModel.removeRow(0)
+            }
+
+            if (isShowAllPresetsMode) {
+                // Для режима Show All загружаем все пресеты синхронно
+                loadAllPresetsSyncForCommands()
+            } else {
+                currentPresetList?.let { currentList ->
+                    // Используем данные из tempPresetLists, а не из currentPresetList
+                    val listFromTemp = tempPresetLists[currentList.id]
+                    if (listFromTemp != null) {
+                        val sourcePresets = presetsOverride ?: listFromTemp.presets
+                        println("ADB_DEBUG: Loading presets from temp list '${listFromTemp.name}' with ${sourcePresets.size} presets")
+                        
+                        val presetsToLoad = if (isHideDuplicatesMode) {
+                            // Фильтруем дубликаты, оставляя только первые вхождения
+                            val seenKeys = mutableSetOf<String>()
+                            var filteredCount = 0
+                            val filtered = sourcePresets.filter { preset ->
+                                val key = createPresetKey(preset)
+                                if (preset.size.isBlank() || preset.dpi.isBlank() || !seenKeys.contains(key)) {
+                                    seenKeys.add(key)
+                                    true
+                                } else {
+                                    filteredCount++
+                                    println("ADB_DEBUG: Filtering duplicate: ${preset.label} ($key)")
+                                    false
+                                }
+                            }
+                            println("ADB_DEBUG: Filtered $filteredCount duplicates, ${filtered.size} presets remain")
+                            filtered
+                        } else {
+                            listFromTemp.presets
+                        }
+
+                        presetsToLoad.forEach { preset ->
+                            val rowData = DevicePresetTableModel.createRowVector(preset, tableModel.rowCount + 1)
+                            tableModel.addRow(rowData)
+                        }
+                        
+                        println("ADB_DEBUG: Added ${presetsToLoad.size} rows to table")
+                    } else {
+                        println("ADB_DEBUG: WARNING - List not found in tempPresetLists!")
+                    }
+                }
+            }
+
+            // Добавляем строку с кнопкой "+"
+            if (!isShowAllPresetsMode) {
+                addButtonRow()
+            }
+
+            // Обновляем номера строк
+            tableModel.updateRowNumbers()
+
+            // Принудительно обновляем UI таблицы
+            table.repaint()
+            table.revalidate()
+        } finally {
+            isTableUpdating = false
+        }
+    }
+    
+    /**
+     * Предоставляет доступ к видимым пресетам в таблице для команд
+     */
+    internal fun getVisiblePresetsForCommands(): List<DevicePreset> {
+        return tableModel.getPresets()
+    }
+    
+    /**
+     * Создает уникальный ключ для пресета на основе размера и DPI
+     */
+    private fun createPresetKey(preset: DevicePreset, index: Int? = null): String {
+        return if (preset.size.isNotBlank() && preset.dpi.isNotBlank()) {
+            "${preset.size}|${preset.dpi}"
+        } else {
+            "unique_${index ?: System.currentTimeMillis()}"
+        }
+    }
+    
+    /**
+     * Находит видимые индексы пресетов, исключая дубликаты
+     */
+    private fun findVisibleIndices(presets: List<DevicePreset>): List<Int> {
+        val visibleIndices = mutableListOf<Int>()
+        val seenKeys = mutableSetOf<String>()
+        
+        presets.forEachIndexed { index, preset ->
+            val key = createPresetKey(preset, index)
+            
+            if (!seenKeys.contains(key)) {
+                seenKeys.add(key)
+                visibleIndices.add(index)
+            }
+        }
+        
+        return visibleIndices
+    }
+    
+    /**
+     * Перезагружает таблицу с временным отключением слушателей для избежания рекурсии
+     */
+    private fun reloadTableWithoutListeners() {
+        SwingUtilities.invokeLater {
+            // Временно отключаем слушатель модели, чтобы избежать рекурсии
+            tableModelListener?.let { tableModel.removeTableModelListener(it) }
+
+            isTableUpdating = true
+            try {
+                loadPresetsIntoTable()
+            } finally {
+                isTableUpdating = false
+                // Возвращаем слушатель на место
+                tableModelListener?.let { tableModel.addTableModelListener(it) }
+            }
+        }
     }
 }

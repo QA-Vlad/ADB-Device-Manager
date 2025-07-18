@@ -23,10 +23,10 @@ class DevicePresetTableModel : DefaultTableModel {
     }
 
     private var isUndoOperation = false
-    private val historyManager: HistoryManager
+    private val historyManager: CommandHistoryManager
 
     // Конструктор для совместимости с оригинальным SettingsDialog
-    constructor(data: Vector<Vector<Any>>, columnNames: Vector<String>, historyManager: HistoryManager) : super(data, columnNames) {
+    constructor(data: Vector<Vector<Any>>, columnNames: Vector<String>, historyManager: CommandHistoryManager) : super(data, columnNames) {
         this.historyManager = historyManager
         updateRowNumbers()
     }
@@ -42,28 +42,7 @@ class DevicePresetTableModel : DefaultTableModel {
 
         // Записываем в историю, только если это не операция отмены и значение действительно изменилось
         if (!isUndoOperation && oldValue != aValue && aValue is String) {
-            historyManager.addToHistory(row, column, oldValue as? String ?: "", aValue)
-        }
-    }
-
-    /**
-     * Устанавливает значение в ячейку в рамках операции отмены, не создавая новую запись в истории.
-     */
-    fun undoValueAt(aValue: Any?, row: Int, column: Int) {
-        isUndoOperation = true
-        try {
-            setValueAt(aValue, row, column)
-        } finally {
-            isUndoOperation = false
-        }
-    }
-
-    fun redoValueAt(aValue: Any?, row: Int, column: Int) {
-        isUndoOperation = true
-        try {
-            setValueAt(aValue, row, column)
-        } finally {
-            isUndoOperation = false
+            historyManager.addCellEdit(row, column, oldValue as? String ?: "", aValue)
         }
     }
 

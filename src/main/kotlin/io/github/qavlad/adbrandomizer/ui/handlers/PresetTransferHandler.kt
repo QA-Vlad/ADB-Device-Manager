@@ -8,7 +8,11 @@ import javax.swing.JTable
 import javax.swing.TransferHandler
 import javax.swing.table.DefaultTableModel
 
-class PresetTransferHandler(private val onRowMoved: ((Int, Int) -> Unit)? = null) : TransferHandler() {
+class PresetTransferHandler(
+    private val onRowMoved: ((Int, Int) -> Unit)? = null,
+    private val onDragStarted: (() -> Unit)? = null,
+    private val onDragEnded: (() -> Unit)? = null
+) : TransferHandler() {
     override fun getSourceActions(c: JComponent?) = MOVE
 
     override fun createTransferable(c: JComponent?): Transferable? {
@@ -23,6 +27,9 @@ class PresetTransferHandler(private val onRowMoved: ((Int, Int) -> Unit)? = null
             }
         }
         
+        // Уведомляем о начале drag операции
+        onDragStarted?.invoke()
+        
         return StringSelection(selectedRow.toString())
     }
 
@@ -35,10 +42,20 @@ class PresetTransferHandler(private val onRowMoved: ((Int, Int) -> Unit)? = null
             val dropLocation = support.dropLocation as? JTable.DropLocation
             if (table != null && dropLocation != null) {
                 val targetRow = dropLocation.row
-                if (targetRow >= 0 && targetRow < table.rowCount) {
-                    val targetValue = table.getValueAt(targetRow, 0)
-                    if (targetValue == "+") {
-                        return false // Не позволяем drop на строку с кнопкой
+                
+                println("ADB_DEBUG: canImport - targetRow: $targetRow, rowCount: ${table.rowCount}")
+                
+                // Проверяем, есть ли строка с плюсиком
+                val lastRow = table.rowCount - 1
+                if (lastRow >= 0) {
+                    val lastRowFirstColumn = table.getValueAt(lastRow, 0)
+                    if (lastRowFirstColumn == "+") {
+                        // В режиме INSERT_ROWS targetRow может быть равен rowCount (вставка после последней строки)
+                        // Разрешаем drop только если targetRow < lastRow (перед строкой с плюсиком)
+                        if (targetRow > lastRow) {
+                            println("ADB_DEBUG: canImport - false, targetRow > lastRow with + button")
+                            return false
+                        }
                     }
                 }
             }
@@ -46,6 +63,7 @@ class PresetTransferHandler(private val onRowMoved: ((Int, Int) -> Unit)? = null
             support.setShowDropLocation(true)
         }
 
+        println("ADB_DEBUG: canImport - returning $canImport")
         return canImport
     }
 
@@ -68,32 +86,62 @@ class PresetTransferHandler(private val onRowMoved: ((Int, Int) -> Unit)? = null
                 }
             }
 
-            // Проверяем, что не пытаемся переместить в строку с кнопкой или саму строку с кнопкой
+            println("ADB_DEBUG: DnD - fromIndex: $fromIndex, initial toIndex: $toIndex, rowCount: ${model.rowCount}")
+
+            // Проверяем наличие строки с плюсиком
             val lastRow = model.rowCount - 1
+            var hasAddButton = false
+            
             if (lastRow >= 0) {
                 val lastRowFirstColumn = model.getValueAt(lastRow, 0)
-                if (lastRowFirstColumn == "+" && (toIndex > lastRow || fromIndex == lastRow)) {
-                    return false // Не позволяем перемещать строку с кнопкой или перемещать что-то после неё
+                if (lastRowFirstColumn == "+") {
+                    hasAddButton = true
+                    
+                    // Не позволяем перемещать саму строку с плюсиком
+                    if (fromIndex == lastRow) {
+                        println("ADB_DEBUG: DnD - Cannot move add button row")
+                        return false
+                    }
                 }
             }
             
-            // Корректируем индекс если перетаскиваем вниз
-            if (fromIndex < toIndex) {
-                toIndex--
+            // Корректируем toIndex для режима INSERT_ROWS
+            // В этом режиме toIndex указывает позицию ПЕРЕД которой вставляется элемент
+            if (hasAddButton && toIndex >= lastRow) {
+                // Если пытаемся вставить на позицию плюсика или после, корректируем
+                toIndex = lastRow
             }
+            
+            // Корректируем индекс если перетаскиваем вниз
+            // Это нужно потому что после удаления элемента с fromIndex, индексы сдвигаются
+            var adjustedToIndex = toIndex
+            if (fromIndex < toIndex) {
+                adjustedToIndex--
+            }
+            
+            println("ADB_DEBUG: DnD - adjusted toIndex: $adjustedToIndex")
 
-            if (fromIndex != -1 && fromIndex != toIndex && toIndex >= 0 && toIndex < model.rowCount) {
-                model.moveRow(fromIndex, fromIndex, toIndex)
-                table.setRowSelectionInterval(toIndex, toIndex)
+            if (fromIndex != -1 && fromIndex != adjustedToIndex && adjustedToIndex >= 0 && adjustedToIndex < model.rowCount) {
+                model.moveRow(fromIndex, fromIndex, adjustedToIndex)
+                table.setRowSelectionInterval(adjustedToIndex, adjustedToIndex)
                 
                 // Уведомляем о перемещении строки
-                onRowMoved?.invoke(fromIndex, toIndex)
+                onRowMoved?.invoke(fromIndex, adjustedToIndex)
                 
+                println("ADB_DEBUG: DnD - Move successful")
                 return true
+            } else {
+                println("ADB_DEBUG: DnD - Move failed: fromIndex=$fromIndex, adjustedToIndex=$adjustedToIndex")
             }
         } catch (e: Exception) {
             e.printStackTrace()
         }
         return false
+    }
+    
+    override fun exportDone(source: JComponent?, data: Transferable?, action: Int) {
+        super.exportDone(source, data, action)
+        // Уведомляем об окончании drag операции
+        onDragEnded?.invoke()
     }
 }
