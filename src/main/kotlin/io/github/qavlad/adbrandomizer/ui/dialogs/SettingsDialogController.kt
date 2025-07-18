@@ -27,7 +27,6 @@ import javax.swing.*
 import com.intellij.openapi.application.ApplicationManager
 import javax.swing.SwingUtilities
 import io.github.qavlad.adbrandomizer.ui.components.TableWithAddButtonPanel
-import io.github.qavlad.adbrandomizer.ui.components.TableFactory
 import io.github.qavlad.adbrandomizer.ui.commands.CommandContext
 import io.github.qavlad.adbrandomizer.services.DevicePreset
 
@@ -68,7 +67,8 @@ class SettingsDialogController(
     private val tableLoader = TableLoader(duplicateManager, viewModeManager)
     private val stateManager = StateManager()
     private val presetDistributor = PresetDistributor(duplicateManager)
-    private val tableFactory = TableFactory()
+    private val componentsFactory = DialogComponentsFactory()
+    private val eventHandlersInitializer = EventHandlersInitializer(this)
     private val dialogState = DialogStateManager()
     private var updateListener: (() -> Unit)? = null
     private var globalClickListener: java.awt.event.AWTEventListener? = null
@@ -83,10 +83,8 @@ class SettingsDialogController(
     // Ссылка на слушатель модели, для временного отключения
     private var tableModelListener: javax.swing.event.TableModelListener? = null
 
-    // Таймер для группировки обновлений таблицы
-    private var lastUpdateTimer: javax.swing.Timer? = null
-    // Счетчик ожидающих обновлений таблицы
-    private var pendingTableUpdates = 0
+    // Слушатель модели таблицы с таймером
+    private var tableModelListenerWithTimer: TableModelListenerWithTimer? = null
 
     /**
      * Инициализация контроллера
@@ -102,140 +100,16 @@ class SettingsDialogController(
      * Создает панель управления списками пресетов
      */
     fun createListManagerPanel(): PresetListManagerPanel {
-        listManagerPanel = PresetListManagerPanel(
-            onListChanged = { presetList ->
-                println("ADB_DEBUG: onListChanged called with: ${presetList.name}")
-                // Останавливаем редактирование если оно активно
-                if (::table.isInitialized && table.isEditing) {
-                    table.cellEditor.stopCellEditing()
-                }
-
-                // Добавляем слушатель к модели
-                tableModel.addTableModelListener(tableModelListener!!)
-
-                dialogState.withListSwitching {
-                    // Переключаемся на временную копию нового списка
-                    currentPresetList = tempPresetLists[presetList.id]
-                    println("ADB_DEBUG: onListChanged - set currentPresetList to: ${currentPresetList?.name}, presets: ${currentPresetList?.presets?.size}")
-                    // Очищаем кэш активного списка при переключении
-                    PresetListService.clearAllCaches()
-                    // Очищаем снимок при переключении списка только если не в режиме скрытия дубликатов
-                    // В режиме скрытия дубликатов снимок нужно сохранять для корректной работы
-                    if (!dialogState.isShowAllPresetsMode() && !dialogState.isHideDuplicatesMode()) {
-                        duplicateManager.clearSnapshots()
-                    }
-                    if (::table.isInitialized) {
-                        loadPresetsIntoTable()
-                    }
-                }
-            },
-            onShowAllPresetsChanged = { showAll ->
-                if (::table.isInitialized && table.isEditing) {
-                    table.cellEditor.stopCellEditing()
-                }
-
-                // Сохраняем текущее состояние перед переключением только если не первая загрузка
-                if (::table.isInitialized && !dialogState.isFirstLoad()) {
-                    // Синхронизируем только если переключаемся В режим Show all или если мы в нем находимся
-                    if (showAll || dialogState.isShowAllPresetsMode()) {
-                        syncTableChangesToTempListsInternal()
-                    }
-                }
-
-                // ВАЖНО: Сохраняем снимок видимых пресетов ПЕРЕД переключением режима
-                // чтобы он был доступен при обработке удаления в режиме Show all
-                // Сохраняем только если снимок еще не был сохранен
-                if (showAll && dialogState.isHideDuplicatesMode() && !dialogState.isShowAllPresetsMode() && !duplicateManager.hasSnapshots()) {
-                    println("ADB_DEBUG: Saving snapshot before switching to Show all mode (snapshot was empty)")
-                    println("ADB_DEBUG: Current visiblePresetsSnapshot size before save: ${duplicateManager.getSnapshotsSize()}")
-                    saveVisiblePresetsSnapshotForAllLists()
-                    println("ADB_DEBUG: After saving, visiblePresetsSnapshot size: ${duplicateManager.getSnapshotsSize()}")
-                } else if (showAll && dialogState.isHideDuplicatesMode() && !dialogState.isShowAllPresetsMode()) {
-                    println("ADB_DEBUG: NOT saving snapshot before Show all - already have ${duplicateManager.getSnapshotsSize()} snapshots")
-                }
-
-                dialogState.withModeSwitching {
-                    dialogState.withTableUpdate {
-                        dialogState.setShowAllPresetsMode(showAll)
-                        tableWithButtonPanel?.setAddButtonVisible(!showAll)
-                        if (::table.isInitialized) {
-                            // Сначала настраиваем колонки, потом загружаем данные
-                            setupTableColumns()
-                            loadPresetsIntoTable()
-                        }
-                    }
-                }
-                
-                // Очищаем снимок при выходе из режима Show all
-                // Он будет пересоздан при необходимости из актуального состояния
-                if (!showAll) {
-                    println("ADB_DEBUG: Clearing snapshot when exiting Show all mode")
-                    duplicateManager.clearSnapshots()
-                }
-            },
-            onHideDuplicatesChanged = { hideDuplicates ->
-                if (dialogState.isPerformingHistoryOperation()) {
-                    println("ADB_DEBUG: onHideDuplicatesChanged skipped during history operation")
-                    return@PresetListManagerPanel
-                }
-
-                println("ADB_DEBUG: onHideDuplicatesChanged called with: $hideDuplicates")
-
-                // Останавливаем редактирование если оно активно
-                if (::table.isInitialized && table.isEditing) {
-                    table.cellEditor.stopCellEditing()
-                }
-
-                // Отладка: выводим состояние списка до синхронизации
-                currentPresetList?.let { list ->
-                    println("ADB_DEBUG: Before sync - list ${list.name} has ${list.presets.size} presets:")
-                    list.presets.forEachIndexed { index, preset ->
-                        println("ADB_DEBUG:   [$index] ${preset.label} | ${preset.size} | ${preset.dpi}")
-                    }
-                }
-
-                // Синхронизируем состояние таблицы только при ВКЛЮЧЕНИИ фильтра дубликатов
-                // При отключении фильтра синхронизация не нужна, так как все пресеты уже есть в списке
-                if (::table.isInitialized && !dialogState.isFirstLoad() && hideDuplicates) {
-                    syncTableChangesToTempListsInternal()
-                }
-
-                dialogState.setHideDuplicatesMode(hideDuplicates)
-
-                // ВАЖНО: После включения фильтра дублей сохраняем снимок для всех списков
-                // Это нужно для корректной работы при последующем переключении в Show all
-                if (hideDuplicates && !dialogState.isFirstLoad()) {
-                    println("ADB_DEBUG: Saving snapshot after enabling hide duplicates")
-                    println("ADB_DEBUG: tempPresetLists size: ${tempPresetLists.size}")
-                    saveVisiblePresetsSnapshotForAllLists()
-                    println("ADB_DEBUG: After saving snapshot, visiblePresetsSnapshot size: ${duplicateManager.getSnapshotsSize()}")
-                    duplicateManager.getSnapshotsDebugInfo().forEach { (listName, presets) ->
-                        println("ADB_DEBUG:   Snapshot for $listName: ${presets.size} presets")
-                    }
-                }
-                // Проверяем, что таблица инициализирована
-                if (::table.isInitialized) {
-                    // Временно отключаем слушатель модели
-                    tableModelListener?.let { tableModel.removeTableModelListener(it) }
-
-                    dialogState.withDuplicatesFilterSwitching {
-                        dialogState.withTableUpdate {
-                            loadPresetsIntoTable()
-                        }
-                    }
-                    
-                    // Возвращаем слушатель на место
-                    tableModelListener?.let { tableModel.addTableModelListener(it) }
-                    // Очищаем снимок при отключении фильтра дубликатов
-                    if (!hideDuplicates) {
-                        duplicateManager.clearSnapshots()
-                    }
-                }
-            }
+        listManagerPanel = eventHandlersInitializer.createAndInitializeListManagerPanel(
+            dialogState = dialogState,
+            duplicateManager = duplicateManager,
+            tempPresetLists = tempPresetLists,
+            tableWithButtonPanel = tableWithButtonPanel,
+            onCurrentListChanged = { newList -> currentPresetList = newList },
+            onLoadPresetsIntoTable = { loadPresetsIntoTable() },
+            onSyncTableChanges = { syncTableChangesToTempListsInternal() },
+            onSetupTableColumns = { setupTableColumns() }
         )
-
-        // НЕ устанавливаем состояния чекбоксов здесь, так как это вызовет callbacks
-        // Вместо этого сделаем это после инициализации таблицы
 
         return listManagerPanel
     }
@@ -244,7 +118,7 @@ class SettingsDialogController(
      * Создает модель таблицы с начальными данными
      */
     fun createTableModel(): DevicePresetTableModel {
-        tableModel = tableFactory.createTableModel(historyManager)
+        tableModel = componentsFactory.createTableModel(historyManager)
         // НЕ добавляем слушатель здесь, так как table еще не создана
 
         // НЕ загружаем список здесь, так как временные списки еще не созданы
@@ -257,29 +131,7 @@ class SettingsDialogController(
      * Создает кастомную таблицу с переопределенными методами рендеринга
      */
     fun createTable(model: DevicePresetTableModel): JBTable {
-        // Создаем callback для обработки событий редактирования
-        val editingCallbacks = object : TableFactory.EditingCallbacks {
-            override fun onEditCellAt(row: Int, column: Int, oldValue: String) {
-                dialogState.setEditingCell(row, column, oldValue)
-            }
-            
-            override fun onRemoveEditor(row: Int, column: Int, oldValue: String?, newValue: String) {
-                println("ADB_DEBUG: removeEditor called - editingCellOldValue=$oldValue, row=$row, col=$column")
-                if (oldValue != null && newValue != oldValue) {
-                    println("ADB_DEBUG: removeEditor - adding command to history from removeEditor")
-                    historyManager.addCellEdit(row, column, oldValue, newValue)
-                }
-                dialogState.clearEditingCell()
-            }
-            
-            override fun onChangeSelection(row: Int, column: Int, oldValue: String) {
-                val editingState = dialogState.getEditingCellState()
-                println("ADB_DEBUG: changeSelection - setting editingCellOldValue='$oldValue' (was: '${editingState.oldValue}')")
-                dialogState.setEditingCell(row, column, oldValue)
-            }
-        }
-        
-        table = tableFactory.createTable(model, { hoverState }, editingCallbacks)
+        table = componentsFactory.createTable(model, { hoverState }, dialogState, historyManager)
         return table
     }
 
@@ -296,65 +148,21 @@ class SettingsDialogController(
             currentPresetList = tempPresetLists.values.first()
         }
 
-        // Используем поля класса для pendingTableUpdates и lastUpdateTimer
-
-        // Создаем слушатель модели и сохраняем ссылку
-        tableModelListener = javax.swing.event.TableModelListener { e ->
-            // println("ADB_DEBUG: TableModelListener fired - type: ${e.type}, dialogState.isTableUpdating(): ${dialogState.isTableUpdating()}")
-            if (dialogState.isTableUpdating()) {
-                return@TableModelListener
-            }
-
-            pendingTableUpdates++
-            println("ADB_DEBUG: pendingTableUpdates incremented to: $pendingTableUpdates")
-
-            // Делаем локальную копию для безопасного использования
-            val currentTimer = lastUpdateTimer
-            currentTimer?.stop()
-
-            // Всегда выполняем валидацию сразу
-            validateFields()
-
-            // Создаем новый таймер для группировки обновлений
-            val newTimer = javax.swing.Timer(50) {
-                if (pendingTableUpdates > 0) {
-                    val eventType = when(e.type) {
-                        javax.swing.event.TableModelEvent.UPDATE -> "UPDATE"
-                        javax.swing.event.TableModelEvent.INSERT -> "INSERT"
-                        javax.swing.event.TableModelEvent.DELETE -> "DELETE"
-                        else -> "UNKNOWN(${e.type})"
-                    }
-                    println("ADB_DEBUG: TableModelListener batch update - processing $pendingTableUpdates updates, type: $eventType")
-                    
-                    // Сохраняем состояние перед синхронизацией для команды перемещения
-                    if (dialogState.isDragAndDropInProgress() && dialogState.isHideDuplicatesMode()) {
-                        val lastCommand = historyManager.getLastCommand()
-                        if (lastCommand is io.github.qavlad.adbrandomizer.ui.commands.PresetMoveCommand) {
-                            println("ADB_DEBUG: Saving state before sync for PresetMoveCommand")
-                            lastCommand.saveStateBeforeSync()
-                        }
-                    }
-
-                    // Синхронизируем изменения с временными списками
-                    // UPDATE - для изменения ячеек, DELETE - для удаления строк
-                    if (e.type == javax.swing.event.TableModelEvent.UPDATE ||
-                        e.type == javax.swing.event.TableModelEvent.DELETE) {
-                        syncTableChangesToTempListsInternal()
-                    }
-
-                    SwingUtilities.invokeLater {
-                        table.repaint()
-                    }
-
-                    pendingTableUpdates = 0
+        // Создаем слушатель модели с таймером
+        tableModelListenerWithTimer = componentsFactory.createTableModelListener(
+            dialogState = dialogState,
+            historyManager = historyManager,
+            onValidateFields = { validateFields() },
+            onSyncTableChanges = { syncTableChangesToTempListsInternal() },
+            onTableRepaint = { 
+                SwingUtilities.invokeLater {
+                    table.repaint()
                 }
             }
-            newTimer.isRepeats = false
-            newTimer.start()
-
-            // Сохраняем ссылку на новый таймер
-            lastUpdateTimer = newTimer
-        }
+        )
+        
+        // Сохраняем ссылку на слушатель
+        tableModelListener = tableModelListenerWithTimer?.listener
         
         // Добавляем слушатель к модели таблицы
         tableModel.addTableModelListener(tableModelListener)
@@ -537,21 +345,7 @@ class SettingsDialogController(
      * Принудительная синхронизация перед операциями истории
      */
     fun forceSyncBeforeHistoryOperation() {
-        println("ADB_DEBUG: forceSyncBeforeHistoryOperation called")
-        println("ADB_DEBUG:   pendingTableUpdates = $pendingTableUpdates")
-        println("ADB_DEBUG:   lastUpdateTimer = $lastUpdateTimer")
-        
-        // Останавливаем все таймеры
-        lastUpdateTimer?.stop()
-        
-        // Выполняем синхронизацию немедленно
-        if (pendingTableUpdates > 0) {
-            println("ADB_DEBUG: Forcing sync of $pendingTableUpdates pending updates")
-            syncTableChangesToTempListsInternal()
-            pendingTableUpdates = 0
-        } else {
-            println("ADB_DEBUG: No pending updates to sync")
-        }
+        tableModelListenerWithTimer?.forceSyncPendingUpdates()
     }
     
     /**
@@ -924,7 +718,7 @@ class SettingsDialogController(
     /**
      * Сохраняет снимок видимых пресетов для всех списков перед переключением в режим Show all
      */
-    private fun saveVisiblePresetsSnapshotForAllLists() {
+    fun saveVisiblePresetsSnapshotForAllLists() {
         snapshotManager.saveVisiblePresetsSnapshotForAllLists(tempPresetLists)
     }
 
@@ -1609,5 +1403,23 @@ class SettingsDialogController(
     
     override fun updateSelectedListInUI() {
         updateSelectedListInUIInternal()
+    }
+    
+    // === Вспомогательные методы для фабрик и инициализаторов ===
+    
+    fun stopTableEditing() {
+        if (::table.isInitialized && table.isEditing) {
+            table.cellEditor.stopCellEditing()
+        }
+    }
+    
+    fun isTableInitialized(): Boolean = ::table.isInitialized
+    
+    fun addTableModelListener() {
+        tableModelListener?.let { tableModel.addTableModelListener(it) }
+    }
+    
+    fun removeTableModelListener() {
+        tableModelListener?.let { tableModel.removeTableModelListener(it) }
     }
 }

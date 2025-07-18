@@ -1,0 +1,176 @@
+package io.github.qavlad.adbrandomizer.ui.dialogs
+
+import io.github.qavlad.adbrandomizer.services.*
+import io.github.qavlad.adbrandomizer.ui.components.*
+import io.github.qavlad.adbrandomizer.services.PresetListService
+import io.github.qavlad.adbrandomizer.ui.services.DuplicateManager
+
+/**
+ * Инициализатор обработчиков событий для диалога настроек.
+ * Централизует всю логику подключения слушателей и обработчиков.
+ */
+class EventHandlersInitializer(
+    private val controller: SettingsDialogController
+) {
+    /**
+     * Создает и инициализирует панель управления списками
+     */
+    fun createAndInitializeListManagerPanel(
+        dialogState: DialogStateManager,
+        duplicateManager: DuplicateManager,
+        tempPresetLists: Map<String, PresetList>,
+        tableWithButtonPanel: TableWithAddButtonPanel?,
+        onCurrentListChanged: (PresetList?) -> Unit,
+        onLoadPresetsIntoTable: () -> Unit,
+        onSyncTableChanges: () -> Unit,
+        onSetupTableColumns: () -> Unit
+    ): PresetListManagerPanel {
+        return PresetListManagerPanel(
+            onListChanged = { presetList ->
+                println("ADB_DEBUG: onListChanged called with: ${presetList.name}")
+                // Останавливаем редактирование если оно активно
+                controller.stopTableEditing()
+                
+                // Добавляем слушатель к модели
+                controller.addTableModelListener()
+                
+                dialogState.withListSwitching {
+                    // Переключаемся на временную копию нового списка
+                    val newCurrentList = tempPresetLists[presetList.id]
+                    onCurrentListChanged(newCurrentList)
+                    println("ADB_DEBUG: onListChanged - set currentPresetList to: ${newCurrentList?.name}, presets: ${newCurrentList?.presets?.size}")
+                    
+                    // Очищаем кэш активного списка при переключении
+                    PresetListService.clearAllCaches()
+                    
+                    // Очищаем снимок при переключении списка только если не в режиме скрытия дубликатов
+                    if (!dialogState.isShowAllPresetsMode() && !dialogState.isHideDuplicatesMode()) {
+                        duplicateManager.clearSnapshots()
+                    }
+                    
+                    if (controller.isTableInitialized()) {
+                        onLoadPresetsIntoTable()
+                    }
+                }
+            },
+            onShowAllPresetsChanged = { showAll ->
+                handleShowAllPresetsChanged(
+                    showAll = showAll,
+                    dialogState = dialogState,
+                    duplicateManager = duplicateManager,
+                    tableWithButtonPanel = tableWithButtonPanel,
+                    onSyncTableChanges = onSyncTableChanges,
+                    onSetupTableColumns = onSetupTableColumns,
+                    onLoadPresetsIntoTable = onLoadPresetsIntoTable
+                )
+            },
+            onHideDuplicatesChanged = { hideDuplicates ->
+                handleHideDuplicatesChanged(
+                    hideDuplicates = hideDuplicates,
+                    dialogState = dialogState,
+                    duplicateManager = duplicateManager,
+                    onSyncTableChanges = onSyncTableChanges,
+                    onLoadPresetsIntoTable = onLoadPresetsIntoTable
+                )
+            }
+        )
+    }
+    
+    
+    /**
+     * Обработка изменения режима Show All Presets
+     */
+    private fun handleShowAllPresetsChanged(
+        showAll: Boolean,
+        dialogState: DialogStateManager,
+        duplicateManager: DuplicateManager,
+        tableWithButtonPanel: TableWithAddButtonPanel?,
+        onSyncTableChanges: () -> Unit,
+        onSetupTableColumns: () -> Unit,
+        onLoadPresetsIntoTable: () -> Unit
+    ) {
+        controller.stopTableEditing()
+        
+        // Сохраняем текущее состояние перед переключением
+        if (controller.isTableInitialized() && !dialogState.isFirstLoad()) {
+            if (showAll || dialogState.isShowAllPresetsMode()) {
+                onSyncTableChanges()
+            }
+        }
+        
+        // Сохраняем снимок видимых пресетов ПЕРЕД переключением режима
+        if (showAll && dialogState.isHideDuplicatesMode() && 
+            !dialogState.isShowAllPresetsMode() && !duplicateManager.hasSnapshots()) {
+            println("ADB_DEBUG: Saving snapshot before switching to Show all mode")
+            controller.saveVisiblePresetsSnapshotForAllLists()
+        }
+        
+        dialogState.withModeSwitching {
+            dialogState.withTableUpdate {
+                dialogState.setShowAllPresetsMode(showAll)
+                tableWithButtonPanel?.setAddButtonVisible(!showAll)
+                if (controller.isTableInitialized()) {
+                    onSetupTableColumns()
+                    onLoadPresetsIntoTable()
+                }
+            }
+        }
+        
+        // Очищаем снимок при выходе из режима Show all
+        if (!showAll) {
+            println("ADB_DEBUG: Clearing snapshot when exiting Show all mode")
+            duplicateManager.clearSnapshots()
+        }
+    }
+    
+    /**
+     * Обработка изменения режима Hide Duplicates
+     */
+    private fun handleHideDuplicatesChanged(
+        hideDuplicates: Boolean,
+        dialogState: DialogStateManager,
+        duplicateManager: DuplicateManager,
+        onSyncTableChanges: () -> Unit,
+        onLoadPresetsIntoTable: () -> Unit
+    ) {
+        if (dialogState.isPerformingHistoryOperation()) {
+            println("ADB_DEBUG: onHideDuplicatesChanged skipped during history operation")
+            return
+        }
+        
+        println("ADB_DEBUG: onHideDuplicatesChanged called with: $hideDuplicates")
+        controller.stopTableEditing()
+        
+        // Синхронизируем состояние таблицы только при ВКЛЮЧЕНИИ фильтра дубликатов
+        if (controller.isTableInitialized() && !dialogState.isFirstLoad() && hideDuplicates) {
+            onSyncTableChanges()
+        }
+        
+        dialogState.setHideDuplicatesMode(hideDuplicates)
+        
+        // После включения фильтра дублей сохраняем снимок для всех списков
+        if (hideDuplicates && !dialogState.isFirstLoad()) {
+            println("ADB_DEBUG: Saving snapshot after enabling hide duplicates")
+            controller.saveVisiblePresetsSnapshotForAllLists()
+        }
+        
+        // Проверяем, что таблица инициализирована
+        if (controller.isTableInitialized()) {
+            controller.removeTableModelListener()
+            
+            dialogState.withDuplicatesFilterSwitching {
+                dialogState.withTableUpdate {
+                    onLoadPresetsIntoTable()
+                }
+            }
+            
+            controller.addTableModelListener()
+            
+            // Очищаем снимок при отключении фильтра дубликатов
+            if (!hideDuplicates) {
+                duplicateManager.clearSnapshots()
+            }
+        }
+    }
+    
+}
