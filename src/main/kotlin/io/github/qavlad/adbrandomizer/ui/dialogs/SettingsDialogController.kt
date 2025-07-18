@@ -18,19 +18,16 @@ import io.github.qavlad.adbrandomizer.ui.services.PresetDistributor
 import io.github.qavlad.adbrandomizer.ui.renderers.ValidationRenderer
 import io.github.qavlad.adbrandomizer.ui.renderers.ListColumnHeaderRenderer
 import io.github.qavlad.adbrandomizer.utils.ButtonUtils
-import io.github.qavlad.adbrandomizer.utils.ValidationUtils
 import io.github.qavlad.adbrandomizer.utils.PresetUpdateUtils
-import io.github.qavlad.adbrandomizer.ui.theme.ColorScheme
-import java.awt.Component
 import java.awt.Container
 import java.awt.event.MouseEvent
 import java.awt.event.MouseAdapter
 import java.util.*
 import javax.swing.*
-import javax.swing.table.TableCellRenderer
 import com.intellij.openapi.application.ApplicationManager
 import javax.swing.SwingUtilities
 import io.github.qavlad.adbrandomizer.ui.components.TableWithAddButtonPanel
+import io.github.qavlad.adbrandomizer.ui.components.TableFactory
 
 /**
  * Контроллер для диалога настроек.
@@ -69,6 +66,7 @@ class SettingsDialogController(
     private val tableLoader = TableLoader(duplicateManager, viewModeManager)
     private val stateManager = StateManager()
     private val presetDistributor = PresetDistributor(duplicateManager)
+    private val tableFactory = TableFactory()
     private var updateListener: (() -> Unit)? = null
     private var globalClickListener: java.awt.event.AWTEventListener? = null
     private var currentPresetList: PresetList? = null
@@ -285,8 +283,7 @@ class SettingsDialogController(
      * Создает модель таблицы с начальными данными
      */
     fun createTableModel(): DevicePresetTableModel {
-        val columnNames = Vector(listOf(" ", "№", "Label", "Size (e.g., 1080x1920)", "DPI (e.g., 480)", "  "))
-        tableModel = DevicePresetTableModel(Vector<Vector<Any>>(), columnNames, historyManager)
+        tableModel = tableFactory.createTableModel(historyManager)
         // НЕ добавляем слушатель здесь, так как table еще не создана
 
         // НЕ загружаем список здесь, так как временные списки еще не созданы
@@ -299,132 +296,34 @@ class SettingsDialogController(
      * Создает кастомную таблицу с переопределенными методами рендеринга
      */
     fun createTable(model: DevicePresetTableModel): JBTable {
-        table = object : JBTable(model) {
-            override fun isCellEditable(row: Int, column: Int): Boolean {
-                // Проверяем, что это не строка с кнопкой
-                if (row >= 0 && row < rowCount) {
-                    val firstColumnValue = model.getValueAt(row, 0)
-                    if (firstColumnValue == "+") {
-                        return false // Не позволяем редактировать строку с кнопкой
-                    }
-                }
-
-                return super.isCellEditable(row, column)
+        // Создаем callback для обработки событий редактирования
+        val editingCallbacks = object : TableFactory.EditingCallbacks {
+            override fun onEditCellAt(row: Int, column: Int, oldValue: String) {
+                editingCellOldValue = oldValue
+                editingCellRow = row
+                editingCellColumn = column
             }
-
-            @Suppress("DEPRECATION")
-            override fun prepareRenderer(renderer: TableCellRenderer, row: Int, column: Int): Component {
-                // Проверяем, что индексы в допустимых пределах
-                if (row >= rowCount || column >= columnCount) {
-                    return super.prepareRenderer(renderer, row, column)
+            
+            override fun onRemoveEditor(row: Int, column: Int, oldValue: String?, newValue: String) {
+                println("ADB_DEBUG: removeEditor called - editingCellOldValue=$oldValue, row=$row, col=$column")
+                if (oldValue != null && newValue != oldValue) {
+                    println("ADB_DEBUG: removeEditor - adding command to history from removeEditor")
+                    historyManager.addCellEdit(row, column, oldValue, newValue)
                 }
-
-                val component = super.prepareRenderer(renderer, row, column)
-
-                if (component is JComponent) {
-                    // Проверяем, является ли это строкой с кнопкой
-                    val firstColumnValue = if (row >= 0 && row < rowCount) model.getValueAt(row, 0) else ""
-                    val isButtonRow = firstColumnValue == "+"
-
-                    if (isButtonRow && column == 0) {
-                        // Для ячейки с плюсиком проверяем hover состояние
-                        val currentHoverState = hoverState
-                        val isHovered = currentHoverState.isTableCellHovered(row, column)
-
-                        // Применяем hover эффект только если мышь именно на этой ячейке
-                        if (isHovered) {
-                            val normalBg = table.background ?: background
-                            val hoverBg = normalBg?.brighter()
-                            component.background = hoverBg ?: normalBg
-                        } else {
-                            component.background = table.background ?: background
-                        }
-                        component.isOpaque = true
-                        return component
-                    } else if (isButtonRow) {
-                        // Для остальных ячеек строки с кнопкой - обычный фон, НЕ применяем hover
-                        component.background = background
-                        component.foreground = foreground
-                        component.isOpaque = true
-                    } else {
-                        // Обычная логика для других строк
-                        val isHovered = hoverState.isTableCellHovered(row, column)
-                        val isSelectedCell = hoverState.isTableCellSelected(row, column)
-
-                        var isInvalidCell = false
-                        if (column in 3..4) {
-                            val value = tableModel.getValueAt(row, column)
-                            val text = value as? String ?: ""
-                            val isValid = if (text.isBlank()) true else when (column) {
-                                3 -> ValidationUtils.isValidSizeFormat(text)
-                                4 -> ValidationUtils.isValidDpi(text)
-                                else -> true
-                            }
-                            if (!isValid) {
-                                isInvalidCell = true
-                            }
-                        }
-
-                        component.background = ColorScheme.getTableCellBackground(
-                            isSelected = isSelectedCell,
-                            isHovered = isHovered,
-                            isError = isInvalidCell
-                        )
-                        component.foreground = ColorScheme.getTableCellForeground(
-                            isError = isInvalidCell
-                        )
-                        component.isOpaque = true
-                    }
-                }
-
-                return component
+                editingCellOldValue = null
+                editingCellRow = -1
+                editingCellColumn = -1
             }
-
-            override fun editCellAt(row: Int, column: Int): Boolean {
-                println("ADB_DEBUG: editCellAt called - row=$row, column=$column")
-                if (row >= 0 && column >= 0) {
-                    val oldValue = tableModel.getValueAt(row, column) as? String ?: ""
-                    println("ADB_DEBUG: editCellAt - setting editingCellOldValue='$oldValue'")
-                    editingCellOldValue = oldValue
-                    editingCellRow = row
-                    editingCellColumn = column
-                }
-                return super.editCellAt(row, column)
-            }
-
-            override fun removeEditor() {
-                println("ADB_DEBUG: removeEditor called - editingCellOldValue=$editingCellOldValue, row=$editingCellRow, col=$editingCellColumn")
-                if (editingCellOldValue != null) {
-                    val newValue = tableModel.getValueAt(editingCellRow, editingCellColumn) as? String ?: ""
-                    if (newValue != editingCellOldValue) {
-                        println("ADB_DEBUG: removeEditor - adding command to history from removeEditor")
-                        historyManager.addCellEdit(editingCellRow, editingCellColumn, editingCellOldValue!!, newValue)
-                    }
-                    editingCellOldValue = null
-                    editingCellRow = -1
-                    editingCellColumn = -1
-                }
-                super.removeEditor()
-            }
-
-            override fun changeSelection(rowIndex: Int, columnIndex: Int, toggle: Boolean, extend: Boolean) {
-                println("ADB_DEBUG: changeSelection called - row=$rowIndex, col=$columnIndex")
-                if (rowIndex >= 0 && columnIndex >= 0 && columnIndex in 2..4) {
-                    val oldRow = selectionModel.leadSelectionIndex
-                    val oldColumn = columnModel.selectionModel.leadSelectionIndex
-
-                    if (oldRow != rowIndex || oldColumn != columnIndex) {
-                        val oldValue = tableModel.getValueAt(rowIndex, columnIndex) as? String ?: ""
-                        println("ADB_DEBUG: changeSelection - setting editingCellOldValue='$oldValue' (was: '$editingCellOldValue')")
-                        editingCellOldValue = oldValue
-                        editingCellRow = rowIndex
-                        editingCellColumn = columnIndex
-                    }
-                }
-                super.changeSelection(rowIndex, columnIndex, toggle, extend)
+            
+            override fun onChangeSelection(row: Int, column: Int, oldValue: String) {
+                println("ADB_DEBUG: changeSelection - setting editingCellOldValue='$oldValue' (was: '$editingCellOldValue')")
+                editingCellOldValue = oldValue
+                editingCellRow = row
+                editingCellColumn = column
             }
         }
-
+        
+        table = tableFactory.createTable(model, { hoverState }, editingCallbacks)
         return table
     }
 
