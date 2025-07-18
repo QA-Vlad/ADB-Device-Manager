@@ -20,7 +20,6 @@ import io.github.qavlad.adbrandomizer.ui.services.TableColumnManager
 import io.github.qavlad.adbrandomizer.ui.services.SettingsPersistenceService
 import io.github.qavlad.adbrandomizer.ui.renderers.ValidationRenderer
 import io.github.qavlad.adbrandomizer.utils.ButtonUtils
-import io.github.qavlad.adbrandomizer.utils.PresetUpdateUtils
 import java.awt.Container
 import java.awt.event.MouseEvent
 import java.awt.event.MouseAdapter
@@ -59,7 +58,8 @@ class SettingsDialogController(
         private set
     override val historyManager = CommandHistoryManager(this)
     private val duplicateManager = DuplicateManager()
-    private val tableSynchronizer = TableDataSynchronizer(duplicateManager)
+    private val presetDistributor = PresetDistributor(duplicateManager)
+    private val tableSynchronizer = TableDataSynchronizer(duplicateManager, presetDistributor)
     private val viewModeManager = ViewModeManager()
     private val presetOperationsService = PresetOperationsService(historyManager)
     private val tableEventHandler = TableEventHandler(project)
@@ -67,7 +67,6 @@ class SettingsDialogController(
     private val validationService = ValidationService()
     private val tableLoader = TableLoader(duplicateManager, viewModeManager)
     private val stateManager = StateManager()
-    private val presetDistributor = PresetDistributor(duplicateManager)
     private val settingsPersistenceService = SettingsPersistenceService()
     private val componentsFactory = DialogComponentsFactory()
     private val eventHandlersInitializer = EventHandlersInitializer(this)
@@ -268,52 +267,15 @@ class SettingsDialogController(
      * Сохраняет текущее состояние таблицы во временные списки
      */
     private fun saveCurrentTableState() {
-        println("ADB_DEBUG: saveCurrentTableState - start, dialogState.isShowAllPresetsMode(): ${dialogState.isShowAllPresetsMode()}")
-        println("ADB_DEBUG: saveCurrentTableState - currentPresetList before: ${currentPresetList?.name}, presets: ${currentPresetList?.presets?.size}")
-
-        if (tableModel.rowCount == 0 && currentPresetList?.presets?.isNotEmpty() == true) {
-            println("ADB_DEBUG: skip saveCurrentTableState, table is empty but current list is not")
-            return
-        }
-
-        if (dialogState.isShowAllPresetsMode()) {
-            // В режиме "Show all presets" распределяем изменения по спискам
-            presetDistributor.distributePresetsToTempLists(
-                tableModel = tableModel,
-                tempPresetLists = tempListsManager.getMutableTempLists(),
-                isHideDuplicatesMode = dialogState.isHideDuplicatesMode(),
-                getListNameAtRow = ::getListNameAtRow,
-                saveVisiblePresetsSnapshotForAllLists = ::saveVisiblePresetsSnapshotForAllLists
-            )
-        } else {
-            // В обычном режиме обновляем только текущий список
-            currentPresetList?.let { list ->
-                // Используем ту же логику, что и в syncTableChangesToTempLists
-                if (dialogState.isHideDuplicatesMode()) {
-                    // Используем ту же логику, что и в syncTableChangesToTempLists
-                    val originalPresets = list.presets.map { it.copy() }
-
-                    // Определяем какие индексы были видимы в таблице
-                    val visibleIndices = duplicateManager.findVisibleIndices(originalPresets)
-
-                    // Получаем обновленные пресеты из таблицы
-                    // Включаем все пресеты, даже полностью пустые (для поддержки кнопки "+")
-                    val updatedTablePresets = tableModel.getPresets()
-
-                    // Создаем новый список, обновляя только видимые элементы
-                    val newPresets = PresetUpdateUtils.updatePresetsWithVisibleIndices(originalPresets, visibleIndices, updatedTablePresets)
-
-                    // Заменяем список
-                    list.presets.clear()
-                    list.presets.addAll(newPresets)
-                } else {
-                    // В обычном режиме без скрытия дубликатов - просто заменяем все
-                    list.presets.clear()
-                    // Включаем все пресеты, даже полностью пустые (для поддержки кнопки "+")
-                    list.presets.addAll(tableModel.getPresets())
-                }
-            }
-        }
+        tableSynchronizer.saveCurrentTableState(
+            tableModel = tableModel,
+            currentPresetList = currentPresetList,
+            tempListsManager = tempListsManager,
+            isShowAllPresetsMode = dialogState.isShowAllPresetsMode(),
+            isHideDuplicatesMode = dialogState.isHideDuplicatesMode(),
+            getListNameAtRow = ::getListNameAtRow,
+            saveVisiblePresetsSnapshotForAllLists = ::saveVisiblePresetsSnapshotForAllLists
+        )
     }
 
     /**
@@ -325,56 +287,22 @@ class SettingsDialogController(
     
     /**
      * Синхронизирует изменения из таблицы с временными списками после drag and drop
-     * Используется только для обновления порядка элементов без перезагрузки таблицы
      */
     private fun syncTableChangesToTempListsAfterDragDrop() {
-        if (!dialogState.isShowAllPresetsMode() || !dialogState.isHideDuplicatesMode()) {
-            return
-        }
-        
-        println("ADB_DEBUG: syncTableChangesToTempListsAfterDragDrop - updating order from table")
-        
-        // Собираем текущий порядок из таблицы
-        val tableOrder = mutableListOf<Pair<String, DevicePreset>>()
-        for (i in 0 until tableModel.rowCount) {
-            val listName = getListNameAtRow(i) ?: continue
-            val preset = getPresetAtRow(i)
-            tableOrder.add(listName to preset)
-        }
-        
-        // Обновляем порядок в tempPresetLists
-        tempListsManager.getTempLists().values.forEach { list ->
-            // Собираем пресеты этого списка из таблицы в правильном порядке
-            val presetsFromTable = tableOrder
-                .filter { it.first == list.name }
-                .map { it.second }
-            
-            // Также нужно сохранить скрытые дубликаты
-            val visibleKeys = presetsFromTable.map { "${it.label}|${it.size}|${it.dpi}" }.toSet()
-            val hiddenPresets = list.presets.filter { preset ->
-                val key = "${preset.label}|${preset.size}|${preset.dpi}"
-                !visibleKeys.contains(key)
-            }
-            
-            // Обновляем список: сначала видимые в новом порядке, потом скрытые
-            list.presets.clear()
-            list.presets.addAll(presetsFromTable.map { it.copy() })
-            list.presets.addAll(hiddenPresets)
-            
-            println("ADB_DEBUG:   Updated list ${list.name} with ${presetsFromTable.size} visible + ${hiddenPresets.size} hidden presets")
-        }
+        tableSynchronizer.syncTableChangesAfterDragDrop(
+            tableModel = tableModel,
+            tempListsManager = tempListsManager,
+            getListNameAtRow = ::getListNameAtRow,
+            getPresetAtRow = ::getPresetAtRow,
+            isShowAllPresetsMode = dialogState.isShowAllPresetsMode(),
+            isHideDuplicatesMode = dialogState.isHideDuplicatesMode()
+        )
     }
     
     /**
      * Синхронизирует изменения из таблицы с временными списками
      */
     private fun syncTableChangesToTempListsInternal() {
-        println("ADB_DEBUG: syncTableChangesToTempLists called")
-        println("ADB_DEBUG: Current call stack:")
-        Thread.currentThread().stackTrace.take(10).forEach { element ->
-            println("ADB_DEBUG:   at ${element.className}.${element.methodName}(${element.fileName}:${element.lineNumber})")
-        }
-        
         val context = TableDataSynchronizer.SyncContext(
             isTableUpdating = dialogState.isTableUpdating(),
             isSwitchingMode = dialogState.isSwitchingMode(),
@@ -383,113 +311,28 @@ class SettingsDialogController(
             isPerformingHistoryOperation = dialogState.isPerformingHistoryOperation(),
             isFirstLoad = dialogState.isFirstLoad(),
             isShowAllPresetsMode = dialogState.isShowAllPresetsMode(),
-            isHideDuplicatesMode = dialogState.isHideDuplicatesMode()
+            isHideDuplicatesMode = dialogState.isHideDuplicatesMode(),
+            isDragAndDropInProgress = dialogState.isDragAndDropInProgress()
         )
         
-        val syncCheck = tableSynchronizer.canSync(context)
-        if (!syncCheck.canSync) {
-            println("ADB_DEBUG: syncTableChangesToTempLists: ${syncCheck.reason}, skip")
-            return
-        }
-
-        println("ADB_DEBUG: syncTableChangesToTempLists - start, dialogState.isShowAllPresetsMode(): ${dialogState.isShowAllPresetsMode()}")
-        println("ADB_DEBUG: syncTableChangesToTempLists - currentPresetList before: ${currentPresetList?.name}, presets: ${currentPresetList?.presets?.size}")
-        tempListsManager.getTempLists().forEach { (k, v) -> println("ADB_DEBUG: TEMP_LIST $k: ${v.name}, presets: ${v.presets.size}") }
-
-        // Не синхронизируем при отключении фильтра дубликатов, если количество строк в таблице меньше количества пресетов
-        // Это означает, что в таблице показаны только видимые пресеты, а синхронизация испортит скрытые
-        if (!dialogState.isHideDuplicatesMode() && currentPresetList != null) {
-            val tablePresetCount = (0 until tableModel.rowCount).count { row ->
-                val firstColumn = tableModel.getValueAt(row, 0) as? String ?: ""
-                firstColumn != "+"
-            }
-            if (tablePresetCount < currentPresetList!!.presets.size) {
-                println("ADB_DEBUG: skip sync - filter just disabled, table has $tablePresetCount rows but list has ${currentPresetList!!.presets.size} presets")
-                return
-            }
-        }
-
-        if (dialogState.isShowAllPresetsMode()) {
-            presetDistributor.distributePresetsToTempLists(
-                tableModel = tableModel,
-                tempPresetLists = tempListsManager.getMutableTempLists(),
-                isHideDuplicatesMode = dialogState.isHideDuplicatesMode(),
-                getListNameAtRow = ::getListNameAtRow,
-                saveVisiblePresetsSnapshotForAllLists = if (dialogState.isDragAndDropInProgress()) {
-                    // Не создаем новый снимок во время drag and drop
-                    {}
-                } else {
-                    ::saveVisiblePresetsSnapshotForAllLists
-                }
-            )
-        } else {
-            currentPresetList?.let { list ->
-                // Всегда используем tableSynchronizer для корректной синхронизации
-                tableSynchronizer.syncCurrentList(tableModel, list, context) {
-                    loadPresetsIntoTable()
-                }
-            }
-        }
+        tableSynchronizer.syncTableChangesToTempLists(
+            tableModel = tableModel,
+            tempListsManager = tempListsManager,
+            currentPresetList = currentPresetList,
+            context = context,
+            getListNameAtRow = ::getListNameAtRow,
+            saveVisiblePresetsSnapshotForAllLists = ::saveVisiblePresetsSnapshotForAllLists,
+            onReloadRequired = { reloadTableWithoutListeners() },
+            historyManager = historyManager,
+            dialogState = dialogState
+        )
         
-        println("ADB_DEBUG: syncTableChangesToTempLists - after, currentPresetList: ${currentPresetList?.name}, presets: ${currentPresetList?.presets?.size}")
-        tempListsManager.getTempLists().forEach { (k, v) -> println("ADB_DEBUG: TEMP_LIST $k: ${v.name}, presets: ${v.presets.size}") }
-
-        // Проверяем, нужно ли обновить таблицу из-за изменения статуса дублей
-        if (dialogState.isHideDuplicatesMode() && !dialogState.isFirstLoad() && !dialogState.isSwitchingDuplicatesFilter()) {
-            // В режиме Show all всегда проверяем изменение статуса дублей
-            // так как дубликаты могут быть в разных списках
-            // Также всегда обновляем если был вызван distributePresetsToTempLists (в режиме Show all)
-            // НО не во время drag and drop операции
-            if (dialogState.isShowAllPresetsMode()) {
-                println("ADB_DEBUG: In Show all mode with hide duplicates, dialogState.isDragAndDropInProgress() = ${dialogState.isDragAndDropInProgress()}")
-                if (!dialogState.isDragAndDropInProgress()) {
-                    println("ADB_DEBUG: Reloading table after sync")
-                    // Перезагружаем таблицу для отображения изменений
-                    reloadTableWithoutListeners()
-                } else {
-                    println("ADB_DEBUG: Skipping table reload - drag and drop in progress")
-                    // Флаг будет сброшен в конце метода
-                }
-            } else if (checkIfDuplicateStatusChanged()) {
-                println("ADB_DEBUG: Duplicate status changed after edit, reloading table")
-                // Перезагружаем таблицу для отображения изменений
-                reloadTableWithoutListeners()
-            }
-        }
-
         // Обновляем снимок видимых пресетов после синхронизации
         if (dialogState.isHideDuplicatesMode()) {
             saveVisiblePresetsSnapshot()
         }
-
-        // Сбрасываем флаг drag and drop после всех операций
-        if (dialogState.isDragAndDropInProgress()) {
-            // Сохраняем состояние после операции для режима Hide Duplicates
-            if (dialogState.isHideDuplicatesMode()) {
-                val lastCommand = historyManager.getLastCommand()
-                if (lastCommand is io.github.qavlad.adbrandomizer.ui.commands.PresetMoveCommand) {
-                    lastCommand.saveStateAfter()
-                }
-            }
-            
-            SwingUtilities.invokeLater {
-                dialogState.endDragAndDrop()
-            }
-        }
     }
 
-    /**
-     * Проверяет, изменился ли статус дублей после редактирования
-     * @return true если статус изменился (появились новые не-дубли или исчезли старые дубли)
-     */
-    private fun checkIfDuplicateStatusChanged(): Boolean {
-        return duplicateManager.checkIfDuplicateStatusChanged(
-            tableModel = tableModel,
-            isShowAllMode = dialogState.isShowAllPresetsMode(),
-            tempLists = tempListsManager.getTempLists(),
-            currentPresetList = currentPresetList
-        )
-    }
 
 
     /**
@@ -1151,10 +994,6 @@ class SettingsDialogController(
     }
     
     /**
-     * Находит глобальные дубликаты во всех списках
-     */
-    
-    /**
      * Перезагружает таблицу с временным отключением слушателей для избежания рекурсии
      */
     private fun reloadTableWithoutListeners() {
@@ -1207,11 +1046,7 @@ class SettingsDialogController(
     }
     
     override fun syncTableChangesToTempLists() {
-        if (dialogState.isShowAllPresetsMode()) {
-            syncTableChangesToTempListsInternal()
-        } else {
-            tempListsManager.syncTableChangesToTempLists(tableModel, currentPresetList, false)
-        }
+        syncTableChangesToTempListsInternal()
     }
     
     
