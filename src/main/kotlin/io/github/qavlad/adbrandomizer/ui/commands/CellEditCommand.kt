@@ -1,13 +1,12 @@
 package io.github.qavlad.adbrandomizer.ui.commands
 
-import io.github.qavlad.adbrandomizer.ui.dialogs.SettingsDialogController
 import io.github.qavlad.adbrandomizer.ui.components.CellIdentity
 
 /**
  * Команда для редактирования ячейки таблицы
  */
 class CellEditCommand(
-    controller: SettingsDialogController,
+    controller: CommandContext,
     val cellId: CellIdentity,
     val oldValue: String,
     val newValue: String,
@@ -44,7 +43,7 @@ class CellEditCommand(
         val targetList = tempPresetLists.values.find { it.name == listName }
         if (targetList != null && targetList.name != currentPresetList?.name) {
             println("ADB_DEBUG: Switching to list '${targetList.name}' for command")
-            controller.setCurrentPresetListForCommands(targetList)
+            controller.setCurrentPresetList(targetList)
         }
 
         // 2. Найти координаты ячейки
@@ -98,11 +97,14 @@ class CellEditCommand(
 
             if (actualRowIndex >= 0 && actualRowIndex < list.presets.size) {
                 val preset = list.presets[actualRowIndex]
-                when (coords.second) {
-                    2 -> preset.label = value
-                    3 -> preset.size = value
-                    4 -> preset.dpi = value
+                // Создаем новый пресет с обновленным значением
+                val updatedPreset = when (coords.second) {
+                    2 -> preset.copy(label = value)
+                    3 -> preset.copy(size = value)
+                    4 -> preset.copy(dpi = value)
+                    else -> preset
                 }
+                list.presets[actualRowIndex] = updatedPreset
                 println("ADB_DEBUG: Updated preset in temp list '${list.name}': row=$actualRowIndex, col=${coords.second}, value=$value")
             } else {
                 // В режиме скрытия дубликатов может быть так, что мы не нашли точное совпадение

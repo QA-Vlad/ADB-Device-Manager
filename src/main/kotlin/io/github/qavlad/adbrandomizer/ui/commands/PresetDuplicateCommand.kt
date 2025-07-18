@@ -1,13 +1,12 @@
 package io.github.qavlad.adbrandomizer.ui.commands
 
-import io.github.qavlad.adbrandomizer.ui.dialogs.SettingsDialogController
 import io.github.qavlad.adbrandomizer.services.DevicePreset
 
 /**
  * Команда для дублирования пресета
  */
 class PresetDuplicateCommand(
-    controller: SettingsDialogController,
+    controller: CommandContext,
     private val originalIndex: Int,
     private val duplicateIndex: Int,
     private val presetData: DevicePreset

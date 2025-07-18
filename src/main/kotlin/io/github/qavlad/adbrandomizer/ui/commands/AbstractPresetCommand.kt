@@ -1,6 +1,5 @@
 package io.github.qavlad.adbrandomizer.ui.commands
 
-import io.github.qavlad.adbrandomizer.ui.dialogs.SettingsDialogController
 import io.github.qavlad.adbrandomizer.ui.components.DevicePresetTableModel
 import io.github.qavlad.adbrandomizer.services.PresetList
 import io.github.qavlad.adbrandomizer.services.DevicePreset
@@ -12,7 +11,7 @@ import javax.swing.SwingUtilities
  * Содержит общую логику и доступ к необходимым компонентам
  */
 abstract class AbstractPresetCommand(
-    protected val controller: SettingsDialogController
+    protected val controller: CommandContext
 ) : UndoableCommand {
     
     protected val tableModel: DevicePresetTableModel
@@ -22,36 +21,36 @@ abstract class AbstractPresetCommand(
         get() = controller.table
         
     protected val currentPresetList: PresetList?
-        get() = controller.getCurrentPresetListForCommands()
+        get() = controller.getCurrentPresetList()
         
     protected val tempPresetLists: Map<String, PresetList>
-        get() = controller.getTempPresetListsForCommands()
+        get() = controller.getTempPresetLists()
         
     protected val isShowAllPresetsMode: Boolean
-        get() = controller.getIsShowAllPresetsModeForCommands()
+        get() = controller.isShowAllPresetsMode()
         
     protected val isHideDuplicatesMode: Boolean
-        get() = controller.getIsHideDuplicatesModeForCommands()
+        get() = controller.isHideDuplicatesMode()
         
     protected val historyManager: CommandHistoryManager
         get() = controller.historyManager
         
     protected var isTableUpdating: Boolean
         get() = false // Не используется для чтения
-        set(value) = controller.setIsTableUpdatingForCommands(value)
+        set(value) = controller.setTableUpdating(value)
         
     /**
      * Обновляет таблицу после изменений
      */
     protected fun refreshTable() {
-        controller.refreshTableForCommands()
+        controller.refreshTable()
     }
     
     /**
      * Перезагружает пресеты в таблицу
      */
     protected fun loadPresetsIntoTable() {
-        controller.loadPresetsIntoTableForCommands(null)
+        controller.loadPresetsIntoTable(null)
     }
     
     /**
@@ -60,16 +59,23 @@ abstract class AbstractPresetCommand(
     protected fun withTableUpdateDisabled(block: () -> Unit) {
         println("ADB_DEBUG: withTableUpdateDisabled - start")
         isTableUpdating = true
-        controller.setIsTableUpdatingForCommands(true)
-        controller.setIsPerformingHistoryOperationForCommands(true)
+        controller.setTableUpdating(true)
+        controller.setPerformingHistoryOperation(true)
         try {
             block()
         } finally {
             isTableUpdating = false
-            controller.setIsTableUpdatingForCommands(false)
-            controller.setIsPerformingHistoryOperationForCommands(false)
+            controller.setTableUpdating(false)
+            controller.setPerformingHistoryOperation(false)
             println("ADB_DEBUG: withTableUpdateDisabled - end")
         }
+    }
+    
+    /**
+     * Обновляет UI для отражения текущего состояния
+     */
+    protected fun updateUI() {
+        controller.updateSelectedListInUI()
     }
     
     /**
@@ -92,10 +98,4 @@ abstract class AbstractPresetCommand(
         return rowData
     }
     
-    /**
-     * Обновляет UI для отражения текущего состояния
-     */
-    protected fun updateUI() {
-        controller.updateSelectedListInUI()
-    }
 }

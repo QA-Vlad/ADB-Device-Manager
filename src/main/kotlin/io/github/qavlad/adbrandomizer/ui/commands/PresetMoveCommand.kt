@@ -1,6 +1,5 @@
 package io.github.qavlad.adbrandomizer.ui.commands
 
-import io.github.qavlad.adbrandomizer.ui.dialogs.SettingsDialogController
 import io.github.qavlad.adbrandomizer.services.DevicePreset
 import io.github.qavlad.adbrandomizer.services.PresetList
 import io.github.qavlad.adbrandomizer.ui.components.DevicePresetTableModel
@@ -10,7 +9,7 @@ import java.util.Vector
  * Команда для перемещения пресета
  */
 class PresetMoveCommand(
-    controller: SettingsDialogController,
+    controller: CommandContext,
     private val fromIndex: Int,
     private val toIndex: Int,
     var orderAfter: List<String>
@@ -33,11 +32,11 @@ class PresetMoveCommand(
 
     init {
         // Если режим Hide Duplicates включен, сохраняем полное состояние
-        if (controller.getIsHideDuplicatesModeForCommands()) {
-            tempListsStateBefore = controller.getTempPresetListsForCommands().mapValues { (_, list) ->
+        if (controller.isHideDuplicatesMode()) {
+            tempListsStateBefore = controller.getTempPresetLists().mapValues { (_, list) ->
                 list.presets.map { it.copy() }
             }
-            visiblePresetsStateBefore = controller.getVisiblePresetsForCommands().map { it.copy() }
+            visiblePresetsStateBefore = controller.getVisiblePresets().map { it.copy() }
             
             // Сохраняем видимые элементы для каждого списка
             visiblePresetsBefore = extractVisiblePresets(tempListsStateBefore!!)
@@ -57,14 +56,13 @@ class PresetMoveCommand(
      * Сохраняет состояние перед синхронизацией (вызывается из контроллера перед syncTableChangesToTempLists)
      */
     fun saveStateBeforeSync() {
-        if (needToSaveStateAfter && controller.getIsHideDuplicatesModeForCommands()) {
+        if (needToSaveStateAfter && controller.isHideDuplicatesMode()) {
             println("ADB_DEBUG: PresetMoveCommand.saveStateBeforeSync() - saving state before sync")
             
             // Сохраняем текущее состояние таблицы (что видит пользователь)
-            val tableModel = controller.getTableModelForCommands()
+            val tableModel = controller.tableModel
             val visiblePresetsFromTable = mutableListOf<DevicePreset>()
             
-            if (tableModel != null) {
                 // Собираем видимые элементы из таблицы
                 for (i in 0 until tableModel.rowCount) {
                     val firstColumn = tableModel.getValueAt(i, 0) as? String ?: ""
@@ -77,11 +75,10 @@ class PresetMoveCommand(
                 }
                 
                 println("ADB_DEBUG: Visible presets from table after move: ${visiblePresetsFromTable.map { it.label }}")
-            }
             
             // Получаем текущий список
-            val currentList = controller.getCurrentPresetListForCommands()
-            val tempLists = controller.getTempPresetListsForCommands()
+            val currentList = controller.getCurrentPresetList()
+            val tempLists = controller.getTempPresetLists()
             
             currentList?.let { list ->
                 // Создаём копию состояния для сохранения после перемещения
@@ -179,24 +176,24 @@ class PresetMoveCommand(
      * Сохраняет состояние после выполнения операции (для обратной совместимости)
      */
     fun saveStateAfter() {
-        println("ADB_DEBUG: PresetMoveCommand.saveStateAfter() - isHideDuplicates: ${controller.getIsHideDuplicatesModeForCommands()}")
-        if (needToSaveStateAfter && controller.getIsHideDuplicatesModeForCommands()) {
-            tempListsStateAfter = controller.getTempPresetListsForCommands().mapValues { (_, list) ->
+        println("ADB_DEBUG: PresetMoveCommand.saveStateAfter() - isHideDuplicates: ${controller.isHideDuplicatesMode()}")
+        if (needToSaveStateAfter && controller.isHideDuplicatesMode()) {
+            tempListsStateAfter = controller.getTempPresetLists().mapValues { (_, list) ->
                 list.presets.map { it.copy() }
             }
-            visiblePresetsStateAfter = controller.getVisiblePresetsForCommands().map { it.copy() }
+            visiblePresetsStateAfter = controller.getVisiblePresets().map { it.copy() }
             println("ADB_DEBUG: Saved tempListsStateAfter with ${tempListsStateAfter?.size} lists and ${visiblePresetsStateAfter?.size} visible presets")
             needToSaveStateAfter = false
         }
     }
 
     override fun undo() {
-        println("ADB_DEBUG: PresetMoveCommand.undo() - isHideDuplicates: ${controller.getIsHideDuplicatesModeForCommands()}, tempListsStateBefore: ${tempListsStateBefore != null}")
+        println("ADB_DEBUG: PresetMoveCommand.undo() - isHideDuplicates: ${controller.isHideDuplicatesMode()}, tempListsStateBefore: ${tempListsStateBefore != null}")
         
         // Добавляем отладку состояния до восстановления
-        val currentList = controller.getCurrentPresetListForCommands()
+        val currentList = controller.getCurrentPresetList()
         currentList?.let {
-            val tempList = controller.getTempPresetListsForCommands()[it.id]
+            val tempList = controller.getTempPresetLists()[it.id]
             println("ADB_DEBUG: Before undo - current tempList order: ${tempList?.presets?.map { p -> p.label }}")
         }
         
@@ -206,22 +203,22 @@ class PresetMoveCommand(
                 println("ADB_DEBUG: Using saved state for undo")
                 restoreState(tempListsStateBefore!!, visiblePresetsStateBefore, visiblePresetsBefore)
             }
-            controller.getIsShowAllPresetsModeForCommands() -> {
-                controller.getTableModelForCommands()?.moveRow(toIndex, toIndex, fromIndex)
-                controller.syncTableChangesToTempListsForCommands()
+            controller.isShowAllPresetsMode() -> {
+                controller.tableModel.moveRow(toIndex, toIndex, fromIndex)
+                controller.syncTableChangesToTempLists()
             }
             else -> {
-                controller.getTempPresetListsForCommands()[controller.getCurrentPresetListForCommands()?.id]?.let { list ->
+                controller.getTempPresetLists()[controller.getCurrentPresetList()?.id]?.let { list ->
                     val preset = list.presets.removeAt(toIndex)
                     list.presets.add(fromIndex, preset)
-                    controller.loadPresetsIntoTableForCommands(null)
+                    controller.loadPresetsIntoTable(null)
                 }
             }
         }
     }
 
     override fun redo() {
-        println("ADB_DEBUG: PresetMoveCommand.redo() - isHideDuplicates: ${controller.getIsHideDuplicatesModeForCommands()}, tempListsStateAfter: ${tempListsStateAfter != null}")
+        println("ADB_DEBUG: PresetMoveCommand.redo() - isHideDuplicates: ${controller.isHideDuplicatesMode()}, tempListsStateAfter: ${tempListsStateAfter != null}")
         
         // Если состояние было сохранено (операция была выполнена в режиме Hide Duplicates),
         // то восстанавливаем это состояние независимо от текущего режима
@@ -231,15 +228,15 @@ class PresetMoveCommand(
         } else {
             // Иначе выполняем стандартное перемещение
             when {
-                controller.getIsShowAllPresetsModeForCommands() -> {
-                    controller.getTableModelForCommands()?.moveRow(fromIndex, fromIndex, toIndex)
-                    controller.syncTableChangesToTempListsForCommands()
+                controller.isShowAllPresetsMode() -> {
+                    controller.tableModel.moveRow(fromIndex, fromIndex, toIndex)
+                    controller.syncTableChangesToTempLists()
                 }
                 else -> {
-                    controller.getTempPresetListsForCommands()[controller.getCurrentPresetListForCommands()?.id]?.let { list ->
+                    controller.getTempPresetLists()[controller.getCurrentPresetList()?.id]?.let { list ->
                         val preset = list.presets.removeAt(fromIndex)
                         list.presets.add(toIndex, preset)
-                        controller.loadPresetsIntoTableForCommands(null)
+                        controller.loadPresetsIntoTable(null)
                     }
                 }
             }
@@ -287,14 +284,14 @@ class PresetMoveCommand(
         savedVisiblePresets: Map<String, List<DevicePreset>>?
     ) {
         println("ADB_DEBUG: PresetMoveCommand.restoreState() - Starting restoration")
-        println("ADB_DEBUG: Current isHideDuplicatesMode: ${controller.getIsHideDuplicatesModeForCommands()}")
-        println("ADB_DEBUG: Current isShowAllMode: ${controller.getIsShowAllPresetsModeForCommands()}")
+        println("ADB_DEBUG: Current isHideDuplicatesMode: ${controller.isHideDuplicatesMode()}")
+        println("ADB_DEBUG: Current isShowAllMode: ${controller.isShowAllPresetsMode()}")
         println("ADB_DEBUG: Saved visiblePresets: ${visiblePresets?.size}")
 
-        controller.setIsPerformingHistoryOperationForCommands(true)
+        controller.setPerformingHistoryOperation(true)
 
         try {
-            val tempLists = controller.getTempPresetListsForCommands()
+            val tempLists = controller.getTempPresetLists()
             state.forEach { (listId, presets) ->
                 tempLists[listId]?.let { list ->
                     println("ADB_DEBUG: Restoring list '$listId' (${list.name}) with ${presets.size} presets")
@@ -306,17 +303,17 @@ class PresetMoveCommand(
             }
 
             // Загружаем пресеты с учетом сохраненных видимых элементов
-            if (controller.getIsHideDuplicatesModeForCommands() && savedVisiblePresets != null) {
+            if (controller.isHideDuplicatesMode() && savedVisiblePresets != null) {
                 // В режиме скрытия дубликатов используем сохраненные видимые элементы
                 loadExactVisiblePresets(savedVisiblePresets)
             } else {
                 // В обычном режиме загружаем все пресеты
-                controller.loadPresetsIntoTableForCommands(null)
+                controller.loadPresetsIntoTable(null)
             }
             
-            println("ADB_DEBUG: Table now has ${controller.getTableModelForCommands()?.rowCount} rows")
+            println("ADB_DEBUG: Table now has ${controller.tableModel.rowCount} rows")
         } finally {
-            controller.setIsPerformingHistoryOperationForCommands(false)
+            controller.setPerformingHistoryOperation(false)
         }
     }
     
@@ -326,8 +323,8 @@ class PresetMoveCommand(
     private fun loadExactVisiblePresets(
         savedVisiblePresets: Map<String, List<DevicePreset>>
     ) {
-        val tableModel = controller.getTableModelForCommands() ?: return
-        val currentList = controller.getCurrentPresetListForCommands() ?: return
+        val tableModel = controller.tableModel
+        val currentList = controller.getCurrentPresetList() ?: return
         
         // Очищаем таблицу
         while (tableModel.rowCount > 0) {

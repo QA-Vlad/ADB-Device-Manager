@@ -1,13 +1,12 @@
 package io.github.qavlad.adbrandomizer.ui.commands
 
-import io.github.qavlad.adbrandomizer.ui.dialogs.SettingsDialogController
 import io.github.qavlad.adbrandomizer.services.DevicePreset
 
 /**
  * Команда для удаления пресета
  */
 class PresetDeleteCommand(
-    controller: SettingsDialogController,
+    controller: CommandContext,
     private val rowIndex: Int,
     private val presetData: DevicePreset,
     private val listName: String? = null,
@@ -42,7 +41,7 @@ class PresetDeleteCommand(
                 if (!isShowAllPresetsMode && targetListName != currentPresetList?.name) {
                     val listToSwitch = tempPresetLists.values.find { it.name == targetListName }
                     if (listToSwitch != null) {
-                        controller.setCurrentPresetListForCommands(listToSwitch)
+                        controller.setCurrentPresetList(listToSwitch)
                     }
                 }
             }

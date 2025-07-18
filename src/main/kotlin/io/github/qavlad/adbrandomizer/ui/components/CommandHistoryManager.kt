@@ -30,7 +30,7 @@ class CommandHistoryManager(
     fun addCellEdit(row: Int, column: Int, oldValue: String, newValue: String) {
         if (oldValue != newValue) {
             val cellId = getCellId(row, column)
-            val listName = controller.getCurrentPresetListForCommands()?.name
+            val listName = controller.getCurrentPresetList()?.name
             
             // Проверяем, не добавляли ли мы точно такую же команду только что
             val lastCommand = historyStack.lastOrNull()
