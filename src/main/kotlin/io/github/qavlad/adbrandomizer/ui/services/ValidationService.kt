@@ -52,4 +52,19 @@ class ValidationService {
     private fun validatePresetField(value: String, validator: (String) -> Boolean): Boolean {
         return value.isBlank() || validator(value)
     }
+    
+    /**
+     * Проверяет поля и обновляет состояние диалога
+     * @return true если все поля валидны
+     */
+    fun validateFieldsAndUpdateUI(
+        tableModel: DevicePresetTableModel,
+        onUpdateOKButton: (Boolean) -> Unit,
+        onRepaintTable: () -> Unit
+    ): Boolean {
+        val allValid = validateAllFields(tableModel)
+        onUpdateOKButton(allValid)
+        onRepaintTable()
+        return allValid
+    }
 }

@@ -294,7 +294,7 @@ class SettingsDialogController(
                     val originalPresets = list.presets.map { it.copy() }
 
                     // Определяем какие индексы были видимы в таблице
-                    val visibleIndices = findVisibleIndices(originalPresets)
+                    val visibleIndices = duplicateManager.findVisibleIndices(originalPresets)
 
                     // Получаем обновленные пресеты из таблицы
                     // Включаем все пресеты, даже полностью пустые (для поддержки кнопки "+")
@@ -483,86 +483,14 @@ class SettingsDialogController(
      * @return true если статус изменился (появились новые не-дубли или исчезли старые дубли)
      */
     private fun checkIfDuplicateStatusChanged(): Boolean {
-        if (dialogState.isShowAllPresetsMode()) {
-            // В режиме Show all проверяем все пресеты из всех списков
-            val allPresets = mutableListOf<DevicePreset>()
-            tempListsManager.getTempLists().values.forEach { list ->
-                allPresets.addAll(list.presets)
-            }
-
-            // Проверяем, есть ли в таблице элементы, которые должны быть скрыты как дубликаты
-            val seenKeys = mutableSetOf<String>()
-            for (row in 0 until tableModel.rowCount) {
-                val firstColumn = tableModel.getValueAt(row, 0) as? String ?: ""
-                if (firstColumn != "+") {
-                    val preset = tableModel.getPresetAt(row)
-                    if (preset != null && preset.size.isNotBlank() && preset.dpi.isNotBlank()) {
-                        val key = createPresetKey(preset)
-                        if (seenKeys.contains(key)) {
-                            // Найден дубликат в таблице, который должен быть скрыт
-                            println("ADB_DEBUG: Found duplicate in table that should be hidden (Show all mode): $key")
-                            return true
-                        }
-                        seenKeys.add(key)
-                    }
-                }
-            }
-
-            // Также проверяем количество видимых строк
-            val currentDuplicates = findDuplicatesInList(allPresets)
-            val visibleRowCount = (0 until tableModel.rowCount).count { row ->
-                val firstColumn = tableModel.getValueAt(row, 0) as? String ?: ""
-                firstColumn != "+"
-            }
-
-            // Если количество не-дублей изменилось, нужно обновить таблицу
-            val expectedVisibleCount = allPresets.size - currentDuplicates.size
-            return visibleRowCount != expectedVisibleCount
-        } else {
-            // В обычном режиме проверяем только текущий список
-            currentPresetList?.let { list ->
-                // Получаем текущие дубликаты в списке
-                val currentDuplicates = findDuplicatesInList(list.presets)
-                
-                // Проверяем, есть ли в таблице элементы, которые должны быть скрыты как дубликаты
-                val seenKeys = mutableSetOf<String>()
-                for (row in 0 until tableModel.rowCount) {
-                    val firstColumn = tableModel.getValueAt(row, 0) as? String ?: ""
-                    if (firstColumn != "+") {
-                        val preset = tableModel.getPresetAt(row)
-                        if (preset != null && preset.size.isNotBlank() && preset.dpi.isNotBlank()) {
-                            val key = createPresetKey(preset)
-                            if (seenKeys.contains(key)) {
-                                // Найден дубликат в таблице, который должен быть скрыт
-                                println("ADB_DEBUG: Found duplicate in table that should be hidden: $key")
-                                return true
-                            }
-                            seenKeys.add(key)
-                        }
-                    }
-                }
-
-                // Также проверяем количество видимых строк
-                val visibleRowCount = (0 until tableModel.rowCount).count { row ->
-                    val firstColumn = tableModel.getValueAt(row, 0) as? String ?: ""
-                    firstColumn != "+"
-                }
-
-                // Если количество не-дублей изменилось, нужно обновить таблицу
-                val expectedVisibleCount = list.presets.size - currentDuplicates.size
-                return visibleRowCount != expectedVisibleCount
-            }
-        }
-        return false
+        return duplicateManager.checkIfDuplicateStatusChanged(
+            tableModel = tableModel,
+            isShowAllMode = dialogState.isShowAllPresetsMode(),
+            tempLists = tempListsManager.getTempLists(),
+            currentPresetList = currentPresetList
+        )
     }
 
-    /**
-     * Находит дубликаты в списке пресетов
-     * @return количество дубликатов (не считая первое вхождение)
-     */
-    private fun findDuplicatesInList(presets: List<DevicePreset>): Set<Int> {
-        return duplicateManager.findDuplicateIndices(presets)
-    }
 
     /**
      * Удаляет пресет из временного списка
@@ -914,9 +842,11 @@ class SettingsDialogController(
             return
         }
 
-        val allValid = validationService.validateAllFields(tableModel)
-        dialog.isOKActionEnabled = allValid
-        table.repaint()
+        validationService.validateFieldsAndUpdateUI(
+            tableModel = tableModel,
+            onUpdateOKButton = { isValid -> dialog.isOKActionEnabled = isValid },
+            onRepaintTable = { table.repaint() }
+        )
     }
 
     // === Сохранение и загрузка ===
@@ -939,19 +869,7 @@ class SettingsDialogController(
     // === Вспомогательные методы ===
 
     fun addHoverEffectToDialogButtons(container: Container) {
-        fun processButtons(c: Container) {
-            for (component in c.components) {
-                when (component) {
-                    is JButton -> {
-                        if (component.text == "Save" || component.text == "Cancel") {
-                            ButtonUtils.addHoverEffect(component)
-                        }
-                    }
-                    is Container -> processButtons(component)
-                }
-            }
-        }
-        processButtons(container)
+        ButtonUtils.addHoverEffectToDialogButtons(container)
     }
 
     private fun getPresetAtRow(row: Int): DevicePreset {
@@ -1141,7 +1059,7 @@ class SettingsDialogController(
                             val seenKeys = mutableSetOf<String>()
                             var filteredCount = 0
                             val filtered = sourcePresets.filter { preset ->
-                                val key = createPresetKey(preset)
+                                val key = duplicateManager.createPresetKey(preset)
                                 if (preset.size.isBlank() || preset.dpi.isBlank() || !seenKeys.contains(key)) {
                                     seenKeys.add(key)
                                     true
@@ -1193,13 +1111,13 @@ class SettingsDialogController(
         
         if (dialogState.isHideDuplicatesMode()) {
             // Загружаем с учетом скрытых дубликатов
-            val duplicateKeys = findGlobalDuplicateKeys(allPresets)
+            val duplicateKeys = duplicateManager.findGlobalDuplicateKeys(allPresets)
             val processedKeys = mutableSetOf<String>()
             
             allPresets.forEach { presetPair ->
                 val listName = presetPair.first
                 val preset = presetPair.second
-                val key = createPresetKey(preset)
+                val key = duplicateManager.createPresetKey(preset)
                 val isEmptyPreset = preset.label.isBlank() && preset.size.isBlank() && preset.dpi.isBlank()
                 
                 val shouldSkip = when {
@@ -1235,49 +1153,6 @@ class SettingsDialogController(
     /**
      * Находит глобальные дубликаты во всех списках
      */
-    private fun findGlobalDuplicateKeys(allPresets: List<Pair<String, DevicePreset>>): Set<String> {
-        val keyCount = mutableMapOf<String, Int>()
-        
-        allPresets.forEach { presetPair ->
-            val preset = presetPair.second
-            if (preset.size.isNotBlank() && preset.dpi.isNotBlank()) {
-                val key = createPresetKey(preset)
-                keyCount[key] = keyCount.getOrDefault(key, 0) + 1
-            }
-        }
-        
-        return keyCount.filter { it.value > 1 }.keys.toSet()
-    }
-    
-    /**
-     * Создает уникальный ключ для пресета на основе размера и DPI
-     */
-    private fun createPresetKey(preset: DevicePreset, index: Int? = null): String {
-        return if (preset.size.isNotBlank() && preset.dpi.isNotBlank()) {
-            "${preset.size}|${preset.dpi}"
-        } else {
-            "unique_${index ?: System.currentTimeMillis()}"
-        }
-    }
-    
-    /**
-     * Находит видимые индексы пресетов, исключая дубликаты
-     */
-    private fun findVisibleIndices(presets: List<DevicePreset>): List<Int> {
-        val visibleIndices = mutableListOf<Int>()
-        val seenKeys = mutableSetOf<String>()
-        
-        presets.forEachIndexed { index, preset ->
-            val key = createPresetKey(preset, index)
-            
-            if (!seenKeys.contains(key)) {
-                seenKeys.add(key)
-                visibleIndices.add(index)
-            }
-        }
-        
-        return visibleIndices
-    }
     
     /**
      * Перезагружает таблицу с временным отключением слушателей для избежания рекурсии

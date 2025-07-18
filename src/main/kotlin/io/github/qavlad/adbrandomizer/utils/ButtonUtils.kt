@@ -1,6 +1,7 @@
 // Файл: src/main/kotlin/io/github/qavlad/adbrandomizer/utils/ButtonUtils.kt
 package io.github.qavlad.adbrandomizer.utils
 
+import java.awt.Container
 import javax.swing.JButton
 import javax.swing.JCheckBox
 
@@ -42,5 +43,29 @@ object ButtonUtils {
                 checkBox.cursor = java.awt.Cursor.getDefaultCursor()
             }
         })
+    }
+    
+    /**
+     * Добавляет эффект наведения на кнопки диалога (Save и Cancel)
+     * @param container корневой контейнер для поиска кнопок
+     */
+    fun addHoverEffectToDialogButtons(container: Container) {
+        processButtons(container)
+    }
+    
+    /**
+     * Рекурсивно обрабатывает контейнер и его дочерние элементы для поиска кнопок
+     */
+    private fun processButtons(container: Container) {
+        for (component in container.components) {
+            when (component) {
+                is JButton -> {
+                    if (component.text == "Save" || component.text == "Cancel") {
+                        addHoverEffect(component)
+                    }
+                }
+                is Container -> processButtons(component)
+            }
+        }
     }
 }
