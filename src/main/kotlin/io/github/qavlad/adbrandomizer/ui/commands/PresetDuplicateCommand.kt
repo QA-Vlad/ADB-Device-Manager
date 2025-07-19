@@ -47,7 +47,7 @@ class PresetDuplicateCommand(
             }
             
             refreshTable()
-        updateUI()
+            updateUI()
         }
     }
     

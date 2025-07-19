@@ -25,6 +25,10 @@ class PresetDeleteCommand(
     }
 
     override fun undo() {
+        logCommandExecutionMode("PresetDeleteCommand.undo()")
+        
+        // Для команд добавления/удаления не переключаем режим, так как они синхронизируются между режимами
+        
         val targetListName = listName ?: currentPresetList?.name
         println("ADB_DEBUG: Undoing delete for preset '${presetData.label}' in list '$targetListName'")
 
@@ -57,6 +61,10 @@ class PresetDeleteCommand(
     }
 
     override fun redo() {
+        logCommandExecutionMode("PresetDeleteCommand.redo()")
+        
+        // Для команд добавления/удаления не переключаем режим, так как они синхронизируются между режимами
+        
         val targetListName = listName ?: currentPresetList?.name
         println("ADB_DEBUG: Redoing delete for preset '${presetData.label}' in list '$targetListName'")
 

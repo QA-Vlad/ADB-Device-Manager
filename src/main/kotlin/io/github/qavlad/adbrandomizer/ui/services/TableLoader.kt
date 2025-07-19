@@ -12,7 +12,9 @@ import javax.swing.SwingUtilities
  */
 class TableLoader(
     private val duplicateManager: DuplicateManager,
-    private val viewModeManager: ViewModeManager
+    private val viewModeManager: ViewModeManager,
+    private val presetOrderManager: PresetOrderManager = PresetOrderManager(),
+    private val tableSortingService: TableSortingService? = null
 ) {
     
     /**
@@ -154,11 +156,27 @@ class TableLoader(
         @Suppress("UNUSED_PARAMETER") isFirstLoad: Boolean,
         @Suppress("UNUSED_PARAMETER") isSwitchingDuplicatesFilter: Boolean
     ) {
-        val duplicateKeys = findGlobalDuplicateKeys(allPresets)
+        // Применяем сохраненный порядок для режима Show All со скрытыми дубликатами
+        val savedOrder = presetOrderManager.getShowAllHideDuplicatesOrder()
+        val orderedPresets = if (savedOrder != null) {
+            // Создаем карту для быстрого поиска
+            val orderMap = savedOrder.withIndex().associate { it.value to it.index }
+            allPresets.sortedBy { (listName, preset) ->
+                val key = "$listName::${preset.label}"
+                orderMap[key] ?: Int.MAX_VALUE
+            }
+        } else {
+            allPresets
+        }
+        
+        // Применяем сортировку, если она активна
+        val sortedPresets = tableSortingService?.sortPresetsWithLists(orderedPresets, true) ?: orderedPresets
+        
+        val duplicateKeys = findGlobalDuplicateKeys(sortedPresets)
         val processedKeys = mutableSetOf<String>()
         var skippedCount = 0
         
-        allPresets.forEach { (listName, preset) ->
+        sortedPresets.forEach { (listName, preset) ->
             val key = "${preset.size}|${preset.dpi}"
             val isEmptyPreset = preset.label.isBlank() && preset.size.isBlank() && preset.dpi.isBlank()
             
@@ -189,9 +207,32 @@ class TableLoader(
         tableModel: DevicePresetTableModel,
         allPresets: List<Pair<String, DevicePreset>>
     ) {
-        allPresets.forEach { (listName, preset) ->
+        println("ADB_DEBUG: loadAllPresetsNormal - start")
+        println("ADB_DEBUG:   allPresets size: ${allPresets.size}")
+        println("ADB_DEBUG:   First 5 presets:")
+        allPresets.take(5).forEachIndexed { index, (listName, preset) ->
+            println("ADB_DEBUG:     [$index] $listName - ${preset.label} | ${preset.size} | ${preset.dpi}")
+        }
+        
+        // Применяем сортировку, если она активна
+        val sortedPresets = if (tableSortingService != null) {
+            println("ADB_DEBUG:   tableSortingService is not null, checking for active sorting")
+            val sorted = tableSortingService.sortPresetsWithLists(allPresets, false)
+            println("ADB_DEBUG:   After sorting, first 5 presets:")
+            sorted.take(5).forEachIndexed { index, (listName, preset) ->
+                println("ADB_DEBUG:     [$index] $listName - ${preset.label} | ${preset.size} | ${preset.dpi}")
+            }
+            sorted
+        } else {
+            println("ADB_DEBUG:   tableSortingService is null, no sorting")
+            allPresets
+        }
+        
+        println("ADB_DEBUG:   Adding ${sortedPresets.size} rows to table")
+        sortedPresets.forEach { (listName, preset) ->
             addPresetRow(tableModel, preset, listName)
         }
+        println("ADB_DEBUG: loadAllPresetsNormal - done")
     }
     
     /**
@@ -223,9 +264,36 @@ class TableLoader(
         tableModel: DevicePresetTableModel,
         list: PresetList
     ) {
-        list.presets.forEach { preset ->
+        println("ADB_DEBUG: loadCurrentListNormal - start")
+        println("ADB_DEBUG: loadCurrentListNormal - list: ${list.name}, presets count: ${list.presets.size}")
+        
+        // Пресеты уже в правильном порядке в файле, поэтому просто используем их
+        val presets = list.presets
+        
+        println("ADB_DEBUG: loadCurrentListNormal - presets from list:")
+        presets.forEachIndexed { index, preset ->
+            println("ADB_DEBUG:   [$index] ${preset.label} | ${preset.size} | ${preset.dpi}")
+        }
+        
+        // Применяем сортировку, если она активна
+        val sortedPresets = if (tableSortingService != null) {
+            println("ADB_DEBUG: loadCurrentListNormal - tableSortingService is not null, applying sort")
+            val sorted = tableSortingService.sortPresets(presets, isShowAll = false, isHideDuplicates = false)
+            println("ADB_DEBUG: loadCurrentListNormal - after sorting:")
+            sorted.forEachIndexed { index, preset ->
+                println("ADB_DEBUG:   [$index] ${preset.label} | ${preset.size} | ${preset.dpi}")
+            }
+            sorted
+        } else {
+            println("ADB_DEBUG: loadCurrentListNormal - tableSortingService is null, no sorting")
+            presets
+        }
+        
+        println("ADB_DEBUG: loadCurrentListNormal - adding ${sortedPresets.size} rows to table")
+        sortedPresets.forEach { preset ->
             addPresetRow(tableModel, preset, null)
         }
+        println("ADB_DEBUG: loadCurrentListNormal - done")
     }
     
     /**

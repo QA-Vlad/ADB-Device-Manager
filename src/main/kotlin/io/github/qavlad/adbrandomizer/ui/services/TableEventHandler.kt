@@ -2,7 +2,6 @@ package io.github.qavlad.adbrandomizer.ui.services
 
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.SystemInfo
-import io.github.qavlad.adbrandomizer.services.DevicePreset
 import io.github.qavlad.adbrandomizer.services.PresetApplicationService
 import io.github.qavlad.adbrandomizer.ui.components.DevicePresetTableModel
 import java.awt.event.MouseEvent
@@ -26,7 +25,6 @@ class TableEventHandler(
         row: Int,
         column: Int,
         clickCount: Int,
-        onApplyPreset: (DevicePreset, Boolean, Boolean) -> Unit,
         onAddNewPreset: () -> Unit
     ) {
         // Проверяем, является ли это строкой с кнопкой "+"
@@ -42,7 +40,8 @@ class TableEventHandler(
             0 -> handleCheckboxClick(tableModel, row)
             // Колонка 1 - это номер пресета, не обрабатываем клики по ней
             2, 3, 4 -> handlePresetCellClick(table, row, column, clickCount)
-            5 -> handleApplyClick(tableModel, row, onApplyPreset)
+            // Колонка 5 - это кнопка удаления обрабатывается через ButtonEditor
+            // Не обрабатываем клики по ней здесь
         }
     }
     
@@ -149,23 +148,4 @@ class TableEventHandler(
         }
     }
     
-    private fun handleApplyClick(
-        tableModel: DevicePresetTableModel,
-        row: Int,
-        onApplyPreset: (DevicePreset, Boolean, Boolean) -> Unit
-    ) {
-        val preset = DevicePreset(
-            label = tableModel.getValueAt(row, 2) as? String ?: "",
-            size = tableModel.getValueAt(row, 3) as? String ?: "",
-            dpi = tableModel.getValueAt(row, 4) as? String ?: ""
-        )
-        
-        // Определяем, что применять на основе заполненности полей
-        val setSize = preset.size.isNotBlank()
-        val setDpi = preset.dpi.isNotBlank()
-        
-        if (setSize || setDpi) {
-            onApplyPreset(preset, setSize, setDpi)
-        }
-    }
 }

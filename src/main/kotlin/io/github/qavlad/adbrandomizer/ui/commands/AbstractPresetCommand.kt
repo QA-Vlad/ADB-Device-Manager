@@ -14,6 +14,11 @@ abstract class AbstractPresetCommand(
     protected val controller: CommandContext
 ) : UndoableCommand {
     
+    // Сохраняем режим, в котором была выполнена операция
+    protected val wasShowAllMode = controller.isShowAllPresetsMode()
+    protected val wasHideDuplicatesMode = controller.isHideDuplicatesMode()
+    protected val originalListId = controller.getCurrentPresetList()?.id
+    
     protected val tableModel: DevicePresetTableModel
         get() = controller.tableModel
         
@@ -98,4 +103,68 @@ abstract class AbstractPresetCommand(
         return rowData
     }
     
+    /**
+     * Проверяет, нужно ли переключить режим для выполнения операции
+     */
+    protected fun needToSwitchMode(): Boolean {
+        val currentShowAll = controller.isShowAllPresetsMode()
+        val currentListId = controller.getCurrentPresetList()?.id
+        
+        // Проверяем режим Show All
+        if (wasShowAllMode != currentShowAll) {
+            return true
+        }
+        
+        // Если не в режиме Show All, проверяем текущий список
+        if (!wasShowAllMode && originalListId != null && originalListId != currentListId) {
+            return true
+        }
+        
+        return false
+    }
+    
+    /**
+     * Переключается в режим, в котором была выполнена операция
+     */
+    protected fun switchToOriginalMode() {
+        println("ADB_DEBUG: Switching to original mode...")
+        println("ADB_DEBUG: Original: ShowAll=$wasShowAllMode, HideDuplicates=$wasHideDuplicatesMode, listId=$originalListId")
+        
+        // Сначала переключаем список, если нужно
+        if (!wasShowAllMode && originalListId != null) {
+            val currentListId = controller.getCurrentPresetList()?.id
+            if (originalListId != currentListId) {
+                println("ADB_DEBUG: Switching to list $originalListId")
+                controller.switchToList(originalListId)
+            }
+        }
+        
+        // Затем переключаем режим Show All
+        if (wasShowAllMode != controller.isShowAllPresetsMode()) {
+            println("ADB_DEBUG: Switching Show All mode to $wasShowAllMode")
+            controller.setShowAllMode(wasShowAllMode)
+        }
+    }
+    
+    /**
+     * Выводит отладочную информацию о режимах выполнения команды
+     */
+    protected fun logCommandExecutionMode(commandName: String, listName: String? = null, additionalInfo: String = "") {
+        println("ADB_DEBUG: $commandName - isShowAllMode: $isShowAllPresetsMode, listName: $listName$additionalInfo")
+        println("ADB_DEBUG: Command was executed in: ShowAll=$wasShowAllMode, HideDuplicates=$wasHideDuplicatesMode, listId=$originalListId")
+        println("ADB_DEBUG: Current mode: ShowAll=${controller.isShowAllPresetsMode()}, HideDuplicates=${controller.isHideDuplicatesMode()}, listId=${controller.getCurrentPresetList()?.id}")
+    }
+    
+    /**
+     * Определяет целевой список для операции
+     */
+    protected fun findTargetList(listName: String?): PresetList? {
+        val targetListName = listName ?: currentPresetList?.name
+        return if (targetListName != null) {
+            tempPresetLists.values.find { it.name == targetListName }
+        } else {
+            currentPresetList
+        }
+    }
+
 }

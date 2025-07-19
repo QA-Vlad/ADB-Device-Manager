@@ -62,19 +62,6 @@ object SettingsService {
     }
 
     /**
-     * Сохраняет список пресетов в хранилище.
-     * Теперь использует PresetListService для поддержки нескольких списков.
-     * @param presets - список пресетов для сохранения.
-     */
-    fun savePresets(presets: List<DevicePreset>) {
-        // Используем новый сервис для сохранения
-        PresetListService.savePresetsForCompatibility(presets)
-        
-        // Очищаем старое хранилище если оно есть
-        properties.setValue(PRESETS_KEY, null)
-    }
-
-    /**
      * Сохраняет путь к исполняемому файлу scrcpy.
      * @param path - путь к файлу для сохранения.
      */
@@ -121,4 +108,29 @@ object SettingsService {
     fun getHideDuplicatesMode(): Boolean {
         return properties.getValue(HIDE_DUPLICATES_MODE_KEY)?.toBoolean() ?: false
     }
+    
+    /**
+     * Сохраняет список строк по ключу
+     */
+    fun setStringList(key: String, list: List<String>) {
+        val json = gson.toJson(list)
+        properties.setValue(key, json)
+    }
+    
+    /**
+     * Получает список строк по ключу
+     */
+    fun getStringList(key: String): List<String> {
+        val json = properties.getValue(key)
+        if (json.isNullOrBlank()) {
+            return emptyList()
+        }
+        return try {
+            val type = object : TypeToken<List<String>>() {}.type
+            gson.fromJson(json, type)
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
 }

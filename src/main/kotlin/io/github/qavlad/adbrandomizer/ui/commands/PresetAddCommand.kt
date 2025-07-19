@@ -30,15 +30,13 @@ class PresetAddCommand(
     }
     
     override fun undo() {
-        println("ADB_DEBUG: PresetAddCommand.undo() - isShowAllMode: $isShowAllPresetsMode, listName: $listName, actualListIndex: $actualListIndex")
+        logCommandExecutionMode("PresetAddCommand.undo()", listName, ", actualListIndex: $actualListIndex")
+        
+        // Для команд добавления/удаления не переключаем режим, так как они синхронизируются между режимами
         
         // Определяем целевой список
+        val targetList = findTargetList(listName)
         val targetListName = listName ?: currentPresetList?.name
-        val targetList = if (targetListName != null) {
-            tempPresetLists.values.find { it.name == targetListName }
-        } else {
-            currentPresetList
-        }
         
         if (targetList != null) {
             // Для пустых пресетов ищем последний пустой пресет
@@ -81,15 +79,13 @@ class PresetAddCommand(
     }
     
     override fun redo() {
-        println("ADB_DEBUG: PresetAddCommand.redo() - isShowAllMode: $isShowAllPresetsMode, listName: $listName")
+        logCommandExecutionMode("PresetAddCommand.redo()", listName)
+        
+        // Для команд добавления/удаления не переключаем режим, так как они синхронизируются между режимами
         
         // Определяем целевой список
+        val targetList = findTargetList(listName)
         val targetListName = listName ?: currentPresetList?.name
-        val targetList = if (targetListName != null) {
-            tempPresetLists.values.find { it.name == targetListName }
-        } else {
-            currentPresetList
-        }
         
         // Добавляем пресет обратно в список
         targetList?.let { list ->

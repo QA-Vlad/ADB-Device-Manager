@@ -3,7 +3,7 @@ package io.github.qavlad.adbrandomizer.ui.services
 import com.intellij.ui.table.JBTable
 import io.github.qavlad.adbrandomizer.ui.components.DevicePresetTableModel
 import io.github.qavlad.adbrandomizer.ui.components.TableConfigurator
-import io.github.qavlad.adbrandomizer.ui.renderers.ListColumnHeaderRenderer
+import io.github.qavlad.adbrandomizer.ui.renderers.SortableHeaderRenderer
 import java.util.Vector
 import javax.swing.table.TableColumn
 
@@ -12,7 +12,10 @@ import javax.swing.table.TableColumn
  * Централизует логику настройки и перенастройки колонок в зависимости от режима отображения.
  */
 class TableColumnManager(
-    private val tableConfigurator: TableConfigurator
+    private val tableConfigurator: TableConfigurator,
+    private val tableSortingService: TableSortingService? = null,
+    private val getShowAllMode: () -> Boolean = { false },
+    private val getHideDuplicatesMode: () -> Boolean = { false }
 ) {
     
     /**
@@ -63,10 +66,29 @@ class TableColumnManager(
         // Настраиваем стандартные колонки через конфигуратор
         tableConfigurator.configureColumns()
         
-        // Настраиваем кастомный рендерер для заголовка колонки List в режиме Show All
-        if (isShowAllPresetsMode && table.columnModel.columnCount > 6) {
-            val listColumn = table.columnModel.getColumn(6)
-            listColumn.headerRenderer = ListColumnHeaderRenderer()
+        // Настраиваем рендереры для сортируемых колонок
+        if (tableSortingService != null) {
+            val headerRenderer = SortableHeaderRenderer(
+                tableSortingService,
+                getShowAllMode,
+                getHideDuplicatesMode
+            )
+            
+            // Устанавливаем рендерер для сортируемых колонок
+            if (table.columnModel.columnCount > 2) {
+                table.columnModel.getColumn(2).headerRenderer = headerRenderer // Label
+            }
+            if (table.columnModel.columnCount > 3) {
+                table.columnModel.getColumn(3).headerRenderer = headerRenderer // Size
+            }
+            if (table.columnModel.columnCount > 4) {
+                table.columnModel.getColumn(4).headerRenderer = headerRenderer // DPI
+            }
+            
+            // Для колонки List в режиме Show All
+            if (isShowAllPresetsMode && table.columnModel.columnCount > 6) {
+                table.columnModel.getColumn(6).headerRenderer = headerRenderer // List
+            }
         }
         
         println("ADB_DEBUG: reconfigureColumns - done")

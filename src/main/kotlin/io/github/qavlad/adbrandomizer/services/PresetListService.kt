@@ -3,12 +3,10 @@ package io.github.qavlad.adbrandomizer.services
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import com.intellij.ide.util.PropertiesComponent
-import io.github.qavlad.adbrandomizer.config.PluginConfig
 import com.intellij.openapi.application.PathManager
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.Paths
-import java.util.UUID
 
 /**
  * Сервис для управления несколькими списками пресетов
@@ -130,9 +128,7 @@ object PresetListService {
         defaultLists.forEach { savePresetList(it) }
         
         // Устанавливаем первый список как активный
-        if (defaultLists.isNotEmpty()) {
-            setActiveListId(defaultLists.first().id)
-        }
+        setActiveListId(defaultLists.first().id)
         
         return metadata
     }
@@ -207,6 +203,10 @@ object PresetListService {
                 val presetList = gson.fromJson(json, PresetList::class.java)
                 if (!cacheEnabled) {
                     println("PresetListService: Successfully loaded list ${presetList.name} with ${presetList.presets.size} presets")
+                    println("PresetListService: Loaded presets order:")
+                    presetList.presets.forEachIndexed { index, preset ->
+                        println("PresetListService:   [$index] ${preset.label} | ${preset.size} | ${preset.dpi}")
+                    }
                 }
                 // Сохраняем в кэш
                 if (cacheEnabled) {
@@ -341,22 +341,6 @@ object PresetListService {
         
         saveListsMetadata(metadata)
         return importedLists
-    }
-    
-    /**
-     * Включает кэширование для массовых операций
-     */
-    fun enableCache() {
-        cacheEnabled = true
-        loadedListsCache.clear()
-    }
-    
-    /**
-     * Отключает кэширование и очищает кэш
-     */
-    fun disableCache() {
-        cacheEnabled = false
-        loadedListsCache.clear()
     }
 
 

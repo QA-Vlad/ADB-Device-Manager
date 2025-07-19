@@ -92,4 +92,14 @@ interface CommandContext {
      * Доступ к менеджеру истории
      */
     val historyManager: CommandHistoryManager
+    
+    /**
+     * Переключить на указанный список по ID
+     */
+    fun switchToList(listId: String)
+    
+    /**
+     * Установить режим Show All
+     */
+    fun setShowAllMode(enabled: Boolean)
 }

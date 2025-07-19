@@ -22,7 +22,8 @@ import com.intellij.util.ui.JBUI
 class PresetListManagerPanel(
     private val onListChanged: (PresetList) -> Unit,
     private val onShowAllPresetsChanged: (Boolean) -> Unit,
-    private val onHideDuplicatesChanged: (Boolean) -> Unit
+    private val onHideDuplicatesChanged: (Boolean) -> Unit,
+    private val onResetSorting: () -> Unit = {}
 ) : JPanel(BorderLayout()) {
     
     private val listComboBox = ComboBox<PresetListItem>()
@@ -116,6 +117,17 @@ class PresetListManagerPanel(
         }
         ButtonUtils.addHoverEffect(hideDuplicatesCheckbox)
         bottomPanel.add(hideDuplicatesCheckbox)
+        
+        // Добавляем кнопку сброса сортировки
+        bottomPanel.add(Box.createHorizontalStrut(20)) // Отступ
+        val resetSortButton = JButton("Reset Sorting").apply {
+            toolTipText = "Reset all column sorting"
+            addActionListener { 
+                onResetSorting()
+            }
+        }
+        ButtonUtils.addHoverEffect(resetSortButton)
+        bottomPanel.add(resetSortButton)
         
         // Компонуем все вместе
         val mainPanel = JPanel(BorderLayout())
@@ -394,5 +406,23 @@ class PresetListManagerPanel(
         val name: String
     ) {
         override fun toString(): String = name
+    }
+    
+    /**
+     * Устанавливает выбранный список по имени
+     */
+    fun setSelectedList(name: String) {
+        isUpdatingComboBox = true
+        try {
+            for (i in 0 until listComboBox.itemCount) {
+                val item = listComboBox.getItemAt(i)
+                if (item.name == name) {
+                    listComboBox.selectedItem = item
+                    break
+                }
+            }
+        } finally {
+            isUpdatingComboBox = false
+        }
     }
 }

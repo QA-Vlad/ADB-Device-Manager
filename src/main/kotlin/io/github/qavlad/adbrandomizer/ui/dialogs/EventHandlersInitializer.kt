@@ -24,7 +24,8 @@ class EventHandlersInitializer(
         onCurrentListChanged: (PresetList?) -> Unit,
         onLoadPresetsIntoTable: () -> Unit,
         onSyncTableChanges: () -> Unit,
-        onSetupTableColumns: () -> Unit
+        onSetupTableColumns: () -> Unit,
+        onResetSorting: () -> Unit = {}
     ): PresetListManagerPanel {
         return PresetListManagerPanel(
             onListChanged = { presetList ->
@@ -73,7 +74,8 @@ class EventHandlersInitializer(
                     onSyncTableChanges = onSyncTableChanges,
                     onLoadPresetsIntoTable = onLoadPresetsIntoTable
                 )
-            }
+            },
+            onResetSorting = onResetSorting
         )
     }
     
@@ -121,6 +123,12 @@ class EventHandlersInitializer(
         if (!showAll) {
             println("ADB_DEBUG: Clearing snapshot when exiting Show all mode")
             duplicateManager.clearSnapshots()
+            
+            // Сохраняем порядок для текущего списка после выхода из режима Show All
+            controller.getCurrentPresetList()?.let { list ->
+                controller.getPresetOrderManager().saveNormalModeOrder(list.id, list.presets)
+                println("ADB_DEBUG: Saved order for list ${list.name} after exiting Show All mode")
+            }
         }
     }
     

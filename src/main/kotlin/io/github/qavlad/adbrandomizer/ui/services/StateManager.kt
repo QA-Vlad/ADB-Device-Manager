@@ -24,6 +24,8 @@ class StateManager {
         allLists.forEach { metadata ->
             val list = PresetListService.loadPresetList(metadata.id)
             if (list != null) {
+                // Не применяем порядок здесь, так как он уже сохранен в файле
+                // и будет применен в TableLoader при необходимости
                 tempPresetLists[list.id] = list
                 println("ADB_DEBUG: Loaded list ${list.name} with ${list.presets.size} presets")
             }
@@ -46,13 +48,21 @@ class StateManager {
      * Определяет начальный текущий список
      */
     fun determineInitialCurrentList(tempPresetLists: Map<String, PresetList>): PresetList? {
-        // Получаем активный список из сервиса
-        val activeList = PresetListService.getActivePresetList()
+        // Получаем ID активного списка
+        val activeListId = PresetListService.getActiveListId()
+        println("ADB_DEBUG: determineInitialCurrentList - activeListId: $activeListId")
         
-        return if (activeList != null) {
-            tempPresetLists[activeList.id] ?: tempPresetLists.values.firstOrNull()
+        return if (activeListId != null) {
+            val list = tempPresetLists[activeListId] ?: tempPresetLists.values.firstOrNull()
+            println("ADB_DEBUG: determineInitialCurrentList - returning list: ${list?.name}, presets count: ${list?.presets?.size}")
+            list?.presets?.forEachIndexed { index, preset ->
+                println("ADB_DEBUG:   [$index] ${preset.label} | ${preset.size} | ${preset.dpi}")
+            }
+            list
         } else {
-            tempPresetLists.values.firstOrNull()
+            val list = tempPresetLists.values.firstOrNull()
+            println("ADB_DEBUG: determineInitialCurrentList - no active list, returning first: ${list?.name}")
+            list
         }
     }
 }

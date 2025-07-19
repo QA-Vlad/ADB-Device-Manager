@@ -18,6 +18,8 @@ import io.github.qavlad.adbrandomizer.ui.services.StateManager
 import io.github.qavlad.adbrandomizer.ui.services.PresetDistributor
 import io.github.qavlad.adbrandomizer.ui.services.TableColumnManager
 import io.github.qavlad.adbrandomizer.ui.services.SettingsPersistenceService
+import io.github.qavlad.adbrandomizer.ui.services.PresetOrderManager
+import io.github.qavlad.adbrandomizer.ui.services.TableSortingService
 import io.github.qavlad.adbrandomizer.ui.renderers.ValidationRenderer
 import io.github.qavlad.adbrandomizer.utils.ButtonUtils
 import java.awt.Container
@@ -60,17 +62,28 @@ class SettingsDialogController(
     private val duplicateManager = DuplicateManager()
     private val presetDistributor = PresetDistributor(duplicateManager)
     private val tableSynchronizer = TableDataSynchronizer(duplicateManager, presetDistributor)
-    private val viewModeManager = ViewModeManager()
-    private val presetOperationsService = PresetOperationsService(historyManager)
+    
+    // Менеджер порядка пресетов (перемещаем сюда для правильной инициализации)
+    private val presetOrderManager = PresetOrderManager()
+    
+    private val viewModeManager = ViewModeManager(presetOrderManager)
+    
+    fun getPresetOrderManager(): PresetOrderManager = presetOrderManager
+    private val presetOperationsService = PresetOperationsService(historyManager, presetOrderManager)
     private val tableEventHandler = TableEventHandler(project)
     private val snapshotManager = SnapshotManager(duplicateManager)
     private val validationService = ValidationService()
-    private val tableLoader = TableLoader(duplicateManager, viewModeManager)
     private val stateManager = StateManager()
     private val settingsPersistenceService = SettingsPersistenceService()
     private val componentsFactory = DialogComponentsFactory()
     private val eventHandlersInitializer = EventHandlersInitializer(this)
     private val dialogState = DialogStateManager()
+    
+    // Сервис сортировки таблицы
+    private val tableSortingService = TableSortingService()
+    
+    // TableLoader зависит от presetOrderManager и tableSortingService
+    private val tableLoader = TableLoader(duplicateManager, viewModeManager, presetOrderManager, tableSortingService)
     private var updateListener: (() -> Unit)? = null
     private var globalClickListener: java.awt.event.AWTEventListener? = null
     private var currentPresetList: PresetList? = null
@@ -112,7 +125,8 @@ class SettingsDialogController(
             onCurrentListChanged = { newList -> currentPresetList = newList },
             onLoadPresetsIntoTable = { loadPresetsIntoTable() },
             onSyncTableChanges = { syncTableChangesToTempListsInternal() },
-            onSetupTableColumns = { setupTableColumns() }
+            onSetupTableColumns = { setupTableColumns() },
+            onResetSorting = { handleResetSorting() }
         )
 
         return listManagerPanel
@@ -224,7 +238,12 @@ class SettingsDialogController(
         tableConfigurator.configure()
         
         // Инициализируем менеджер колонок
-        tableColumnManager = TableColumnManager(tableConfigurator)
+        tableColumnManager = TableColumnManager(
+            tableConfigurator,
+            tableSortingService,
+            { dialogState.isShowAllPresetsMode() },
+            { dialogState.isHideDuplicatesMode() }
+        )
 
         println("ADB_DEBUG: After tableConfigurator.configure() - currentPresetList: ${currentPresetList?.name}, presets: ${currentPresetList?.presets?.size}")
 
@@ -244,6 +263,10 @@ class SettingsDialogController(
 
         table.addKeyListener(keyboardHandler.createTableKeyListener())
         keyboardHandler.addGlobalKeyListener()
+        
+        // Добавляем обработчик кликов по заголовкам таблицы
+        setupTableHeaderClickListener()
+        
         validateFields()
     }
 
@@ -252,6 +275,71 @@ class SettingsDialogController(
      */
     private fun setupTableColumns() {
         tableColumnManager.setupTableColumns(table, tableModel, dialogState.isShowAllPresetsMode())
+    }
+    
+    /**
+     * Настраивает обработчик кликов по заголовкам таблицы для сортировки
+     */
+    private fun setupTableHeaderClickListener() {
+        table.tableHeader.addMouseListener(object : MouseAdapter() {
+            override fun mouseClicked(e: MouseEvent) {
+                val columnIndex = table.columnModel.getColumnIndexAtX(e.x)
+                if (columnIndex < 0) return
+                
+                // Проверяем, является ли колонка сортируемой
+                val isSortable = when (columnIndex) {
+                    2, 3, 4 -> true // Label, Size, DPI
+                    6 -> dialogState.isShowAllPresetsMode() // List только в режиме Show All
+                    else -> false
+                }
+                
+                if (isSortable) {
+                    handleHeaderClick()
+                }
+            }
+        })
+    }
+    
+    /**
+     * Обрабатывает клик по заголовку колонки
+     */
+    private fun handleHeaderClick() {
+
+        // Обрабатываем клик через сервис сортировки
+
+        // Применяем сортировку
+        applySorting()
+        
+        // Обновляем заголовки таблицы для отображения индикаторов сортировки
+        table.tableHeader.repaint()
+    }
+    
+    /**
+     * Применяет текущую сортировку к таблице
+     */
+    private fun applySorting() {
+        // Сохраняем текущее состояние
+        forceSyncBeforeHistoryOperation()
+        
+        // Перезагружаем таблицу с учетом сортировки
+        loadPresetsIntoTable()
+    }
+    
+    /**
+     * Обрабатывает сброс сортировки
+     */
+    private fun handleResetSorting() {
+        // Сбрасываем сортировку для текущего режима
+        tableSortingService.resetSort(
+            dialogState.isShowAllPresetsMode(),
+            dialogState.isHideDuplicatesMode()
+        )
+        
+        // Перезагружаем таблицу без сортировки
+        loadPresetsIntoTable()
+        
+        // Обновляем заголовки таблицы
+        table.tableHeader.repaint()
     }
 
 
@@ -284,21 +372,7 @@ class SettingsDialogController(
     fun forceSyncBeforeHistoryOperation() {
         tableModelListenerWithTimer?.forceSyncPendingUpdates()
     }
-    
-    /**
-     * Синхронизирует изменения из таблицы с временными списками после drag and drop
-     */
-    private fun syncTableChangesToTempListsAfterDragDrop() {
-        tableSynchronizer.syncTableChangesAfterDragDrop(
-            tableModel = tableModel,
-            tempListsManager = tempListsManager,
-            getListNameAtRow = ::getListNameAtRow,
-            getPresetAtRow = ::getPresetAtRow,
-            isShowAllPresetsMode = dialogState.isShowAllPresetsMode(),
-            isHideDuplicatesMode = dialogState.isHideDuplicatesMode()
-        )
-    }
-    
+
     /**
      * Синхронизирует изменения из таблицы с временными списками
      */
@@ -331,6 +405,14 @@ class SettingsDialogController(
         if (dialogState.isHideDuplicatesMode()) {
             saveVisiblePresetsSnapshot()
         }
+        
+        // Сохраняем порядок после синхронизации, если мы не в процессе переключения режимов
+        if (!context.isSwitchingMode && !context.isSwitchingList && !dialogState.isShowAllPresetsMode()) {
+            currentPresetList?.let { list ->
+                presetOrderManager.saveNormalModeOrder(list.id, list.presets)
+                println("ADB_DEBUG: Order saved after sync for list ${list.name}")
+            }
+        }
     }
 
 
@@ -359,16 +441,27 @@ class SettingsDialogController(
                     val indexToRemove = matchingIndices.first()
                     val removedPreset = targetList.presets.removeAt(indexToRemove)
                     println("ADB_DEBUG: deletePresetFromTempList - removed preset '${removedPreset.label}' from list $listName at index $indexToRemove (hide duplicates mode)")
+                    // Удаляем из фиксированного порядка
+                    presetOrderManager.removeFromFixedOrder(listName, removedPreset)
                     return Pair(true, indexToRemove)
                 }
                 return Pair(false, null)
             }
 
             // В обычном режиме удаляем по точному совпадению
+            val removedPreset = targetList.presets.find {
+                it.label == preset.label &&
+                        it.size == preset.size &&
+                        it.dpi == preset.dpi
+            }
             val removed = targetList.presets.removeIf {
                 it.label == preset.label &&
                         it.size == preset.size &&
                         it.dpi == preset.dpi
+            }
+            if (removed && removedPreset != null) {
+                // Удаляем из фиксированного порядка
+                presetOrderManager.removeFromFixedOrder(listName, removedPreset)
             }
             println("ADB_DEBUG: deletePresetFromTempList - removed from list $listName: $removed")
             return Pair(removed, null)
@@ -395,6 +488,8 @@ class SettingsDialogController(
                 if (row >= 0 && row < currentPresetList!!.presets.size) {
                     val removedPreset = currentPresetList!!.presets.removeAt(row)
                     println("ADB_DEBUG: deletePresetFromTempList - removed preset '${removedPreset.label}' from current list at index $row")
+                    // Удаляем из фиксированного порядка
+                    presetOrderManager.removeFromFixedOrder(currentPresetList!!.name, removedPreset)
                     return Pair(true, null)
                 }
                 return Pair(false, null)
@@ -425,6 +520,12 @@ class SettingsDialogController(
         
         // Определяем начальный текущий список
         currentPresetList = stateManager.determineInitialCurrentList(tempListsManager.getTempLists())
+        
+        println("ADB_DEBUG: After determineInitialCurrentList - currentPresetList: ${currentPresetList?.name}")
+        println("ADB_DEBUG: currentPresetList contents after assignment:")
+        currentPresetList?.presets?.forEachIndexed { index, preset ->
+            println("ADB_DEBUG:   [$index] ${preset.label} | ${preset.size} | ${preset.dpi}")
+        }
         
         println("ADB_DEBUG: initializeTempPresetLists - done. Current list: ${currentPresetList?.name}, temp lists count: ${tempListsManager.size()}")
     }
@@ -492,12 +593,6 @@ class SettingsDialogController(
                 row = row,
                 column = column,
                 clickCount = clickCount,
-                onApplyPreset = { preset, setSize, setDpi ->
-                    if (project != null) {
-                        PresetApplicationService.applyPreset(project, preset, setSize, setDpi)
-                        refreshTableInternal()
-                    }
-                },
                 onAddNewPreset = { addNewPreset() }
             )
         } else {
@@ -530,6 +625,16 @@ class SettingsDialogController(
     }
 
     fun onRowMoved(fromIndex: Int, toIndex: Int) {
+        println("ADB_DEBUG: onRowMoved called - fromIndex: $fromIndex, toIndex: $toIndex")
+        println("ADB_DEBUG:   isShowAllPresetsMode: ${dialogState.isShowAllPresetsMode()}")
+        println("ADB_DEBUG:   currentPresetList: ${currentPresetList?.name} (id: ${currentPresetList?.id})")
+        
+        println("ADB_DEBUG: Table state after drag & drop:")
+        val tablePresets = tableModel.getPresets()
+        tablePresets.forEachIndexed { index, preset ->
+            println("ADB_DEBUG:   [$index] ${preset.label} | ${preset.size} | ${preset.dpi}")
+        }
+        
         val orderAfter = tableModel.getPresets().map { it.label }
 
         historyManager.addPresetMove(fromIndex, toIndex, orderAfter)
@@ -549,21 +654,71 @@ class SettingsDialogController(
             }
         }
 
-        // В режиме Show all нужно сохранить новый порядок для правильной работы
-        if (dialogState.isShowAllPresetsMode() && !dialogState.isHideDuplicatesMode()) {
-            settingsPersistenceService.saveShowAllPresetsOrder(tableModel)
-            
-            // Важно: после drag and drop нужно обновить порядок в tempPresetLists
-            // чтобы снимок создавался с правильным порядком
+        println("ADB_DEBUG: onRowMoved - after historyManager calls")
+        
+        // Сохраняем порядок в зависимости от текущего режима
+        if (dialogState.isShowAllPresetsMode()) {
+            // В режиме Show All
             if (dialogState.isHideDuplicatesMode()) {
-                // Синхронизируем tempPresetLists с актуальным состоянием таблицы
-                syncTableChangesToTempListsAfterDragDrop()
-                // Теперь создаем снимок с правильным порядком
-                saveVisiblePresetsSnapshotForAllLists()
+                // Сохраняем порядок для режима Show All со скрытыми дубликатами
+                val visiblePresets = mutableListOf<Pair<String, DevicePreset>>()
+                for (i in 0 until tableModel.rowCount) {
+                    val preset = getPresetAtRow(i)
+                    if (preset.label.isNotEmpty()) { // Пропускаем строку с кнопкой
+                        val listName = getListNameAtRow(i) ?: continue
+                        visiblePresets.add(listName to preset)
+                    }
+                }
+                presetOrderManager.saveShowAllHideDuplicatesOrder(visiblePresets)
+            } else {
+                // Собираем порядок из таблицы для Show All режима
+                val allPresetsWithLists = mutableListOf<Pair<String, DevicePreset>>()
+                val listColumn = if (tableModel.columnCount > 6) 6 else -1
+                
+                for (i in 0 until tableModel.rowCount) {
+                    // Пропускаем строку с кнопкой "+"
+                    if (tableModel.getValueAt(i, 0) == "+") {
+                        continue
+                    }
+                    
+                    val listName = if (listColumn >= 0) {
+                        tableModel.getValueAt(i, listColumn)?.toString() ?: ""
+                    } else {
+                        ""
+                    }
+                    
+                    if (listName.isNotEmpty()) {
+                        val preset = tableModel.getPresetAt(i)
+                        if (preset != null) {
+                            allPresetsWithLists.add(listName to preset)
+                        }
+                    }
+                }
+                
+                // Сохраняем как savedOrder для PresetListService
+                presetOrderManager.saveShowAllModeOrder(allPresetsWithLists)
+                // И обновляем fixedOrder чтобы новый порядок сохранился после переоткрытия
+                presetOrderManager.updateFixedShowAllOrder(allPresetsWithLists)
+                println("ADB_DEBUG: Updated both savedOrder and fixedOrder for Show All mode with ${allPresetsWithLists.size} items")
+                
+                // Сбрасываем сортировку после drag & drop в режиме Show All
+                tableSortingService.resetSort(true, dialogState.isHideDuplicatesMode())
+                println("ADB_DEBUG: Reset sorting after drag & drop in Show All mode")
             }
+        } else {
+            // В обычном режиме сохраняем порядок для текущего списка
+            currentPresetList?.let { list ->
+                val presets = tableModel.getPresets()
+                presetOrderManager.saveNormalModeOrder(list.id, presets)
+            }
+            
+            // Сбрасываем сортировку после drag & drop, чтобы сохранить пользовательский порядок
+            tableSortingService.resetSort(dialogState.isShowAllPresetsMode(), dialogState.isHideDuplicatesMode())
+            println("ADB_DEBUG: Reset sorting after drag & drop to preserve user order")
         }
         
         // Не вызываем refreshTableInternal() так как перемещение уже выполнено в таблице
+        println("ADB_DEBUG: onRowMoved - completed")
     }
 
     fun showContextMenu(e: MouseEvent) {
@@ -664,7 +819,8 @@ class SettingsDialogController(
             isHideDuplicatesMode = dialogState.isHideDuplicatesMode(),
             onDuplicatesFilterToggle = { enabled ->
                 listManagerPanel.setHideDuplicates(enabled)
-            }
+            },
+            currentListName = currentPresetList?.name
         )
         
         if (duplicated) {
@@ -1070,5 +1226,48 @@ class SettingsDialogController(
     
     fun removeTableModelListener() {
         tableModelListener?.let { tableModel.removeTableModelListener(it) }
+    }
+    
+    override fun switchToList(listId: String) {
+        println("ADB_DEBUG: switchToList called with listId: $listId")
+        
+        // Находим список по ID
+        val targetList = tempListsManager.getTempList(listId)
+        if (targetList == null) {
+            println("ADB_DEBUG: List with id $listId not found")
+            return
+        }
+        
+        // Сохраняем текущее состояние, если находимся не в режиме Show All
+        if (!dialogState.isShowAllPresetsMode()) {
+            syncTableChangesToTempListsInternal()
+        }
+        
+        // Переключаемся на новый список
+        currentPresetList = targetList
+        
+        // Обновляем UI
+        listManagerPanel.setSelectedList(targetList.name)
+        
+        // Загружаем данные нового списка
+        loadPresetsIntoTable(null)
+    }
+    
+    override fun setShowAllMode(enabled: Boolean) {
+        println("ADB_DEBUG: setShowAllMode called with enabled: $enabled")
+        
+        // Временно отключаем синхронизацию при переключении режима для команд
+        dialogState.setPerformingHistoryOperation(true)
+        try {
+            // Устанавливаем состояние чекбокса
+            listManagerPanel.setShowAllPresets(enabled)
+            
+            // Обработчик чекбокса автоматически выполнит необходимые действия
+        } finally {
+            // Восстанавливаем флаг после небольшой задержки, чтобы дать время обработчику выполниться
+            SwingUtilities.invokeLater {
+                dialogState.setPerformingHistoryOperation(false)
+            }
+        }
     }
 }

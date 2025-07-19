@@ -13,7 +13,8 @@ import javax.swing.SwingUtilities
  * Инкапсулирует логику добавления, удаления, дублирования и перемещения пресетов
  */
 class PresetOperationsService(
-    private val historyManager: CommandHistoryManager
+    private val historyManager: CommandHistoryManager,
+    private val presetOrderManager: PresetOrderManager? = null
 ) {
     
     /**
@@ -53,6 +54,17 @@ class PresetOperationsService(
         // Добавляем в историю
         historyManager.addPresetAdd(newRowIndex, newPreset, currentListName)
         
+        // Добавляем в фиксированный порядок, если есть имя списка
+        if (currentListName != null && presetOrderManager != null) {
+            // Определяем, после какого пресета добавить новый
+            val afterPreset = if (newRowIndex > 0) {
+                getPresetFromRow(tableModel, newRowIndex - 1)
+            } else {
+                null
+            }
+            presetOrderManager.addToFixedOrder(currentListName, newPreset, afterPreset)
+        }
+        
         // Уведомляем о добавлении
         onPresetAdded(newRowIndex)
         
@@ -74,7 +86,8 @@ class PresetOperationsService(
         table: JTable,
         isShowAllMode: Boolean,
         isHideDuplicatesMode: Boolean,
-        onDuplicatesFilterToggle: (Boolean) -> Unit
+        onDuplicatesFilterToggle: (Boolean) -> Unit,
+        currentListName: String? = null
     ): Boolean {
         if (row < 0 || row >= tableModel.rowCount) return false
         
@@ -106,6 +119,15 @@ class PresetOperationsService(
         // Учитываем, что после вставки все последующие строки сдвинутся
         val rowData = createRowData(newPreset, insertIndex + 1)
         tableModel.insertRow(insertIndex, rowData)
+        
+        // Добавляем в фиксированный порядок, если есть менеджер
+        if (presetOrderManager != null) {
+            // Определяем имя списка
+            val listName = getCurrentListName(tableModel, row) ?: currentListName
+            if (listName != null) {
+                presetOrderManager.addToFixedOrder(listName, newPreset, originalPreset)
+            }
+        }
         
         SwingUtilities.invokeLater {
             table.scrollRectToVisible(table.getCellRect(insertIndex, 0, true))
@@ -184,6 +206,21 @@ class PresetOperationsService(
         return if (tableModel.columnCount > 6) {
             tableModel.getValueAt(row, 6) as? String
         } else {
+            null
+        }
+    }
+    
+    /**
+     * Получает имя текущего списка для пресета
+     * В режиме Show All получает из таблицы, в обычном режиме использует переданное имя
+     */
+    private fun getCurrentListName(tableModel: DevicePresetTableModel, row: Int): String? {
+        // Проверяем, находимся ли мы в режиме Show All по количеству колонок
+        return if (tableModel.columnCount > 6) {
+            getListNameFromRow(tableModel, row)
+        } else {
+            // В обычном режиме имя списка должно быть передано через контекст
+            // Возвращаем null, чтобы вызывающий код мог обработать это
             null
         }
     }

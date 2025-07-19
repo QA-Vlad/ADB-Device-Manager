@@ -126,7 +126,10 @@ class PresetTransferHandler(
                 table.setRowSelectionInterval(adjustedToIndex, adjustedToIndex)
                 
                 // Уведомляем о перемещении строки
+                println("ADB_DEBUG: DnD - Calling onRowMoved, callback is null: ${onRowMoved == null}")
+                println("ADB_DEBUG: DnD - Thread: ${Thread.currentThread().name}")
                 onRowMoved?.invoke(fromIndex, adjustedToIndex)
+                println("ADB_DEBUG: DnD - onRowMoved completed")
                 
                 println("ADB_DEBUG: DnD - Move successful")
                 return true

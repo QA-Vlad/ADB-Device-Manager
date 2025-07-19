@@ -331,10 +331,17 @@ class PresetDistributor(
         tempPresetLists: MutableMap<String, PresetList>,
         getListNameAtRow: (Int) -> String?
     ) {
-        // Сначала очищаем все списки
-        tempPresetLists.values.forEach { it.presets.clear() }
+        // Сохраняем оригинальный порядок пресетов в каждом списке
+        val originalOrders = mutableMapOf<String, List<String>>()
+        tempPresetLists.values.forEach { list ->
+            originalOrders[list.name] = list.presets.map { preset ->
+                "${preset.label}|${preset.size}|${preset.dpi}"
+            }
+        }
 
-        // Распределяем пресеты по спискам
+        // Собираем обновленные пресеты из таблицы
+        val updatedPresetsPerList = mutableMapOf<String, MutableMap<String, DevicePreset>>()
+        
         for (i in 0 until tableModel.rowCount) {
             val firstColumn = tableModel.getValueAt(i, 0) as? String ?: ""
             if (firstColumn == "+") continue
@@ -342,7 +349,35 @@ class PresetDistributor(
             val listName = getListNameAtRow(i) ?: continue
             val preset = tableModel.getPresetAt(i) ?: continue
 
-            tempPresetLists.values.find { it.name == listName }?.presets?.add(preset.copy())
+            val presetKey = "${preset.label}|${preset.size}|${preset.dpi}"
+            updatedPresetsPerList.getOrPut(listName) { mutableMapOf() }[presetKey] = preset.copy()
+        }
+
+        // Обновляем списки, сохраняя оригинальный порядок
+        tempPresetLists.values.forEach { list ->
+            val originalOrder = originalOrders[list.name] ?: emptyList()
+            val updatedPresets = updatedPresetsPerList[list.name] ?: mutableMapOf()
+            
+            // Создаем новый список, сохраняя оригинальный порядок
+            val newPresets = mutableListOf<DevicePreset>()
+            
+            // Сначала добавляем пресеты в оригинальном порядке
+            originalOrder.forEach { presetKey ->
+                updatedPresets[presetKey]?.let { preset ->
+                    newPresets.add(preset)
+                }
+            }
+            
+            // Затем добавляем новые пресеты, которых не было в оригинальном порядке
+            updatedPresets.forEach { (presetKey, preset) ->
+                if (!originalOrder.contains(presetKey)) {
+                    newPresets.add(preset)
+                }
+            }
+            
+            // Обновляем список
+            list.presets.clear()
+            list.presets.addAll(newPresets)
         }
     }
     

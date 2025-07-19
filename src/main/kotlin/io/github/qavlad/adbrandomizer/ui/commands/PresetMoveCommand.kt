@@ -188,7 +188,16 @@ class PresetMoveCommand(
     }
 
     override fun undo() {
-        println("ADB_DEBUG: PresetMoveCommand.undo() - isHideDuplicates: ${controller.isHideDuplicatesMode()}, tempListsStateBefore: ${tempListsStateBefore != null}")
+        logCommandExecutionMode("PresetMoveCommand.undo()", null, ", isHideDuplicates: ${controller.isHideDuplicatesMode()}, tempListsStateBefore: ${tempListsStateBefore != null}")
+        
+        // Проверяем, нужно ли переключить режим
+        if (needToSwitchMode()) {
+            println("ADB_DEBUG: Need to switch mode before undo")
+            switchToOriginalMode()
+            // После переключения режима, вызываем undo еще раз
+            undo()
+            return
+        }
         
         // Добавляем отладку состояния до восстановления
         val currentList = controller.getCurrentPresetList()
@@ -218,7 +227,16 @@ class PresetMoveCommand(
     }
 
     override fun redo() {
-        println("ADB_DEBUG: PresetMoveCommand.redo() - isHideDuplicates: ${controller.isHideDuplicatesMode()}, tempListsStateAfter: ${tempListsStateAfter != null}")
+        logCommandExecutionMode("PresetMoveCommand.redo()", null, ", isHideDuplicates: ${controller.isHideDuplicatesMode()}, tempListsStateAfter: ${tempListsStateAfter != null}")
+        
+        // Проверяем, нужно ли переключить режим
+        if (needToSwitchMode()) {
+            println("ADB_DEBUG: Need to switch mode before redo")
+            switchToOriginalMode()
+            // После переключения режима, вызываем redo еще раз
+            redo()
+            return
+        }
         
         // Если состояние было сохранено (операция была выполнена в режиме Hide Duplicates),
         // то восстанавливаем это состояние независимо от текущего режима

@@ -2,6 +2,7 @@ package io.github.qavlad.adbrandomizer.ui.services
 
 import io.github.qavlad.adbrandomizer.services.DevicePreset
 import io.github.qavlad.adbrandomizer.services.PresetList
+import io.github.qavlad.adbrandomizer.services.PresetListService
 import io.github.qavlad.adbrandomizer.ui.components.DevicePresetTableModel
 import io.github.qavlad.adbrandomizer.ui.components.CommandHistoryManager
 import io.github.qavlad.adbrandomizer.ui.commands.PresetMoveCommand
@@ -116,22 +117,30 @@ class TableDataSynchronizer(
         }
 
         if (context.isShowAllPresetsMode) {
-            presetDistributor?.distributePresetsToTempLists(
-                tableModel = tableModel,
-                tempPresetLists = tempListsManager.getMutableTempLists(),
-                isHideDuplicatesMode = context.isHideDuplicatesMode,
-                getListNameAtRow = getListNameAtRow,
-                saveVisiblePresetsSnapshotForAllLists = if (context.isDragAndDropInProgress) {
-                    // Не создаем новый снимок во время drag and drop
-                    {}
-                } else {
-                    saveVisiblePresetsSnapshotForAllLists
+            // В режиме Show All при drag & drop не обновляем tempLists
+            if (!context.isDragAndDropInProgress) {
+                presetDistributor?.distributePresetsToTempLists(
+                    tableModel = tableModel,
+                    tempPresetLists = tempListsManager.getMutableTempLists(),
+                    isHideDuplicatesMode = context.isHideDuplicatesMode,
+                    getListNameAtRow = getListNameAtRow,
+                    saveVisiblePresetsSnapshotForAllLists = saveVisiblePresetsSnapshotForAllLists
+                )
+                
+                // Сохраняем все списки после синхронизации в режиме Show All
+                println("ADB_DEBUG: Saving all preset lists after sync in Show All mode")
+                tempListsManager.getTempLists().values.forEach { list ->
+                    PresetListService.savePresetList(list)
                 }
-            )
+            }
         } else {
             currentPresetList?.let { list ->
                 // Всегда используем syncCurrentList для корректной синхронизации
                 syncCurrentList(tableModel, list, context, onReloadRequired)
+                
+                // Сохраняем список в файл после синхронизации
+                println("ADB_DEBUG: Saving currentPresetList after sync")
+                PresetListService.savePresetList(list)
             }
         }
         
@@ -173,56 +182,7 @@ class TableDataSynchronizer(
             }
         }
     }
-    
-    /**
-     * Синхронизирует изменения из таблицы после drag and drop операции
-     * Используется только для обновления порядка элементов без перезагрузки таблицы
-     */
-    fun syncTableChangesAfterDragDrop(
-        tableModel: DevicePresetTableModel,
-        tempListsManager: TempListsManager,
-        getListNameAtRow: (Int) -> String?,
-        getPresetAtRow: (Int) -> DevicePreset,
-        isShowAllPresetsMode: Boolean,
-        isHideDuplicatesMode: Boolean
-    ) {
-        if (!isShowAllPresetsMode || !isHideDuplicatesMode) {
-            return
-        }
-        
-        println("ADB_DEBUG: syncTableChangesAfterDragDrop - updating order from table")
-        
-        // Собираем текущий порядок из таблицы
-        val tableOrder = mutableListOf<Pair<String, DevicePreset>>()
-        for (i in 0 until tableModel.rowCount) {
-            val listName = getListNameAtRow(i) ?: continue
-            val preset = getPresetAtRow(i)
-            tableOrder.add(listName to preset)
-        }
-        
-        // Обновляем порядок в tempPresetLists
-        tempListsManager.getTempLists().values.forEach { list ->
-            // Собираем пресеты этого списка из таблицы в правильном порядке
-            val presetsFromTable = tableOrder
-                .filter { it.first == list.name }
-                .map { it.second }
-            
-            // Также нужно сохранить скрытые дубликаты
-            val visibleKeys = presetsFromTable.map { "${it.label}|${it.size}|${it.dpi}" }.toSet()
-            val hiddenPresets = list.presets.filter { preset ->
-                val key = "${preset.label}|${preset.size}|${preset.dpi}"
-                !visibleKeys.contains(key)
-            }
-            
-            // Обновляем список: сначала видимые в новом порядке, потом скрытые
-            list.presets.clear()
-            list.presets.addAll(presetsFromTable.map { it.copy() })
-            list.presets.addAll(hiddenPresets)
-            
-            println("ADB_DEBUG:   Updated list ${list.name} with ${presetsFromTable.size} visible + ${hiddenPresets.size} hidden presets")
-        }
-    }
-    
+
     /**
      * Проверяет, изменился ли статус дублей после редактирования
      */
@@ -249,7 +209,18 @@ class TableDataSynchronizer(
         context: SyncContext,
         onReloadRequired: () -> Unit
     ) {
+        println("ADB_DEBUG: syncCurrentList - start")
+        println("ADB_DEBUG: syncCurrentList - currentList before sync: ${currentList.name}")
+        currentList.presets.forEachIndexed { index, preset ->
+            println("ADB_DEBUG:   before[$index] ${preset.label} | ${preset.size} | ${preset.dpi}")
+        }
+        
         val tablePresets = getPresetsFromTable(tableModel)
+        
+        println("ADB_DEBUG: syncCurrentList - table presets:")
+        tablePresets.forEachIndexed { index, preset ->
+            println("ADB_DEBUG:   table[$index] ${preset.label} | ${preset.size} | ${preset.dpi}")
+        }
         
         // Проверка на пустую таблицу
         if (tablePresets.isEmpty() && currentList.presets.isNotEmpty() && !context.isHideDuplicatesMode) {
@@ -261,6 +232,11 @@ class TableDataSynchronizer(
             syncWithHiddenDuplicates(tablePresets, currentList, onReloadRequired)
         } else {
             syncWithoutHiddenDuplicates(tablePresets, currentList)
+        }
+        
+        println("ADB_DEBUG: syncCurrentList - currentList after sync:")
+        currentList.presets.forEachIndexed { index, preset ->
+            println("ADB_DEBUG:   after[$index] ${preset.label} | ${preset.size} | ${preset.dpi}")
         }
     }
     
