@@ -1,32 +1,27 @@
 package io.github.qavlad.adbrandomizer.ui.renderers
 
-import com.intellij.icons.AllIcons
 import com.intellij.ui.components.JBLabel
-import com.intellij.util.ui.JBUI
 import java.awt.BorderLayout
 import javax.swing.JPanel
 
 /**
  * Рендерер для ячеек, которые могут содержать индикатор дубликата.
  */
-class DuplicateInfoRenderer : JPanel(BorderLayout(JBUI.scale(4), 0)) {
+class DuplicateInfoRenderer : JPanel(BorderLayout(0, 0)) {
     private val textLabel = JBLabel()
-    private val iconLabel = JBLabel(AllIcons.General.Warning)
 
     init {
         isOpaque = true
         add(textLabel, BorderLayout.CENTER)
-        add(iconLabel, BorderLayout.EAST)
     }
 
     fun configure(text: String, isDuplicate: Boolean, duplicateRows: List<Int>) {
-        textLabel.text = text
-        iconLabel.isVisible = isDuplicate
-
         if (isDuplicate) {
+            textLabel.text = "$text⚠️"
             val otherRows = duplicateRows.joinToString(", ") { "#${it + 1}" }
             toolTipText = "Duplicate of row(s): $otherRows"
         } else {
+            textLabel.text = text
             toolTipText = null
         }
     }
