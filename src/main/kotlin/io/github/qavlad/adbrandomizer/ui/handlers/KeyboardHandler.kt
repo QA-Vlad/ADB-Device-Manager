@@ -47,7 +47,17 @@ class KeyboardHandler(
                     }
                     e.keyCode == KeyEvent.VK_V && e.isControlDown -> {
                         println("ADB_DEBUG: Ctrl+V pressed, selectedRow=${hoverState().selectedTableRow}, selectedColumn=${hoverState().selectedTableColumn}")
-                        if (hoverState().selectedTableRow >= 0 && hoverState().selectedTableColumn >= 0) {
+                        val row = hoverState().selectedTableRow
+                        val column = hoverState().selectedTableColumn
+                        
+                        // Если таблица в режиме редактирования, не перехватываем событие
+                        if (table.isEditing && table.editingRow == row && table.editingColumn == column) {
+                            println("ADB_DEBUG: Table is editing - allowing standard paste")
+                            return@KeyEventDispatcher false
+                        }
+                        
+                        // Если ячейка выделена, но не редактируется - обрабатываем вставку
+                        if (row >= 0 && column >= 0) {
                             pasteCellFromClipboard()
                             return@KeyEventDispatcher true
                         }
@@ -174,19 +184,21 @@ class KeyboardHandler(
                 if (data != null && data.isDataFlavorSupported(DataFlavor.stringFlavor)) {
                     val row = hoverState().selectedTableRow
                     val column = hoverState().selectedTableColumn
-                    val oldValue = tableModel.getValueAt(row, column) as? String ?: ""
-                    val newValue = (data.getTransferData(DataFlavor.stringFlavor) as String).trim()
+                    val clipboardText = (data.getTransferData(DataFlavor.stringFlavor) as String).trim()
 
-                    // Добавляем команду в историю здесь
-                    if (newValue != oldValue) {
-                        historyManager.addCellEdit(row, column, oldValue, newValue)
+                    // Проверяем, находится ли таблица в режиме редактирования этой ячейки
+                    if (table.isEditing && table.editingRow == row && table.editingColumn == column) {
+                        // В режиме редактирования - позволяем стандартному редактору обработать вставку
+                        // Ctrl+V будет работать как в обычном текстовом поле
+                        return
+                    } else {
+                        // Не в режиме редактирования - заменяем содержимое ячейки полностью
+                        tableModel.setValueAt(clipboardText, row, column)
+                        println("ADB_DEBUG: Вставлено из буфера: '$clipboardText' (история: ${historyManager.size()})")
+
+                        validateFields()
+                        table.repaint()
                     }
-
-                    tableModel.setValueAt(newValue, row, column)
-                    println("ADB_DEBUG: Вставлено из буфера: '$newValue' (история: ${historyManager.size()})")
-
-                    validateFields()
-                    table.repaint()
                 }
             } catch (e: Exception) {
                 println("ADB_DEBUG: Ошибка при вставке: ${e.message}")

@@ -244,83 +244,86 @@ class PresetDistributor(
     ) {
         println("ADB_DEBUG:   Handling update/add case")
 
-        // Map snapshot indices to table indices for proper ordering
-        val snapshotToTableIndex = mutableMapOf<String, Int>()
-        updatedPresets.forEachIndexed { index, preset ->
-            val key = "${preset.label}|${preset.size}|${preset.dpi}"
-            snapshotToTableIndex[key] = index
-        }
-
-        // First, check what elements are in table vs snapshot
-        val tableKeys = updatedPresets.map { "${it.label}|${it.size}|${it.dpi}" }.toSet()
-        val snapshotKeys = visibleSnapshot.toSet()
-        val missingKeys = snapshotKeys - tableKeys
-
-        // If we have missing keys from snapshot, it might be a restore operation
-        if (missingKeys.isNotEmpty()) {
-            println("ADB_DEBUG:   Keys missing from table (might be restore): $missingKeys")
-        }
-
-        // Create mapping of table presets for quick lookup
-        val tablePresetsMap = updatedPresets.mapIndexed { index, preset ->
-            "${preset.label}|${preset.size}|${preset.dpi}" to (index to preset)
-        }.toMap()
-
-        // When elements are edited, we need to match by position in snapshot
-        val processedListIndices = mutableSetOf<Int>()
-        val processedTableIndices = mutableSetOf<Int>()
-
-        // First pass: update elements that match exactly (no edits)
-        visibleSnapshot.forEachIndexed { _, snapshotKey ->
-            if (tablePresetsMap.containsKey(snapshotKey)) {
-                val (tableIndex, tablePreset) = tablePresetsMap[snapshotKey]!!
-                
-                // Find corresponding index in the list
-                val listIndex = list.presets.indexOfFirst { preset ->
-                    "${preset.label}|${preset.size}|${preset.dpi}" == snapshotKey
+        // Build a complete picture of what the list should contain
+        val originalPresets = list.presets.map { it.copy() }
+        val newListContent = mutableListOf<DevicePreset>()
+        
+        // Create a map of visible snapshot keys to their positions
+        val snapshotPositions = visibleSnapshot.withIndex().associate { (index, key) -> key to index }
+        
+        println("ADB_DEBUG:   Original list has ${originalPresets.size} presets")
+        println("ADB_DEBUG:   Visible snapshot has ${visibleSnapshot.size} entries")
+        println("ADB_DEBUG:   Table has ${updatedPresets.size} entries")
+        
+        // Process each original preset
+        originalPresets.forEach { originalPreset ->
+            val originalKey = "${originalPreset.label}|${originalPreset.size}|${originalPreset.dpi}"
+            
+            when {
+                // Case 1: Preset is in the visible snapshot
+                snapshotPositions.containsKey(originalKey) -> {
+                    val snapshotPos = snapshotPositions[originalKey]!!
+                    // Check if this preset was edited (position in snapshot but different in table)
+                    if (snapshotPos < updatedPresets.size) {
+                        val tablePreset = updatedPresets[snapshotPos]
+                        val tableKey = "${tablePreset.label}|${tablePreset.size}|${tablePreset.dpi}"
+                        
+                        if (tableKey != originalKey) {
+                            // Check if this is a duplicate situation where table shows a different duplicate
+                            val originalSizeDpi = "${originalPreset.size}|${originalPreset.dpi}"
+                            val tableSizeDpi = "${tablePreset.size}|${tablePreset.dpi}"
+                            
+                            if (originalSizeDpi == tableSizeDpi && originalPreset.size.isNotBlank() && originalPreset.dpi.isNotBlank()) {
+                                // This is a duplicate - the table is showing a different duplicate than snapshot expected
+                                // Keep the original to maintain consistency
+                                println("ADB_DEBUG:   Table shows different duplicate at position $snapshotPos: expected $originalKey, got $tableKey - keeping original")
+                                newListContent.add(originalPreset)
+                            } else {
+                                // This preset was actually edited
+                                println("ADB_DEBUG:   Preset edited at position $snapshotPos: $originalKey -> $tableKey")
+                                newListContent.add(tablePreset.copy())
+                            }
+                        } else {
+                            // Exact match - use the table version
+                            println("ADB_DEBUG:   Exact match for visible preset: $originalKey")
+                            newListContent.add(tablePreset.copy())
+                        }
+                    } else {
+                        // Snapshot position out of bounds - keep original
+                        println("ADB_DEBUG:   Keeping original (snapshot pos out of bounds): $originalKey")
+                        newListContent.add(originalPreset)
+                    }
                 }
                 
-                if (listIndex >= 0) {
-                    list.presets[listIndex] = tablePreset.copy()
-                    processedListIndices.add(listIndex)
-                    processedTableIndices.add(tableIndex)
-                    println("ADB_DEBUG:   Updated exact match at list index $listIndex: $snapshotKey")
-                }
-            }
-        }
-
-        // Second pass: handle edited elements by matching position
-        visibleSnapshot.forEachIndexed { snapshotIndex, snapshotKey ->
-            if (!tablePresetsMap.containsKey(snapshotKey) && snapshotIndex < updatedPresets.size) {
-                // This element was likely edited - match by position
-                val tablePreset = updatedPresets[snapshotIndex]
-                val tableKey = "${tablePreset.label}|${tablePreset.size}|${tablePreset.dpi}"
-                
-                // Find the original element in the list by the snapshot key
-                val listIndex = list.presets.indexOfFirst { preset ->
-                    "${preset.label}|${preset.size}|${preset.dpi}" == snapshotKey
-                }
-                
-                if (listIndex >= 0 && !processedListIndices.contains(listIndex)) {
-                    // Update with edited values
-                    list.presets[listIndex] = tablePreset.copy()
-                    processedListIndices.add(listIndex)
-                    processedTableIndices.add(snapshotIndex)
-                    println("ADB_DEBUG:   Updated edited element at list index $listIndex: $snapshotKey -> $tableKey")
+                // Case 2: Preset is not in visible snapshot (was hidden)
+                !snapshotPositions.containsKey(originalKey) -> {
+                    // This is a hidden preset - preserve it
+                    println("ADB_DEBUG:   Preserving hidden preset: $originalKey")
+                    newListContent.add(originalPreset)
                 }
             }
         }
-
-        // Third pass: add any new elements from table
-        updatedPresets.forEachIndexed { tableIndex, preset ->
-            if (!processedTableIndices.contains(tableIndex)) {
-                list.presets.add(preset.copy())
-                println("ADB_DEBUG:   Added new element: ${preset.label}|${preset.size}|${preset.dpi}")
+        
+        // Add any completely new presets from the table
+        updatedPresets.forEach { tablePreset ->
+            val tableKey = "${tablePreset.label}|${tablePreset.size}|${tablePreset.dpi}"
+            
+            // Check if this is a new preset not in the original list
+            val isNew = !originalPresets.any { preset ->
+                "${preset.label}|${preset.size}|${preset.dpi}" == tableKey
+            }
+            
+            if (isNew) {
+                println("ADB_DEBUG:   Adding new preset from table: $tableKey")
+                newListContent.add(tablePreset.copy())
             }
         }
-
-        // Remove any duplicates that might have been created
-        cleanupDuplicatesInList(list)
+        
+        // Update the list
+        list.presets.clear()
+        list.presets.addAll(newListContent)
+        
+        println("ADB_DEBUG:   Final list has ${list.presets.size} presets")
     }
     
     /**
@@ -408,27 +411,5 @@ class PresetDistributor(
         }
 
         return updatedPresetsPerList
-    }
-    
-    /**
-     * Очищает дубликаты в списке после обновления
-     */
-    private fun cleanupDuplicatesInList(list: PresetList) {
-        val seen = mutableSetOf<String>()
-        val cleaned = mutableListOf<DevicePreset>()
-        
-        list.presets.forEach { preset ->
-            val key = "${preset.label}|${preset.size}|${preset.dpi}"
-            if (!seen.contains(key)) {
-                seen.add(key)
-                cleaned.add(preset)
-            }
-        }
-        
-        if (cleaned.size < list.presets.size) {
-            list.presets.clear()
-            list.presets.addAll(cleaned)
-            println("ADB_DEBUG:   Removed ${list.presets.size - cleaned.size} duplicate entries")
-        }
     }
 }

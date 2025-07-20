@@ -110,6 +110,10 @@ class TableConfigurator(
 
             configureColumns()
             setDefaultRenderer(Object::class.java, validationRenderer)
+            
+            // Устанавливаем кастомный редактор для редактируемых колонок
+            val clearOnTypeEditor = ClearOnTypeCellEditor()
+            setDefaultEditor(Object::class.java, clearOnTypeEditor)
         }
     }
     

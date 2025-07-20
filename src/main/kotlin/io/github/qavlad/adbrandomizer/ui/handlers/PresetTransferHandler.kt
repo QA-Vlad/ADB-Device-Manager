@@ -34,7 +34,13 @@ class PresetTransferHandler(
     }
 
     override fun canImport(support: TransferSupport): Boolean {
-        val canImport = support.component is JTable && support.isDrop && support.isDataFlavorSupported(DataFlavor.stringFlavor)
+        // Проверяем, что это именно drag-and-drop операция
+        if (!support.isDrop) {
+            // Это не drag-and-drop (например, Ctrl+V) - не обрабатываем
+            return false
+        }
+        
+        val canImport = support.component is JTable && support.isDataFlavorSupported(DataFlavor.stringFlavor)
 
         if (canImport) {
             // Проверяем, что не пытаемся сбросить на строку с кнопкой
@@ -68,6 +74,12 @@ class PresetTransferHandler(
     }
 
     override fun importData(support: TransferSupport): Boolean {
+        // Проверяем, что это именно drag-and-drop операция
+        if (!support.isDrop) {
+            // Это не drag-and-drop (например, Ctrl+V) - не обрабатываем
+            return false
+        }
+        
         val table = support.component as? JTable ?: return false
         val model = table.model as? DefaultTableModel ?: return false
 

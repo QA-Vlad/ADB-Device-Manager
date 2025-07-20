@@ -30,7 +30,13 @@ class CommandHistoryManager(
     fun addCellEdit(row: Int, column: Int, oldValue: String, newValue: String) {
         if (oldValue != newValue) {
             val cellId = getCellId(row, column)
-            val listName = controller.getCurrentPresetList()?.name
+            
+            // В режиме Show all нужно определить список из колонки List
+            val listName = if (controller.isShowAllPresetsMode()) {
+                controller.getListNameAtRow(row) ?: controller.getCurrentPresetList()?.name
+            } else {
+                controller.getCurrentPresetList()?.name
+            }
             
             // Проверяем, не добавляли ли мы точно такую же команду только что
             val lastCommand = historyStack.lastOrNull()

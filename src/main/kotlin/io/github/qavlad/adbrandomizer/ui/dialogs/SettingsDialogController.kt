@@ -938,7 +938,7 @@ class SettingsDialogController(
         )
     }
 
-    private fun getListNameAtRow(row: Int): String? {
+    fun getListNameAtRow(row: Int): String? {
         // В режиме Show all presets получаем название списка из последней колонки
         if (dialogState.isShowAllPresetsMode() && row >= 0 && row < tableModel.rowCount) {
             // Колонка List находится в последней позиции (columnCount - 1)

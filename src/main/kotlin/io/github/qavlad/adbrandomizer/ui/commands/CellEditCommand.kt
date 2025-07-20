@@ -1,6 +1,7 @@
 package io.github.qavlad.adbrandomizer.ui.commands
 
 import io.github.qavlad.adbrandomizer.ui.components.CellIdentity
+import io.github.qavlad.adbrandomizer.services.PresetList
 
 /**
  * Команда для редактирования ячейки таблицы
@@ -31,19 +32,29 @@ class CellEditCommand(
     private fun performOperation(valueToSet: String) {
         println("ADB_DEBUG: CellEditCommand.performOperation - cellId: ${cellId.id.substring(0, 8)}..., value: '$valueToSet'")
         
-        // Логируем текущее состояние tempPresetLists перед операцией
-        currentPresetList?.let { list ->
-            println("ADB_DEBUG: Current preset list '${list.name}' has ${list.presets.size} presets")
-            list.presets.forEachIndexed { index, preset ->
-                println("ADB_DEBUG:   [$index] ${preset.label} | ${preset.size} | ${preset.dpi}")
+        // В режиме Show all не переключаем текущий список
+        if (isShowAllPresetsMode) {
+            println("ADB_DEBUG: Show all mode - listName: $listName")
+            
+            // Найти нужный список по имени
+            val targetList = tempPresetLists.values.find { it.name == listName }
+            if (targetList != null) {
+                logPresetList("Found target list", targetList)
+            } else {
+                println("ADB_DEBUG: Target list '$listName' not found!")
             }
-        }
-        
-        // 1. Найти нужный список и сделать его активным, если он не активен
-        val targetList = tempPresetLists.values.find { it.name == listName }
-        if (targetList != null && targetList.name != currentPresetList?.name) {
-            println("ADB_DEBUG: Switching to list '${targetList.name}' for command")
-            controller.setCurrentPresetList(targetList)
+        } else {
+            // В обычном режиме работаем как раньше
+            currentPresetList?.let { list ->
+                logPresetList("Current preset list", list)
+            }
+            
+            // Найти нужный список и сделать его активным, если он не активен
+            val targetList = tempPresetLists.values.find { it.name == listName }
+            if (targetList != null && targetList.name != currentPresetList?.name) {
+                println("ADB_DEBUG: Switching to list '${targetList.name}' for command")
+                controller.setCurrentPresetList(targetList)
+            }
         }
 
         // 2. Найти координаты ячейки
@@ -67,32 +78,18 @@ class CellEditCommand(
     }
 
     private fun updatePresetInTempList(coords: Pair<Int, Int>, value: String) {
-        currentPresetList?.let { list ->
-            val actualRowIndex = if (isHideDuplicatesMode) {
-                // В режиме скрытия дубликатов нужно найти индекс в полном списке
-                // Получаем текущий пресет из таблицы, по видимому индексу
-                val tableRow = coords.first
-                if (tableRow >= 0 && tableRow < tableModel.rowCount) {
-                    val tablePreset = tableModel.getPresetAt(tableRow)
-                    if (tablePreset != null) {
-                        // Ищем этот пресет в полном списке
-                        list.presets.indexOfFirst { preset ->
-                            // Сравниваем по всем полям, учитывая какое поле мы редактируем
-                            when (coords.second) {
-                                2 -> preset.size == tablePreset.size && preset.dpi == tablePreset.dpi
-                                3 -> preset.label == tablePreset.label && preset.dpi == tablePreset.dpi  
-                                4 -> preset.label == tablePreset.label && preset.size == tablePreset.size
-                                else -> false
-                            }
-                        }
-                    } else {
-                        -1
-                    }
-                } else {
-                    -1
-                }
-            } else {
-                coords.first
+        // В режиме Show all работаем с конкретным списком по имени
+        val targetList = if (isShowAllPresetsMode && listName != null) {
+            tempPresetLists.values.find { it.name == listName }
+        } else {
+            currentPresetList
+        }
+        
+        targetList?.let { list ->
+            val actualRowIndex = when {
+                isShowAllPresetsMode -> findPresetIndexInList(list, coords)
+                isHideDuplicatesMode -> findPresetIndexInList(list, coords)
+                else -> coords.first
             }
 
             if (actualRowIndex >= 0 && actualRowIndex < list.presets.size) {
@@ -112,6 +109,39 @@ class CellEditCommand(
                 println("ADB_DEBUG: Could not find exact preset match in temp list. Coords: $coords")
                 // Обновляем в таблице напрямую - синхронизация произойдет через TableModelListener
                 tableModel.setValueAt(value, coords.first, coords.second)
+            }
+        }
+    }
+    
+    /**
+     * Выводит отладочную информацию о списке пресетов
+     */
+    private fun logPresetList(prefix: String, list: PresetList) {
+        println("ADB_DEBUG: $prefix '${list.name}' has ${list.presets.size} presets")
+        list.presets.forEachIndexed { index, preset ->
+            println("ADB_DEBUG:   [$index] ${preset.label} | ${preset.size} | ${preset.dpi}")
+        }
+    }
+    
+    /**
+     * Находит индекс пресета в списке по координатам из таблицы
+     * Используется в режимах Show All и Hide Duplicates
+     */
+    private fun findPresetIndexInList(list: PresetList, coords: Pair<Int, Int>): Int {
+        val tableRow = coords.first
+        if (tableRow < 0 || tableRow >= tableModel.rowCount) {
+            return -1
+        }
+        
+        val tablePreset = tableModel.getPresetAt(tableRow) ?: return -1
+        
+        // Ищем пресет в списке, сравнивая по полям в зависимости от редактируемой колонки
+        return list.presets.indexOfFirst { preset ->
+            when (coords.second) {
+                2 -> preset.size == tablePreset.size && preset.dpi == tablePreset.dpi
+                3 -> preset.label == tablePreset.label && preset.dpi == tablePreset.dpi
+                4 -> preset.label == tablePreset.label && preset.size == tablePreset.size
+                else -> false
             }
         }
     }
