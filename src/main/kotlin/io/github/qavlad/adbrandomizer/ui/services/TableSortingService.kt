@@ -62,6 +62,67 @@ class TableSortingService {
             else -> normalModeSortState
         }
     }
+    
+    /**
+     * Обрабатывает клик по заголовку колонки и циклически переключает сортировку
+     */
+    fun handleColumnClick(columnName: String, isShowAll: Boolean, isHideDuplicates: Boolean) {
+        val state = getSortState(isShowAll, isHideDuplicates)
+        
+        // Если кликнули по новой колонке, сбрасываем сортировку других колонок
+        if (state.activeColumn != columnName) {
+            state.labelSort = SortType.NONE
+            state.sizeSort = SortType.NONE
+            state.dpiSort = SortType.NONE
+            state.listSort = SortType.NONE
+        }
+        
+        // Устанавливаем активную колонку
+        state.activeColumn = columnName
+        
+        // Циклически переключаем тип сортировки для активной колонки
+        when (columnName) {
+            "Label" -> {
+                state.labelSort = when (state.labelSort) {
+                    SortType.NONE -> SortType.LABEL_ASC
+                    SortType.LABEL_ASC -> SortType.LABEL_DESC
+                    SortType.LABEL_DESC -> SortType.NONE
+                    else -> SortType.LABEL_ASC
+                }
+                if (state.labelSort == SortType.NONE) state.activeColumn = null
+            }
+            "Size" -> {
+                state.sizeSort = when (state.sizeSort) {
+                    SortType.NONE -> SortType.SIZE_DESC
+                    SortType.SIZE_DESC -> SortType.SIZE_ASC
+                    SortType.SIZE_ASC -> SortType.NONE
+                    else -> SortType.SIZE_DESC
+                }
+                if (state.sizeSort == SortType.NONE) state.activeColumn = null
+            }
+            "DPI" -> {
+                state.dpiSort = when (state.dpiSort) {
+                    SortType.NONE -> SortType.DPI_DESC
+                    SortType.DPI_DESC -> SortType.DPI_ASC
+                    SortType.DPI_ASC -> SortType.NONE
+                    else -> SortType.DPI_DESC
+                }
+                if (state.dpiSort == SortType.NONE) state.activeColumn = null
+            }
+            "List" -> {
+                state.listSort = when (state.listSort) {
+                    SortType.NONE -> SortType.LIST_ASC
+                    SortType.LIST_ASC -> SortType.LIST_DESC
+                    SortType.LIST_DESC -> SortType.NONE
+                    else -> SortType.LIST_ASC
+                }
+                if (state.listSort == SortType.NONE) state.activeColumn = null
+            }
+        }
+        
+        // Сохраняем состояние
+        saveSortStates()
+    }
 
     /**
      * Сортирует список пресетов согласно текущему состоянию

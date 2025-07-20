@@ -289,14 +289,17 @@ class SettingsDialogController(
                 if (columnIndex < 0) return
                 
                 // Проверяем, является ли колонка сортируемой
+                val hasCounters = SettingsService.getShowCounters()
+                val listColumnIndex = if (hasCounters) 8 else 6 // List колонка сдвигается при наличии счетчиков
+                
                 val isSortable = when (columnIndex) {
                     2, 3, 4 -> true // Label, Size, DPI
-                    6 -> dialogState.isShowAllPresetsMode() // List только в режиме Show All
+                    listColumnIndex -> dialogState.isShowAllPresetsMode() // List только в режиме Show All
                     else -> false
                 }
                 
                 if (isSortable) {
-                    handleHeaderClick()
+                    handleHeaderClick(columnIndex)
                 }
             }
         })
@@ -305,15 +308,33 @@ class SettingsDialogController(
     /**
      * Обрабатывает клик по заголовку колонки
      */
-    private fun handleHeaderClick() {
-
-        // Обрабатываем клик через сервис сортировки
-
-        // Применяем сортировку
-        applySorting()
+    private fun handleHeaderClick(columnIndex: Int) {
+        // Определяем имя колонки
+        val hasCounters = SettingsService.getShowCounters()
+        val listColumnIndex = if (hasCounters) 8 else 6
         
-        // Обновляем заголовки таблицы для отображения индикаторов сортировки
-        table.tableHeader.repaint()
+        val columnName = when (columnIndex) {
+            2 -> "Label"
+            3 -> "Size"
+            4 -> "DPI"
+            listColumnIndex -> if (dialogState.isShowAllPresetsMode()) "List" else null
+            else -> null
+        }
+        
+        if (columnName != null) {
+            // Обрабатываем клик через сервис сортировки
+            tableSortingService.handleColumnClick(
+                columnName,
+                dialogState.isShowAllPresetsMode(),
+                dialogState.isHideDuplicatesMode()
+            )
+            
+            // Применяем сортировку
+            applySorting()
+            
+            // Обновляем заголовки таблицы для отображения индикаторов сортировки
+            table.tableHeader.repaint()
+        }
     }
     
     /**
