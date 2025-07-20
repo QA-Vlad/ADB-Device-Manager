@@ -304,7 +304,12 @@ class TableLoader(
         preset: DevicePreset,
         listName: String?
     ) {
-        val rowData = DevicePresetTableModel.createRowVector(preset, tableModel.rowCount + 1)
+        // Определяем, показывать ли счетчики на основе наличия колонок счетчиков
+        val showCounters = when {
+            listName != null -> tableModel.columnCount > 7  // Show All mode
+            else -> tableModel.columnCount > 6              // Normal mode
+        }
+        val rowData = DevicePresetTableModel.createRowVector(preset, tableModel.rowCount + 1, showCounters)
         if (listName != null) {
             rowData.add(listName)
         }

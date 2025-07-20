@@ -26,8 +26,12 @@ class TableFactory {
     /**
      * Создает модель таблицы с начальными колонками
      */
-    fun createTableModel(historyManager: CommandHistoryManager): DevicePresetTableModel {
-        val columnNames = Vector(listOf(" ", "№", "Label", "Size (e.g., 1080x1920)", "DPI (e.g., 480)", "  "))
+    fun createTableModel(historyManager: CommandHistoryManager, showCounters: Boolean = true): DevicePresetTableModel {
+        val columnNames = if (showCounters) {
+            Vector(listOf(" ", "№", "Label", "Size (e.g., 1080x1920)", "DPI (e.g., 480)", "Size Uses", "DPI Uses", "  "))
+        } else {
+            Vector(listOf(" ", "№", "Label", "Size (e.g., 1080x1920)", "DPI (e.g., 480)", "  "))
+        }
         return DevicePresetTableModel(Vector<Vector<Any>>(), columnNames, historyManager)
     }
     

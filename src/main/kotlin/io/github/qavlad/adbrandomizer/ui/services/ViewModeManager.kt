@@ -29,33 +29,9 @@ class ViewModeManager(
         
         val allPresets = mutableListOf<Pair<String, DevicePreset>>()
         
-        // Сначала пытаемся использовать фиксированный порядок
-        val fixedOrder = presetOrderManager.getFixedShowAllOrder()
-        println("ADB_DEBUG:   fixedOrder size: ${fixedOrder.size}")
-        
-        if (fixedOrder.isNotEmpty()) {
-            // Используем фиксированный порядок
-            fixedOrder.forEach { key ->
-                parsePresetKeyAndAdd(key, tempPresetLists, allPresets)
-            }
-            
-            // Добавляем новые пресеты, которых нет в фиксированном порядке
-            tempPresetLists.forEach { (_, list) ->
-                list.presets.forEach { preset ->
-                    val key = "${list.name}::${preset.label}::${preset.size}::${preset.dpi}"
-                    if (!fixedOrder.contains(key)) {
-                        // Новый пресет - добавляем его после пресетов из того же списка
-                        val lastIndexOfSameList = allPresets.indexOfLast { it.first == list.name }
-                        if (lastIndexOfSameList >= 0) {
-                            allPresets.add(lastIndexOfSameList + 1, list.name to preset)
-                        } else {
-                            allPresets.add(list.name to preset)
-                        }
-                    }
-                }
-            }
-        } else if (savedOrder != null && savedOrder.isNotEmpty()) {
-            // Используем сохраненный порядок drag & drop
+        // Приоритет: savedOrder (drag & drop) > fixedOrder > обычный порядок
+        if (savedOrder != null && savedOrder.isNotEmpty()) {
+            // Используем сохраненный порядок drag & drop (высший приоритет)
             savedOrder.forEach { key ->
                 parsePresetKeyAndAdd(key, tempPresetLists, allPresets, supportOldFormat = true)
             }
@@ -70,16 +46,43 @@ class ViewModeManager(
                 }
             }
         } else {
-            // Обычный порядок - по спискам (и фиксируем его)
-            tempPresetLists.forEach { (_, list) ->
-                list.presets.forEach { preset ->
-                    allPresets.add(list.name to preset)
-                }
-            }
+            // Если нет savedOrder, пытаемся использовать фиксированный порядок
+            val fixedOrder = presetOrderManager.getFixedShowAllOrder()
+            println("ADB_DEBUG:   fixedOrder size: ${fixedOrder.size}")
             
-            // Фиксируем порядок при первом использовании
-            if (!presetOrderManager.hasFixedShowAllOrder()) {
-                presetOrderManager.fixShowAllOrder(tempPresetLists)
+            if (fixedOrder.isNotEmpty()) {
+                // Используем фиксированный порядок
+                fixedOrder.forEach { key ->
+                    parsePresetKeyAndAdd(key, tempPresetLists, allPresets)
+                }
+                
+                // Добавляем новые пресеты, которых нет в фиксированном порядке
+                tempPresetLists.forEach { (_, list) ->
+                    list.presets.forEach { preset ->
+                        val key = "${list.name}::${preset.label}::${preset.size}::${preset.dpi}"
+                        if (!fixedOrder.contains(key)) {
+                            // Новый пресет - добавляем его после пресетов из того же списка
+                            val lastIndexOfSameList = allPresets.indexOfLast { it.first == list.name }
+                            if (lastIndexOfSameList >= 0) {
+                                allPresets.add(lastIndexOfSameList + 1, list.name to preset)
+                            } else {
+                                allPresets.add(list.name to preset)
+                            }
+                        }
+                    }
+                }
+            } else {
+                // Обычный порядок - по спискам (и фиксируем его)
+                tempPresetLists.forEach { (_, list) ->
+                    list.presets.forEach { preset ->
+                        allPresets.add(list.name to preset)
+                    }
+                }
+                
+                // Фиксируем порядок при первом использовании
+                if (!presetOrderManager.hasFixedShowAllOrder()) {
+                    presetOrderManager.fixShowAllOrder(tempPresetLists)
+                }
             }
         }
         

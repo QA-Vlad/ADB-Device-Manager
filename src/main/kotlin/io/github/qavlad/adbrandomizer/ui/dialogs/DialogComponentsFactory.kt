@@ -16,8 +16,8 @@ class DialogComponentsFactory {
     /**
      * Создает модель таблицы
      */
-    fun createTableModel(historyManager: CommandHistoryManager): DevicePresetTableModel {
-        return tableFactory.createTableModel(historyManager)
+    fun createTableModel(historyManager: CommandHistoryManager, showCounters: Boolean = true): DevicePresetTableModel {
+        return tableFactory.createTableModel(historyManager, showCounters)
     }
     
     /**

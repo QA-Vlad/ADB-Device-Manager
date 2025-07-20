@@ -80,6 +80,7 @@ object SettingsService {
     // Ключи для сохранения состояния чекбоксов
     private const val SHOW_ALL_PRESETS_MODE_KEY = "ADB_RANDOMIZER_SHOW_ALL_PRESETS_MODE"
     private const val HIDE_DUPLICATES_MODE_KEY = "ADB_RANDOMIZER_HIDE_DUPLICATES_MODE"
+    private const val SHOW_COUNTERS_KEY = "ADB_RANDOMIZER_SHOW_COUNTERS"
     
     /**
      * Сохраняет состояние чекбокса "Show all presets"
@@ -107,6 +108,20 @@ object SettingsService {
      */
     fun getHideDuplicatesMode(): Boolean {
         return properties.getValue(HIDE_DUPLICATES_MODE_KEY)?.toBoolean() ?: false
+    }
+    
+    /**
+     * Сохраняет состояние чекбокса "Show usage counters"
+     */
+    fun setShowCounters(enabled: Boolean) {
+        properties.setValue(SHOW_COUNTERS_KEY, enabled.toString())
+    }
+    
+    /**
+     * Получает состояние чекбокса "Show usage counters"
+     */
+    fun getShowCounters(): Boolean {
+        return properties.getValue(SHOW_COUNTERS_KEY)?.toBoolean() ?: true
     }
     
     /**

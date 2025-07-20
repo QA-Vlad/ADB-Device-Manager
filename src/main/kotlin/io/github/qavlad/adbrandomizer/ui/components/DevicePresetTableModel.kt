@@ -1,6 +1,7 @@
 package io.github.qavlad.adbrandomizer.ui.components
 
 import io.github.qavlad.adbrandomizer.services.DevicePreset
+import io.github.qavlad.adbrandomizer.services.UsageCounterService
 import java.util.*
 import javax.swing.table.DefaultTableModel
 
@@ -10,14 +11,20 @@ class DevicePresetTableModel : DefaultTableModel {
         /**
          * Создает Vector строки таблицы из DevicePreset
          */
-        fun createRowVector(preset: DevicePreset, rowNumber: Int = 0): Vector<Any> {
+        fun createRowVector(preset: DevicePreset, rowNumber: Int = 0, showCounters: Boolean = true): Vector<Any> {
             return Vector<Any>().apply {
                 add("☰")
                 add(rowNumber)
                 add(preset.label)
                 add(preset.size)
                 add(preset.dpi)
-                add("Delete")
+                // Добавляем счетчики только если колонки видимы
+                if (showCounters) {
+                    add(UsageCounterService.getSizeCounter(preset.size))
+                    add(UsageCounterService.getDpiCounter(preset.dpi))
+                }
+                add("")  // Пустая колонка для кнопки удаления
+                // Колонка List добавляется отдельно в TableLoader для режима Show All
             }
         }
     }
@@ -32,17 +39,82 @@ class DevicePresetTableModel : DefaultTableModel {
     }
 
     override fun isCellEditable(row: Int, column: Int): Boolean {
-        // Запрещаем редактирование иконки "перетащить" и номера строки
-        return column != 0 && column != 1
+        // Определяем колонки счетчиков и удаления в зависимости от количества колонок
+        val hasCounters = columnCount > 6
+        val deleteColumnIndex = when {
+            hasCounters && columnCount >= 9 -> 7  // Show All с счетчиками
+            hasCounters && columnCount >= 8 -> 7  // Normal со счетчиками
+            columnCount >= 7 -> 5                  // Show All без счетчиков
+            else -> 5                              // Normal без счетчиков
+        }
+        
+        return when {
+            column == 0 || column == 1 -> false    // Drag icon and row number
+            hasCounters && (column == 5 || column == 6) -> false  // Size and DPI counters
+            column == deleteColumnIndex -> true     // Delete button column should be editable
+            column >= deleteColumnIndex -> false    // Columns after delete (like List in Show All)
+            else -> true                           // Label, Size, DPI columns
+        }
     }
 
     override fun setValueAt(aValue: Any?, row: Int, column: Int) {
         val oldValue = getValueAt(row, column)
         super.setValueAt(aValue, row, column)
 
-        // Записываем в историю, только если это не операция отмены и значение действительно изменилось
+        // Обновляем счетчики при изменении Size или DPI
         if (!isUndoOperation && oldValue != aValue && aValue is String) {
-            historyManager.addCellEdit(row, column, oldValue as? String ?: "", aValue)
+            when (column) {
+                3 -> { // Size column
+                    val newCounter = UsageCounterService.updateSizeValue(oldValue as? String ?: "", aValue)
+                    // Обновляем счетчик в таблице, если колонки видимы
+                    if (columnCount > 6) {
+                        super.setValueAt(newCounter, row, 5)
+                    }
+                    // Обновляем счетчики для всех строк с таким же размером
+                    updateCountersForSameValue(aValue, true)
+                }
+                4 -> { // DPI column
+                    val newCounter = UsageCounterService.updateDpiValue(oldValue as? String ?: "", aValue)
+                    // Обновляем счетчик в таблице, если колонки видимы
+                    if (columnCount > 7) {
+                        super.setValueAt(newCounter, row, 6)
+                    }
+                    // Обновляем счетчики для всех строк с таким же DPI
+                    updateCountersForSameValue(aValue, false)
+                }
+            }
+            
+            // Записываем в историю только изменения в редактируемых колонках (Label, Size, DPI)
+            // Исключаем колонку удаления, так как удаление обрабатывается отдельной командой
+            if (column in 2..4) {
+                historyManager.addCellEdit(row, column, oldValue as? String ?: "", aValue)
+            }
+        }
+    }
+    
+    /**
+     * Обновляет счетчики для всех строк с таким же значением Size или DPI
+     */
+    private fun updateCountersForSameValue(value: String, isSize: Boolean) {
+        if (value.isBlank()) return
+        
+        val column = if (isSize) 3 else 4 // Size или DPI
+        val counterColumn = if (isSize) 5 else 6 // Колонка счетчика
+        
+        // Проверяем, есть ли колонки счетчиков
+        if (columnCount <= counterColumn) return
+        
+        val counter = if (isSize) {
+            UsageCounterService.getSizeCounter(value)
+        } else {
+            UsageCounterService.getDpiCounter(value)
+        }
+        
+        for (i in 0 until rowCount) {
+            val cellValue = getValueAt(i, column) as? String ?: ""
+            if (cellValue == value) {
+                super.setValueAt(counter, i, counterColumn)
+            }
         }
     }
 

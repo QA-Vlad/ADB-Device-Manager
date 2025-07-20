@@ -72,7 +72,12 @@ class SnapshotManager(
         val originalPresetLists = mutableMapOf<String, PresetList>()
         
         tempPresetLists.forEach { (key, list) ->
-            originalPresetLists[key] = PresetList(name = list.name).apply {
+            // Сохраняем ID оригинального списка
+            originalPresetLists[key] = PresetList(
+                id = list.id,
+                name = list.name,
+                isDefault = list.isDefault
+            ).apply {
                 list.presets.forEach { preset ->
                     presets.add(preset.copy())
                 }
@@ -91,7 +96,12 @@ class SnapshotManager(
     ) {
         tempPresetLists.clear()
         snapshots.forEach { (key, snapshotList) ->
-            tempPresetLists[key] = PresetList(name = snapshotList.name).apply {
+            // Восстанавливаем с оригинальным ID
+            tempPresetLists[key] = PresetList(
+                id = snapshotList.id,
+                name = snapshotList.name,
+                isDefault = snapshotList.isDefault
+            ).apply {
                 snapshotList.presets.forEach { preset ->
                     presets.add(preset.copy())
                 }

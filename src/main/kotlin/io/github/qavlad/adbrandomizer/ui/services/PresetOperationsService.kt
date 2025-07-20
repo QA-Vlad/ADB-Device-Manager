@@ -178,14 +178,9 @@ class PresetOperationsService(
      * Создает данные строки для таблицы
      */
     private fun createRowData(preset: DevicePreset, rowIndex: Int): Array<Any> {
-        return arrayOf(
-            "☰",      // drag handle
-            rowIndex, // row number
-            preset.label,
-            preset.size,
-            preset.dpi,
-            false     // validation status (placeholder)
-        )
+        // Используем стандартный метод создания строки таблицы
+        val vector = DevicePresetTableModel.createRowVector(preset, rowIndex, showCounters = true)
+        return vector.toTypedArray()
     }
     
     /**

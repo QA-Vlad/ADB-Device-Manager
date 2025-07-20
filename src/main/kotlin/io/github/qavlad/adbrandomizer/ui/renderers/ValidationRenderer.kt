@@ -90,9 +90,15 @@ class ValidationRenderer(
         // Для остальных колонок используем стандартный рендерер
         val component = super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column)
         
-        // Особая обработка для колонки "List" (колонка 6)
-        if (column == 6) {
-            // Создаем специальный компонент с иконкой и вертикальной линией
+        // Особая обработка для колонки "List" - определяем правильный индекс
+        val hasCounters = table.columnCount > 7  // Если больше 7 колонок, значит есть счетчики
+        val listColumnIndex = if (hasCounters) 8 else 6  // List - последняя колонка в режиме Show All
+        
+        // Проверяем, что это действительно режим Show All (есть колонка List)
+        val isShowAllMode = table.columnCount >= 7  // Минимум 7 колонок в Show All без счетчиков
+        
+        if (isShowAllMode && column == listColumnIndex) {
+            // Создаем специальный компонент с вертикальной линией
             val listComponent = ListColumnComponent(value as? String ?: "")
             listComponent.background = cellBackground
             return listComponent

@@ -23,12 +23,15 @@ class PresetListManagerPanel(
     private val onListChanged: (PresetList) -> Unit,
     private val onShowAllPresetsChanged: (Boolean) -> Unit,
     private val onHideDuplicatesChanged: (Boolean) -> Unit,
-    private val onResetSorting: () -> Unit = {}
+    private val onResetSorting: () -> Unit = {},
+    private val onShowCountersChanged: (Boolean) -> Unit = {},
+    private val onResetCounters: () -> Unit = {}
 ) : JPanel(BorderLayout()) {
     
     private val listComboBox = ComboBox<PresetListItem>()
     private val showAllPresetsCheckbox = JBCheckBox("Show all presets", false)
     private val hideDuplicatesCheckbox = JBCheckBox("Hide duplicates", false)
+    private val showCountersCheckbox = JBCheckBox("Show usage counters", true)
     
     private var isUpdatingComboBox = false
     
@@ -118,6 +121,12 @@ class PresetListManagerPanel(
         ButtonUtils.addHoverEffect(hideDuplicatesCheckbox)
         bottomPanel.add(hideDuplicatesCheckbox)
         
+        showCountersCheckbox.addItemListener { event ->
+            onShowCountersChanged(event.stateChange == ItemEvent.SELECTED)
+        }
+        ButtonUtils.addHoverEffect(showCountersCheckbox)
+        bottomPanel.add(showCountersCheckbox)
+        
         // Добавляем кнопку сброса сортировки
         bottomPanel.add(Box.createHorizontalStrut(20)) // Отступ
         val resetSortButton = JButton("Reset Sorting").apply {
@@ -128,6 +137,16 @@ class PresetListManagerPanel(
         }
         ButtonUtils.addHoverEffect(resetSortButton)
         bottomPanel.add(resetSortButton)
+        
+        // Добавляем кнопку сброса счетчиков
+        val resetCountersButton = JButton("Reset Counters").apply {
+            toolTipText = "Reset all usage counters to zero"
+            addActionListener { 
+                resetUsageCounters()
+            }
+        }
+        ButtonUtils.addHoverEffect(resetCountersButton)
+        bottomPanel.add(resetCountersButton)
         
         // Компонуем все вместе
         val mainPanel = JPanel(BorderLayout())
@@ -366,6 +385,19 @@ class PresetListManagerPanel(
             }
         }
     }
+    
+    private fun resetUsageCounters() {
+        val result = Messages.showYesNoDialog(
+            this,
+            "Are you sure you want to reset all usage counters to zero?",
+            "Reset Usage Counters",
+            Messages.getQuestionIcon()
+        )
+        
+        if (result == Messages.YES) {
+            onResetCounters()
+        }
+    }
 
     
     /**
@@ -425,4 +457,5 @@ class PresetListManagerPanel(
             isUpdatingComboBox = false
         }
     }
+
 }

@@ -15,7 +15,8 @@ class TableColumnManager(
     private val tableConfigurator: TableConfigurator,
     private val tableSortingService: TableSortingService? = null,
     private val getShowAllMode: () -> Boolean = { false },
-    private val getHideDuplicatesMode: () -> Boolean = { false }
+    private val getHideDuplicatesMode: () -> Boolean = { false },
+    private val getShowCounters: () -> Boolean = { true }
 ) {
     
     /**
@@ -85,9 +86,23 @@ class TableColumnManager(
                 table.columnModel.getColumn(4).headerRenderer = headerRenderer // DPI
             }
             
+            // Для колонок счетчиков, если они включены
+            val showCounters = getShowCounters()
+            if (showCounters) {
+                if (table.columnModel.columnCount > 5) {
+                    table.columnModel.getColumn(5).headerRenderer = headerRenderer // Size Uses
+                }
+                if (table.columnModel.columnCount > 6) {
+                    table.columnModel.getColumn(6).headerRenderer = headerRenderer // DPI Uses
+                }
+            }
+            
             // Для колонки List в режиме Show All
-            if (isShowAllPresetsMode && table.columnModel.columnCount > 6) {
-                table.columnModel.getColumn(6).headerRenderer = headerRenderer // List
+            if (isShowAllPresetsMode) {
+                val listColumnIndex = if (showCounters) 8 else 6
+                if (table.columnModel.columnCount > listColumnIndex) {
+                    table.columnModel.getColumn(listColumnIndex).headerRenderer = headerRenderer // List
+                }
             }
         }
         
@@ -98,10 +113,25 @@ class TableColumnManager(
      * Получает имена колонок в виде Vector для текущего режима
      */
     private fun getColumnNamesVector(isShowAllPresetsMode: Boolean): Vector<String> {
-        return if (isShowAllPresetsMode) {
-            Vector(listOf(" ", "№", "Label", "Size (e.g., 1080x1920)", "DPI (e.g., 480)", "  ", "List"))
-        } else {
-            Vector(listOf(" ", "№", "Label", "Size (e.g., 1080x1920)", "DPI (e.g., 480)", "  "))
+        val showCounters = getShowCounters()
+        
+        return when {
+            isShowAllPresetsMode && showCounters -> {
+                // Show All mode with counters
+                Vector(listOf(" ", "№", "Label", "Size (e.g., 1080x1920)", "DPI (e.g., 480)", "Size Uses", "DPI Uses", "  ", "List"))
+            }
+            isShowAllPresetsMode && !showCounters -> {
+                // Show All mode without counters
+                Vector(listOf(" ", "№", "Label", "Size (e.g., 1080x1920)", "DPI (e.g., 480)", "  ", "List"))
+            }
+            !isShowAllPresetsMode && showCounters -> {
+                // Normal mode with counters
+                Vector(listOf(" ", "№", "Label", "Size (e.g., 1080x1920)", "DPI (e.g., 480)", "Size Uses", "DPI Uses", "  "))
+            }
+            else -> {
+                // Normal mode without counters
+                Vector(listOf(" ", "№", "Label", "Size (e.g., 1080x1920)", "DPI (e.g., 480)", "  "))
+            }
         }
     }
 }

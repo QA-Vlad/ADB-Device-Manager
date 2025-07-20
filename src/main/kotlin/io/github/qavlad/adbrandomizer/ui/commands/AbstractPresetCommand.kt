@@ -94,13 +94,8 @@ abstract class AbstractPresetCommand(
      * Создает Vector для строки таблицы из DevicePreset
      */
     protected fun createTableRow(preset: DevicePreset): java.util.Vector<Any> {
-        val rowData = java.util.Vector<Any>()
-        rowData.add(false) // checked
-        rowData.add(false) // edit mode
-        rowData.add(preset.label)
-        rowData.add(preset.size)
-        rowData.add(preset.dpi)
-        return rowData
+        val showCounters = tableModel.columnCount > 6
+        return DevicePresetTableModel.createRowVector(preset, tableModel.rowCount + 1, showCounters)
     }
     
     /**

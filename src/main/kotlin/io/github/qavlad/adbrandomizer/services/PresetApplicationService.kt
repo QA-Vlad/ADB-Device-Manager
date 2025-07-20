@@ -36,6 +36,14 @@ object PresetApplicationService {
                 // Обновляем состояние устройств после применения пресета
                 updateDeviceStatesAfterPresetApplication(devices, presetData)
                 
+                // Увеличиваем счетчики использования
+                if (setSize && preset.size.isNotBlank()) {
+                    UsageCounterService.incrementSizeCounter(preset.size)
+                }
+                if (setDpi && preset.dpi.isNotBlank()) {
+                    UsageCounterService.incrementDpiCounter(preset.dpi)
+                }
+                
                 // Отслеживаем какой пресет был применен (сохраняем полную копию текущего состояния пресета)
                 val appliedSizePreset = if (setSize) preset.copy() else null
                 val appliedDpiPreset = if (setDpi) preset.copy() else null

@@ -356,20 +356,26 @@ class PresetDistributor(
         // Обновляем списки, сохраняя оригинальный порядок
         tempPresetLists.values.forEach { list ->
             val originalOrder = originalOrders[list.name] ?: emptyList()
-            val updatedPresets = updatedPresetsPerList[list.name] ?: mutableMapOf()
+            val updatedPresetsMap = updatedPresetsPerList[list.name] ?: mutableMapOf()
+            
+            // If the list has no updates from table, skip it to preserve existing presets
+            if (updatedPresetsMap.isEmpty() && list.presets.isNotEmpty()) {
+                println("ADB_DEBUG: distributeNormal - No updates for list ${list.name}, preserving existing ${list.presets.size} presets")
+                return@forEach
+            }
             
             // Создаем новый список, сохраняя оригинальный порядок
             val newPresets = mutableListOf<DevicePreset>()
             
             // Сначала добавляем пресеты в оригинальном порядке
             originalOrder.forEach { presetKey ->
-                updatedPresets[presetKey]?.let { preset ->
+                updatedPresetsMap[presetKey]?.let { preset ->
                     newPresets.add(preset)
                 }
             }
             
             // Затем добавляем новые пресеты, которых не было в оригинальном порядке
-            updatedPresets.forEach { (presetKey, preset) ->
+            updatedPresetsMap.forEach { (presetKey, preset) ->
                 if (!originalOrder.contains(presetKey)) {
                     newPresets.add(preset)
                 }
@@ -397,10 +403,7 @@ class PresetDistributor(
             val listName = getListNameAtRow(i) ?: continue
             val preset = tableModel.getPresetAt(i) ?: continue
 
-            if (preset.label.isBlank() && preset.size.isBlank() && preset.dpi.isBlank()) {
-                continue
-            }
-
+            // Don't skip empty presets - they should be preserved
             updatedPresetsPerList.getOrPut(listName) { mutableListOf() }.add(preset)
         }
 

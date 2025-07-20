@@ -19,6 +19,14 @@ object PresetListService {
     private val gson = Gson()
     private val presetsDir = Paths.get(PathManager.getConfigPath(), "ADBRandomizer", "presets")
     
+    // Кэш для загруженных списков, чтобы избежать повторного чтения файлов
+    private val loadedListsCache = mutableMapOf<String, PresetList>()
+    private var cacheEnabled = false
+    
+    // Кэш для активного списка
+    private var activeListCache: PresetList? = null
+    private var activeListCacheId: String? = null
+    
     init {
         println("PresetListService: Initializing with presets directory: ${presetsDir.toAbsolutePath()}")
         // Создаем директорию для пресетов если её нет
@@ -174,14 +182,6 @@ object PresetListService {
         }
         return list
     }
-    
-    // Кэш для загруженных списков, чтобы избежать повторного чтения файлов
-    private val loadedListsCache = mutableMapOf<String, PresetList>()
-    private var cacheEnabled = false
-    
-    // Кэш для активного списка
-    private var activeListCache: PresetList? = null
-    private var activeListCacheId: String? = null
     
     /**
      * Загружает список пресетов по ID

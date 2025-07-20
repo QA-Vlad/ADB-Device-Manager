@@ -246,9 +246,20 @@ class TableConfigurator(
             }
         }
 
-        // Настраиваем колонку удаления - всегда на позиции 5
-        if (table.columnModel.columnCount > 5) {
-            table.columnModel.getColumn(5).apply {
+        // Настраиваем колонку удаления - позиция зависит от количества колонок
+        // В нормальном режиме: " ", "№", "Label", "Size", "DPI", ["Size Uses", "DPI Uses",] "  "
+        // В Show All режиме: " ", "№", "Label", "Size", "DPI", ["Size Uses", "DPI Uses",] "  ", "List"
+        val deleteColumnIndex = when {
+            isShowAllPresetsMode() && table.columnModel.columnCount >= 9 -> 7  // Show All с счетчиками (9 колонок)
+            isShowAllPresetsMode() && table.columnModel.columnCount >= 7 -> 5  // Show All без счетчиков (7 колонок)
+            !isShowAllPresetsMode() && table.columnModel.columnCount >= 8 -> 7 // Normal со счетчиками (8 колонок) - исправлено!
+            else -> 5  // Normal без счетчиков (6 колонок)
+        }
+        
+        println("ADB_DEBUG: Configuring delete column - columnCount: ${table.columnModel.columnCount}, isShowAllPresetsMode: ${isShowAllPresetsMode()}, deleteColumnIndex: $deleteColumnIndex")
+        
+        if (table.columnModel.columnCount > deleteColumnIndex) {
+            table.columnModel.getColumn(deleteColumnIndex).apply {
                 minWidth = JBUI.scale(40)
                 maxWidth = JBUI.scale(40)
                 cellRenderer = ButtonRenderer(isShowAllPresetsMode)
@@ -259,7 +270,7 @@ class TableConfigurator(
                 )
                 
                 // Добавляем проверку редактируемости
-                println("ADB_DEBUG: Column 5 configured, isCellEditable check...")
+                println("ADB_DEBUG: Delete column $deleteColumnIndex configured, isCellEditable check...")
             }
         }
     }

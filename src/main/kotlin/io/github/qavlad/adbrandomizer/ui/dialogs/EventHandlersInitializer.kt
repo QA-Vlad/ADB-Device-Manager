@@ -75,7 +75,17 @@ class EventHandlersInitializer(
                     onLoadPresetsIntoTable = onLoadPresetsIntoTable
                 )
             },
-            onResetSorting = onResetSorting
+            onResetSorting = onResetSorting,
+            onShowCountersChanged = { showCounters ->
+                handleShowCountersChanged(
+                    showCounters = showCounters,
+                    onSetupTableColumns = onSetupTableColumns,
+                    onLoadPresetsIntoTable = onLoadPresetsIntoTable
+                )
+            },
+            onResetCounters = {
+                handleResetCounters(onLoadPresetsIntoTable)
+            }
         )
     }
     
@@ -96,7 +106,8 @@ class EventHandlersInitializer(
         
         // Сохраняем текущее состояние перед переключением
         if (controller.isTableInitialized() && !dialogState.isFirstLoad()) {
-            if (showAll || dialogState.isShowAllPresetsMode()) {
+            // Only sync when EXITING Show All mode, not when entering it
+            if (!showAll && dialogState.isShowAllPresetsMode()) {
                 onSyncTableChanges()
             }
         }
@@ -179,6 +190,46 @@ class EventHandlersInitializer(
             if (!hideDuplicates) {
                 duplicateManager.clearSnapshots()
             }
+        }
+    }
+    
+    /**
+     * Обработка изменения видимости счетчиков
+     */
+    private fun handleShowCountersChanged(
+        showCounters: Boolean,
+        onSetupTableColumns: () -> Unit,
+        onLoadPresetsIntoTable: () -> Unit
+    ) {
+        println("ADB_DEBUG: Show counters changed to: $showCounters")
+        
+        // Останавливаем редактирование если оно активно
+        controller.stopTableEditing()
+        
+        // Сохраняем настройку
+        SettingsService.setShowCounters(showCounters)
+        
+        // Пересоздаем колонки таблицы
+        onSetupTableColumns()
+        
+        // Перезагружаем данные в таблицу
+        if (controller.isTableInitialized()) {
+            onLoadPresetsIntoTable()
+        }
+    }
+    
+    /**
+     * Обработка сброса счетчиков использования
+     */
+    private fun handleResetCounters(onLoadPresetsIntoTable: () -> Unit) {
+        println("ADB_DEBUG: Resetting usage counters")
+        
+        // Сбрасываем все счетчики
+        UsageCounterService.resetAllCounters()
+        
+        // Перезагружаем таблицу для обновления отображения
+        if (controller.isTableInitialized()) {
+            onLoadPresetsIntoTable()
         }
     }
     

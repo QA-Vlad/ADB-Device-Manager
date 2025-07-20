@@ -82,9 +82,10 @@ class SettingsPersistenceService {
             // Пропускаем строку с кнопкой "+"
             if (firstColumn == "+") continue
             
-            // В режиме Show All в последней колонке хранится имя списка
-            val listName = if (tableModel.columnCount > 6) {
-                tableModel.getValueAt(row, 6) as? String ?: ""
+            // В режиме Show All колонка List всегда последняя
+            val listColumnIndex = tableModel.columnCount - 1
+            val listName = if (tableModel.columnCount >= 7) {  // Минимум 7 колонок в Show All
+                tableModel.getValueAt(row, listColumnIndex) as? String ?: ""
             } else {
                 ""
             }
@@ -92,8 +93,8 @@ class SettingsPersistenceService {
             if (listName.isNotEmpty()) {
                 val preset = tableModel.getPresetAt(row)
                 if (preset != null) {
-                    // Сохраняем в формате: listName|label|size|dpi
-                    presetsOrder.add("$listName|${preset.label}|${preset.size}|${preset.dpi}")
+                    // Сохраняем в формате: listName::label::size::dpi (формат должен совпадать с ViewModeManager)
+                    presetsOrder.add("$listName::${preset.label}::${preset.size}::${preset.dpi}")
                 }
             }
         }

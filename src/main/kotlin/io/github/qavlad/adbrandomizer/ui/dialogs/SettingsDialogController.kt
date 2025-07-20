@@ -136,7 +136,8 @@ class SettingsDialogController(
      * Создает модель таблицы с начальными данными
      */
     fun createTableModel(): DevicePresetTableModel {
-        tableModel = componentsFactory.createTableModel(historyManager)
+        val showCounters = SettingsService.getShowCounters()
+        tableModel = componentsFactory.createTableModel(historyManager, showCounters)
         // НЕ добавляем слушатель здесь, так как table еще не создана
 
         // НЕ загружаем список здесь, так как временные списки еще не созданы
@@ -242,7 +243,8 @@ class SettingsDialogController(
             tableConfigurator,
             tableSortingService,
             { dialogState.isShowAllPresetsMode() },
-            { dialogState.isHideDuplicatesMode() }
+            { dialogState.isHideDuplicatesMode() },
+            { SettingsService.getShowCounters() }
         )
 
         println("ADB_DEBUG: After tableConfigurator.configure() - currentPresetList: ${currentPresetList?.name}, presets: ${currentPresetList?.presets?.size}")
@@ -890,9 +892,13 @@ class SettingsDialogController(
 
     private fun getListNameAtRow(row: Int): String? {
         // В режиме Show all presets получаем название списка из последней колонки
-        if (dialogState.isShowAllPresetsMode() && row >= 0 && row < tableModel.rowCount && tableModel.columnCount > 6) {
-            val value = tableModel.getValueAt(row, 6)
-            return value as? String
+        if (dialogState.isShowAllPresetsMode() && row >= 0 && row < tableModel.rowCount) {
+            // Колонка List находится в последней позиции (columnCount - 1)
+            val listColumnIndex = tableModel.columnCount - 1
+            if (listColumnIndex >= 0) {
+                val value = tableModel.getValueAt(row, listColumnIndex)
+                return value as? String
+            }
         }
         return null
     }
@@ -912,10 +918,45 @@ class SettingsDialogController(
     private fun setupUpdateListener() {
         updateListener = {
             SwingUtilities.invokeLater {
+                // Обновляем счетчики в таблице
+                updateTableCounters()
                 table.repaint()
             }
         }
         updateListener?.let { SettingsDialogUpdateNotifier.addListener(it) }
+    }
+    
+    /**
+     * Обновляет счетчики использования в таблице
+     */
+    private fun updateTableCounters() {
+        val showCounters = SettingsService.getShowCounters()
+        if (!showCounters || tableModel.columnCount < 7) return  // Нет колонок счетчиков
+        
+        // Обновляем счетчики для всех строк в таблице
+        for (row in 0 until tableModel.rowCount) {
+            // Пропускаем строку с кнопкой добавления
+            if (tableModel.getValueAt(row, 0) == "+") continue
+            
+            val size = tableModel.getValueAt(row, 3) as? String ?: ""
+            val dpi = tableModel.getValueAt(row, 4) as? String ?: ""
+            
+            // Обновляем счетчики напрямую через dataVector, чтобы избежать лишних событий
+            val rowVector = tableModel.dataVector.elementAt(row) as java.util.Vector<Any>
+            
+            if (size.isNotBlank()) {
+                val sizeCounter = UsageCounterService.getSizeCounter(size)
+                rowVector.setElementAt(sizeCounter, 5)
+            }
+            
+            if (dpi.isNotBlank()) {
+                val dpiCounter = UsageCounterService.getDpiCounter(dpi)
+                rowVector.setElementAt(dpiCounter, 6)
+            }
+        }
+        
+        // Уведомляем таблицу об изменении данных
+        tableModel.fireTableDataChanged()
     }
 
     private fun refreshDeviceStatesIfNeeded() {
