@@ -71,7 +71,11 @@ class SettingsDialogController(
     
     fun getPresetOrderManager(): PresetOrderManager = presetOrderManager
     private val presetOperationsService = PresetOperationsService(historyManager, presetOrderManager)
-    private val tableEventHandler = TableEventHandler(project)
+    private val tableEventHandler = TableEventHandler(
+        project = project,
+        getHoverState = { hoverState },
+        setHoverState = { newState -> hoverState = newState }
+    )
     private val snapshotManager = SnapshotManager(duplicateManager)
     private val validationService = ValidationService()
     private val stateManager = StateManager()

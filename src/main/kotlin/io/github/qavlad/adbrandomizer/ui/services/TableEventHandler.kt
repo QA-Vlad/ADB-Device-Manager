@@ -4,6 +4,7 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.SystemInfo
 import io.github.qavlad.adbrandomizer.services.PresetApplicationService
 import io.github.qavlad.adbrandomizer.ui.components.DevicePresetTableModel
+import io.github.qavlad.adbrandomizer.ui.components.HoverState
 import java.awt.event.MouseEvent
 import com.intellij.ui.table.JBTable
 import javax.swing.*
@@ -13,7 +14,9 @@ import javax.swing.*
  * Управляет кликами, редактированием ячеек, контекстным меню и другими событиями
  */
 class TableEventHandler(
-    private val project: Project?
+    private val project: Project?,
+    private val getHoverState: () -> HoverState? = { null },
+    private val setHoverState: ((HoverState) -> Unit)? = null
 ) {
     
     /**
@@ -39,7 +42,20 @@ class TableEventHandler(
         when (column) {
             0 -> handleCheckboxClick(tableModel, row)
             // Колонка 1 - это номер пресета, не обрабатываем клики по ней
-            2, 3, 4 -> handlePresetCellClick(table, row, column, clickCount)
+            2, 3, 4 -> {
+                val currentHoverState = getHoverState()
+                val oldSelectedRow = currentHoverState?.selectedTableRow ?: -1
+                val oldSelectedColumn = currentHoverState?.selectedTableColumn ?: -1
+                
+                // Если кликнули на другую ячейку, перерисовываем старую
+                if (oldSelectedRow >= 0 && oldSelectedColumn >= 0 && 
+                    (oldSelectedRow != row || oldSelectedColumn != column)) {
+                    val oldRect = table.getCellRect(oldSelectedRow, oldSelectedColumn, false)
+                    table.repaint(oldRect)
+                }
+                
+                handlePresetCellClick(table, row, column, clickCount)
+            }
             // Колонка 5 - это кнопка удаления обрабатывается через ButtonEditor
             // Не обрабатываем клики по ней здесь
         }
@@ -140,10 +156,23 @@ class TableEventHandler(
         column: Int,
         clickCount: Int
     ) {
+        val currentHoverState = getHoverState()
+        val isCellSelected = currentHoverState?.isTableCellSelected(row, column) ?: false
+        
         if (clickCount == 1) {
-            SwingUtilities.invokeLater {
-                table.editCellAt(row, column)
-                table.editorComponent?.requestFocus()
+            if (isCellSelected) {
+                // Если ячейка уже выделена, начинаем редактирование
+                SwingUtilities.invokeLater {
+                    table.editCellAt(row, column)
+                    table.editorComponent?.requestFocus()
+                }
+            } else {
+                // Если ячейка не выделена, только выделяем её
+                setHoverState?.invoke(currentHoverState?.withTableSelection(row, column) ?: HoverState().withTableSelection(row, column))
+                
+                // Перерисовываем таблицу для отображения выделения
+                val rect = table.getCellRect(row, column, false)
+                table.repaint(rect)
             }
         }
     }
