@@ -249,6 +249,9 @@ class SettingsDialogController(
 
         println("ADB_DEBUG: After tableConfigurator.configure() - currentPresetList: ${currentPresetList?.name}, presets: ${currentPresetList?.presets?.size}")
 
+        // Настраиваем колонки таблицы, включая заголовки для сортировки
+        setupTableColumns()
+
         // Загружаем данные после полной инициализации
         println("ADB_DEBUG: Before loadPresetsIntoTable in initializeHandlers - currentPresetList: ${currentPresetList?.name}, presets: ${currentPresetList?.presets?.size}")
         loadPresetsIntoTable()
