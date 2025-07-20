@@ -3,8 +3,8 @@ package io.github.qavlad.adbrandomizer.ui.components
 import com.intellij.ui.table.JBTable
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.AbstractTableCellEditor
-import io.github.qavlad.adbrandomizer.config.PluginConfig
 import io.github.qavlad.adbrandomizer.ui.handlers.PresetTransferHandler
+import io.github.qavlad.adbrandomizer.services.SettingsService
 import io.github.qavlad.adbrandomizer.ui.renderers.ValidationRenderer
 import java.awt.Dimension
 import java.awt.Component
@@ -16,6 +16,7 @@ import javax.swing.table.TableCellEditor
 import javax.swing.table.TableCellRenderer
 import java.awt.Color
 import com.intellij.ui.JBColor
+import io.github.qavlad.adbrandomizer.config.PluginConfig
 
 private fun configureButtonAppearance(button: JButton, trashIcon: Icon, showAllMode: Boolean) {
     button.icon = trashIcon
@@ -56,7 +57,8 @@ class TableConfigurator(
     private val isShowAllPresetsMode: () -> Boolean = { false },
     private val onPresetDeletedFromEditor: (Int) -> Unit,
     private val onDragStarted: () -> Unit = {},
-    private val onDragEnded: () -> Unit = {}
+    private val onDragEnded: () -> Unit = {},
+    private val columnWidthConfig: PluginConfig.UI.ColumnWidthConfig = PluginConfig.UI.ColumnWidthConfig()
 ) {
     
     private fun isAddButtonRow(table: JTable, row: Int): Boolean {
@@ -196,9 +198,9 @@ class TableConfigurator(
     fun configureColumns() {
         // Column 0: Drag Handle
                 table.columnModel.getColumn(0).apply {
-            preferredWidth = JBUI.scale(20)
-            minWidth = JBUI.scale(20)
-            maxWidth = JBUI.scale(20)
+            preferredWidth = JBUI.scale(columnWidthConfig.dragHandle)
+            minWidth = JBUI.scale(columnWidthConfig.dragHandle)
+            maxWidth = JBUI.scale(columnWidthConfig.dragHandle)
             // Use a custom renderer that displays the icon based on the cell value
             setCellRenderer { table, value, _, _, _, _ ->
                 val iconLabel = if (value == "+") "+" else "☰"
@@ -217,8 +219,8 @@ class TableConfigurator(
         }
 
         table.columnModel.getColumn(1).apply {
-            minWidth = JBUI.scale(40)
-            maxWidth = JBUI.scale(40)
+            minWidth = JBUI.scale(columnWidthConfig.number)
+            maxWidth = JBUI.scale(columnWidthConfig.number)
             cellRenderer = object : DefaultTableCellRenderer() {
                 init {
                     horizontalAlignment = CENTER
@@ -260,8 +262,8 @@ class TableConfigurator(
         
         if (table.columnModel.columnCount > deleteColumnIndex) {
             table.columnModel.getColumn(deleteColumnIndex).apply {
-                minWidth = JBUI.scale(40)
-                maxWidth = JBUI.scale(40)
+                minWidth = JBUI.scale(columnWidthConfig.deleteButton)
+                maxWidth = JBUI.scale(columnWidthConfig.deleteButton)
                 cellRenderer = ButtonRenderer(isShowAllPresetsMode)
                 cellEditor = ButtonEditor(
                     table = table,
@@ -273,6 +275,34 @@ class TableConfigurator(
                 println("ADB_DEBUG: Delete column $deleteColumnIndex configured, isCellEditable check...")
             }
         }
+        
+        // Настраиваем ширину остальных колонок
+        configureColumnWidth(2, columnWidthConfig.label)  // Label
+        configureColumnWidth(3, columnWidthConfig.size)   // Size
+        configureColumnWidth(4, columnWidthConfig.dpi)    // DPI
+        
+        // Счетчики использования (если включены)
+        val hasCounters = SettingsService.getShowCounters()
+        if (hasCounters) {
+            configureColumnWidth(5, columnWidthConfig.sizeUses)  // Size Uses
+            configureColumnWidth(6, columnWidthConfig.dpiUses)   // DPI Uses
+        }
+        
+        // Колонка List (только в режиме Show All)
+        if (isShowAllPresetsMode() && table.columnModel.columnCount > deleteColumnIndex + 1) {
+            configureColumnWidth(deleteColumnIndex + 1, columnWidthConfig.listColumn)
+        }
+    }
+    
+    private fun configureColumnWidth(columnIndex: Int, width: Int?) {
+        if (columnIndex < table.columnModel.columnCount && width != null) {
+            table.columnModel.getColumn(columnIndex).apply {
+                preferredWidth = JBUI.scale(width)
+                minWidth = JBUI.scale(width / 2)  // Минимум - половина от заданной ширины
+                maxWidth = JBUI.scale(width * 2)  // Максимум - в два раза больше заданной
+            }
+        }
+        // Если width == null, оставляем автоматическую ширину
     }
 }
 

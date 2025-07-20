@@ -22,6 +22,33 @@ object PluginConfig {
         const val SETTINGS_DIALOG_WIDTH = 650
         const val SETTINGS_DIALOG_HEIGHT = 400
         const val NOTIFICATION_GROUP_ID = "ADB Randomizer Notifications"
+        
+        // Ширина колонок таблицы (null = автоматическая ширина)
+        const val COLUMN_WIDTH_DRAG_HANDLE = 20
+        const val COLUMN_WIDTH_NUMBER = 40
+        val COLUMN_WIDTH_LABEL: Int? = 150
+        val COLUMN_WIDTH_SIZE: Int? = 140
+        val COLUMN_WIDTH_DPI: Int? = 115
+        val COLUMN_WIDTH_SIZE_USES: Int? = 80
+        val COLUMN_WIDTH_DPI_USES: Int? = 75
+        const val COLUMN_WIDTH_DELETE_BUTTON = 40
+        val COLUMN_WIDTH_LIST: Int? = 155
+        
+        /**
+         * Конфигурация ширины колонок таблицы.
+         * Значение null означает автоматическую ширину.
+         */
+        data class ColumnWidthConfig(
+            val dragHandle: Int = COLUMN_WIDTH_DRAG_HANDLE,
+            val number: Int = COLUMN_WIDTH_NUMBER,
+            val label: Int? = COLUMN_WIDTH_LABEL,
+            val size: Int? = COLUMN_WIDTH_SIZE,
+            val dpi: Int? = COLUMN_WIDTH_DPI,
+            val sizeUses: Int? = COLUMN_WIDTH_SIZE_USES,
+            val dpiUses: Int? = COLUMN_WIDTH_DPI_USES,
+            val deleteButton: Int = COLUMN_WIDTH_DELETE_BUTTON,
+            val listColumn: Int? = COLUMN_WIDTH_LIST
+        )
     }
     
     // Scrcpy Configuration
