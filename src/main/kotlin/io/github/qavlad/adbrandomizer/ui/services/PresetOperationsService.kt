@@ -107,18 +107,22 @@ class PresetOperationsService(
             return false
         }
         
-        // Если включен режим скрытия дублей, сначала отключаем его
-        if (isHideDuplicatesMode) {
-            onDuplicatesFilterToggle(false)
-        }
-        
         val originalPreset = getPresetFromRow(tableModel, row)
         val newPreset = originalPreset.copy(label = "${originalPreset.label} (copy)")
         
         val insertIndex = row + 1
         // Учитываем, что после вставки все последующие строки сдвинутся
         val rowData = createRowData(newPreset, insertIndex + 1)
+        
+        println("ADB_DEBUG: duplicatePreset - before insertRow, tableModel.rowCount=${tableModel.rowCount}")
         tableModel.insertRow(insertIndex, rowData)
+        println("ADB_DEBUG: duplicatePreset - after insertRow, tableModel.rowCount=${tableModel.rowCount}")
+        
+        // Если включен режим скрытия дублей, автоматически отключаем его ПОСЛЕ вставки
+        if (isHideDuplicatesMode) {
+            println("ADB_DEBUG: duplicatePreset - disabling hide duplicates mode")
+            onDuplicatesFilterToggle(false)
+        }
         
         // Добавляем в фиксированный порядок, если есть менеджер
         if (presetOrderManager != null) {

@@ -174,8 +174,8 @@ class EventHandlersInitializer(
             controller.saveVisiblePresetsSnapshotForAllLists()
         }
         
-        // Проверяем, что таблица инициализирована
-        if (controller.isTableInitialized()) {
+        // Проверяем, что таблица инициализирована и не идет процесс дублирования
+        if (controller.isTableInitialized() && !controller.isDuplicatingPreset()) {
             controller.removeTableModelListener()
             
             dialogState.withDuplicatesFilterSwitching {

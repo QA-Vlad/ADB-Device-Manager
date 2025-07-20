@@ -415,6 +415,8 @@ class PresetListManagerPanel(
     fun setHideDuplicates(enabled: Boolean) {
         if (hideDuplicatesCheckbox.isSelected != enabled) {
             hideDuplicatesCheckbox.isSelected = enabled
+            // Явно вызываем обработчик, так как программное изменение может не вызвать ItemListener
+            onHideDuplicatesChanged(enabled)
         }
     }
     

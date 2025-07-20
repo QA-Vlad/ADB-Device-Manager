@@ -37,11 +37,18 @@ class ViewModeManager(
             }
             
             // Добавляем новые пресеты, которых нет в сохраненном порядке
+            val addedKeys = mutableSetOf<String>()
+            allPresets.forEach { (listName, preset) ->
+                val key = "${listName}::${preset.label}::${preset.size}::${preset.dpi}"
+                addedKeys.add(key)
+            }
+            
             tempPresetLists.forEach { (_, list) ->
                 list.presets.forEach { preset ->
                     val key = "${list.name}::${preset.label}::${preset.size}::${preset.dpi}"
-                    if (!savedOrder.contains(key)) {
+                    if (!savedOrder.contains(key) && !addedKeys.contains(key)) {
                         allPresets.add(list.name to preset)
+                        addedKeys.add(key)
                     }
                 }
             }
@@ -57,10 +64,16 @@ class ViewModeManager(
                 }
                 
                 // Добавляем новые пресеты, которых нет в фиксированном порядке
+                val addedKeys = mutableSetOf<String>()
+                allPresets.forEach { (listName, preset) ->
+                    val key = "${listName}::${preset.label}::${preset.size}::${preset.dpi}"
+                    addedKeys.add(key)
+                }
+                
                 tempPresetLists.forEach { (_, list) ->
                     list.presets.forEach { preset ->
                         val key = "${list.name}::${preset.label}::${preset.size}::${preset.dpi}"
-                        if (!fixedOrder.contains(key)) {
+                        if (!fixedOrder.contains(key) && !addedKeys.contains(key)) {
                             // Новый пресет - добавляем его после пресетов из того же списка
                             val lastIndexOfSameList = allPresets.indexOfLast { it.first == list.name }
                             if (lastIndexOfSameList >= 0) {
@@ -68,6 +81,7 @@ class ViewModeManager(
                             } else {
                                 allPresets.add(list.name to preset)
                             }
+                            addedKeys.add(key)
                         }
                     }
                 }

@@ -58,6 +58,7 @@ class SettingsDialogController(
     // Состояние
     var hoverState = HoverState.noHover()
         private set
+    private var isDuplicatingPreset = false
     override val historyManager = CommandHistoryManager(this)
     private val duplicateManager = DuplicateManager()
     private val presetDistributor = PresetDistributor(duplicateManager)
@@ -848,25 +849,33 @@ class SettingsDialogController(
 
 
     fun duplicatePreset(row: Int) {
-        val duplicated = presetOperationsService.duplicatePreset(
-            row = row,
-            tableModel = tableModel,
-            table = table,
-            isShowAllMode = dialogState.isShowAllPresetsMode(),
-            isHideDuplicatesMode = dialogState.isHideDuplicatesMode(),
-            onDuplicatesFilterToggle = { enabled ->
-                listManagerPanel.setHideDuplicates(enabled)
-            },
-            currentListName = currentPresetList?.name
-        )
+        // Устанавливаем флаг, чтобы заблокировать перезагрузку таблицы
+        isDuplicatingPreset = true
         
-        if (duplicated) {
-            SwingUtilities.invokeLater {
-                val insertIndex = row + 1
-                table.scrollRectToVisible(table.getCellRect(insertIndex, 0, true))
-                hoverState = hoverState.withTableSelection(insertIndex, 2)
-                table.repaint()
+        try {
+            val duplicated = presetOperationsService.duplicatePreset(
+                row = row,
+                tableModel = tableModel,
+                table = table,
+                isShowAllMode = dialogState.isShowAllPresetsMode(),
+                isHideDuplicatesMode = dialogState.isHideDuplicatesMode(),
+                onDuplicatesFilterToggle = { enabled ->
+                    listManagerPanel.setHideDuplicates(enabled)
+                },
+                currentListName = currentPresetList?.name
+            )
+            
+            if (duplicated) {
+                SwingUtilities.invokeLater {
+                    val insertIndex = row + 1
+                    table.scrollRectToVisible(table.getCellRect(insertIndex, 0, true))
+                    hoverState = hoverState.withTableSelection(insertIndex, 2)
+                    table.repaint()
+                }
             }
+        } finally {
+            // Сбрасываем флаг
+            isDuplicatingPreset = false
         }
     }
 
@@ -1295,6 +1304,8 @@ class SettingsDialogController(
     }
     
     fun isTableInitialized(): Boolean = ::table.isInitialized
+    
+    fun isDuplicatingPreset(): Boolean = isDuplicatingPreset
     
     fun addTableModelListener() {
         tableModelListener?.let { tableModel.addTableModelListener(it) }

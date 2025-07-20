@@ -105,6 +105,12 @@ class PresetOrderManager {
         val fixedOrder = getFixedShowAllOrder().toMutableList()
         val newKey = "${listName}::${preset.label}::${preset.size}::${preset.dpi}"
         
+        // Проверяем, нет ли уже такого ключа в списке
+        if (fixedOrder.contains(newKey)) {
+            println("ADB_DEBUG: PresetOrderManager.addToFixedOrder - key already exists: $newKey")
+            return
+        }
+        
         if (afterPreset != null) {
             // Ищем позицию пресета, после которого нужно вставить новый
             val afterKey = "${listName}::${afterPreset.label}::${afterPreset.size}::${afterPreset.dpi}"
