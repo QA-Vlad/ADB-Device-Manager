@@ -27,7 +27,7 @@ object PluginConfig {
         const val COLUMN_WIDTH_DRAG_HANDLE = 20
         const val COLUMN_WIDTH_NUMBER = 40
         val COLUMN_WIDTH_LABEL: Int? = 150
-        val COLUMN_WIDTH_SIZE: Int? = 140
+        val COLUMN_WIDTH_SIZE: Int? = 150
         val COLUMN_WIDTH_DPI: Int? = 115
         val COLUMN_WIDTH_SIZE_USES: Int? = 80
         val COLUMN_WIDTH_DPI_USES: Int? = 75

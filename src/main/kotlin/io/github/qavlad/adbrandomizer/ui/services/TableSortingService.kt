@@ -86,37 +86,37 @@ class TableSortingService {
                 state.labelSort = when (state.labelSort) {
                     SortType.NONE -> SortType.LABEL_ASC
                     SortType.LABEL_ASC -> SortType.LABEL_DESC
-                    SortType.LABEL_DESC -> SortType.NONE
+                    SortType.LABEL_DESC -> SortType.LABEL_ASC  // Возвращаемся к ASC вместо NONE
                     else -> SortType.LABEL_ASC
                 }
-                if (state.labelSort == SortType.NONE) state.activeColumn = null
+                // Убираем сброс activeColumn - сортировка всегда активна
             }
             "Size" -> {
                 state.sizeSort = when (state.sizeSort) {
                     SortType.NONE -> SortType.SIZE_DESC
                     SortType.SIZE_DESC -> SortType.SIZE_ASC
-                    SortType.SIZE_ASC -> SortType.NONE
+                    SortType.SIZE_ASC -> SortType.SIZE_DESC  // Возвращаемся к DESC вместо NONE
                     else -> SortType.SIZE_DESC
                 }
-                if (state.sizeSort == SortType.NONE) state.activeColumn = null
+                // Убираем сброс activeColumn - сортировка всегда активна
             }
             "DPI" -> {
                 state.dpiSort = when (state.dpiSort) {
                     SortType.NONE -> SortType.DPI_DESC
                     SortType.DPI_DESC -> SortType.DPI_ASC
-                    SortType.DPI_ASC -> SortType.NONE
+                    SortType.DPI_ASC -> SortType.DPI_DESC  // Возвращаемся к DESC вместо NONE
                     else -> SortType.DPI_DESC
                 }
-                if (state.dpiSort == SortType.NONE) state.activeColumn = null
+                // Убираем сброс activeColumn - сортировка всегда активна
             }
             "List" -> {
                 state.listSort = when (state.listSort) {
                     SortType.NONE -> SortType.LIST_ASC
                     SortType.LIST_ASC -> SortType.LIST_DESC
-                    SortType.LIST_DESC -> SortType.NONE
+                    SortType.LIST_DESC -> SortType.LIST_ASC  // Возвращаемся к ASC вместо NONE
                     else -> SortType.LIST_ASC
                 }
-                if (state.listSort == SortType.NONE) state.activeColumn = null
+                // Убираем сброс activeColumn - сортировка всегда активна
             }
         }
         
