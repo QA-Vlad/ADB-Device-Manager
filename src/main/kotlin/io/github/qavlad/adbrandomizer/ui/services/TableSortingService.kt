@@ -2,6 +2,7 @@ package io.github.qavlad.adbrandomizer.ui.services
 
 import io.github.qavlad.adbrandomizer.services.DevicePreset
 import io.github.qavlad.adbrandomizer.services.SettingsService
+import io.github.qavlad.adbrandomizer.services.UsageCounterService
 import com.google.gson.Gson
 
 /**
@@ -20,6 +21,10 @@ class TableSortingService {
         SIZE_ASC,   // По возрастанию суммы (сначала маленькие)
         DPI_DESC,   // По убыванию (сначала большие)
         DPI_ASC,    // По возрастанию (сначала маленькие)
+        SIZE_USES_DESC,  // По убыванию использований размера
+        SIZE_USES_ASC,   // По возрастанию использований размера
+        DPI_USES_DESC,   // По убыванию использований DPI
+        DPI_USES_ASC,    // По возрастанию использований DPI
         LIST_ASC,
         LIST_DESC
     }
@@ -31,6 +36,8 @@ class TableSortingService {
         var labelSort: SortType = SortType.NONE,
         var sizeSort: SortType = SortType.NONE,
         var dpiSort: SortType = SortType.NONE,
+        var sizeUsesSort: SortType = SortType.NONE,
+        var dpiUsesSort: SortType = SortType.NONE,
         var listSort: SortType = SortType.NONE,
         var activeColumn: String? = null
     )
@@ -74,6 +81,8 @@ class TableSortingService {
             state.labelSort = SortType.NONE
             state.sizeSort = SortType.NONE
             state.dpiSort = SortType.NONE
+            state.sizeUsesSort = SortType.NONE
+            state.dpiUsesSort = SortType.NONE
             state.listSort = SortType.NONE
         }
         
@@ -109,6 +118,22 @@ class TableSortingService {
                 }
                 // Убираем сброс activeColumn - сортировка всегда активна
             }
+            "Size Uses" -> {
+                state.sizeUsesSort = when (state.sizeUsesSort) {
+                    SortType.NONE -> SortType.SIZE_USES_DESC
+                    SortType.SIZE_USES_DESC -> SortType.SIZE_USES_ASC
+                    SortType.SIZE_USES_ASC -> SortType.SIZE_USES_DESC
+                    else -> SortType.SIZE_USES_DESC
+                }
+            }
+            "DPI Uses" -> {
+                state.dpiUsesSort = when (state.dpiUsesSort) {
+                    SortType.NONE -> SortType.DPI_USES_DESC
+                    SortType.DPI_USES_DESC -> SortType.DPI_USES_ASC
+                    SortType.DPI_USES_ASC -> SortType.DPI_USES_DESC
+                    else -> SortType.DPI_USES_DESC
+                }
+            }
             "List" -> {
                 state.listSort = when (state.listSort) {
                     SortType.NONE -> SortType.LIST_ASC
@@ -139,6 +164,7 @@ class TableSortingService {
         println("ADB_DEBUG:   isShowAll: $isShowAll, isHideDuplicates: $isHideDuplicates")
         println("ADB_DEBUG:   activeColumn: ${state.activeColumn}")
         println("ADB_DEBUG:   labelSort: ${state.labelSort}, sizeSort: ${state.sizeSort}, dpiSort: ${state.dpiSort}")
+        println("ADB_DEBUG:   sizeUsesSort: ${state.sizeUsesSort}, dpiUsesSort: ${state.dpiUsesSort}")
         
         return when (state.activeColumn) {
             "Label" -> {
@@ -152,6 +178,14 @@ class TableSortingService {
             "DPI" -> {
                 println("ADB_DEBUG:   Sorting by DPI with sort type: ${state.dpiSort}")
                 sortByDpi(presets, state.dpiSort)
+            }
+            "Size Uses" -> {
+                println("ADB_DEBUG:   Sorting by Size Uses with sort type: ${state.sizeUsesSort}")
+                sortBySizeUses(presets, state.sizeUsesSort)
+            }
+            "DPI Uses" -> {
+                println("ADB_DEBUG:   Sorting by DPI Uses with sort type: ${state.dpiUsesSort}")
+                sortByDpiUses(presets, state.dpiUsesSort)
             }
             "List" -> {
                 if (isShowAll && listNames != null && listNames.size == presets.size) {
@@ -182,6 +216,7 @@ class TableSortingService {
         println("ADB_DEBUG:   isHideDuplicates: $isHideDuplicates")
         println("ADB_DEBUG:   activeColumn: ${state.activeColumn}")
         println("ADB_DEBUG:   labelSort: ${state.labelSort}, sizeSort: ${state.sizeSort}, dpiSort: ${state.dpiSort}, listSort: ${state.listSort}")
+        println("ADB_DEBUG:   sizeUsesSort: ${state.sizeUsesSort}, dpiUsesSort: ${state.dpiUsesSort}")
         
         return when (state.activeColumn) {
             "Label" -> {
@@ -205,6 +240,28 @@ class TableSortingService {
                     else -> presetsWithLists
                 }
             }
+            "Size Uses" -> {
+                when (state.sizeUsesSort) {
+                    SortType.SIZE_USES_DESC -> presetsWithLists.sortedByDescending { 
+                        UsageCounterService.getSizeCounter(it.second.size) 
+                    }
+                    SortType.SIZE_USES_ASC -> presetsWithLists.sortedBy { 
+                        UsageCounterService.getSizeCounter(it.second.size) 
+                    }
+                    else -> presetsWithLists
+                }
+            }
+            "DPI Uses" -> {
+                when (state.dpiUsesSort) {
+                    SortType.DPI_USES_DESC -> presetsWithLists.sortedByDescending { 
+                        UsageCounterService.getDpiCounter(it.second.dpi) 
+                    }
+                    SortType.DPI_USES_ASC -> presetsWithLists.sortedBy { 
+                        UsageCounterService.getDpiCounter(it.second.dpi) 
+                    }
+                    else -> presetsWithLists
+                }
+            }
             "List" -> {
                 when (state.listSort) {
                     SortType.LIST_ASC -> presetsWithLists.sortedBy { it.first.lowercase() }
@@ -224,6 +281,8 @@ class TableSortingService {
         state.labelSort = SortType.NONE
         state.sizeSort = SortType.NONE
         state.dpiSort = SortType.NONE
+        state.sizeUsesSort = SortType.NONE
+        state.dpiUsesSort = SortType.NONE
         state.listSort = SortType.NONE
         state.activeColumn = null
         saveSortStates()
@@ -234,12 +293,19 @@ class TableSortingService {
      */
     fun getCurrentSortType(columnIndex: Int, isShowAll: Boolean, isHideDuplicates: Boolean): SortType {
         val state = getSortState(isShowAll, isHideDuplicates)
+        val hasCounters = SettingsService.getShowCounters()
         
         return when (columnIndex) {
             2 -> state.labelSort
             3 -> state.sizeSort
             4 -> state.dpiSort
-            6 -> if (isShowAll) state.listSort else SortType.NONE
+            5 -> if (hasCounters) state.sizeUsesSort else SortType.NONE
+            6 -> when {
+                hasCounters -> state.dpiUsesSort
+                isShowAll -> state.listSort
+                else -> SortType.NONE
+            }
+            8 -> if (isShowAll && hasCounters) state.listSort else SortType.NONE
             else -> SortType.NONE
         }
     }
@@ -280,6 +346,30 @@ class TableSortingService {
             else -> presetsWithLists
         }
         return sorted.map { it.first }
+    }
+    
+    private fun sortBySizeUses(presets: List<DevicePreset>, sortType: SortType): List<DevicePreset> {
+        return when (sortType) {
+            SortType.SIZE_USES_DESC -> presets.sortedByDescending { 
+                UsageCounterService.getSizeCounter(it.size) 
+            }
+            SortType.SIZE_USES_ASC -> presets.sortedBy { 
+                UsageCounterService.getSizeCounter(it.size) 
+            }
+            else -> presets
+        }
+    }
+    
+    private fun sortByDpiUses(presets: List<DevicePreset>, sortType: SortType): List<DevicePreset> {
+        return when (sortType) {
+            SortType.DPI_USES_DESC -> presets.sortedByDescending { 
+                UsageCounterService.getDpiCounter(it.dpi) 
+            }
+            SortType.DPI_USES_ASC -> presets.sortedBy { 
+                UsageCounterService.getDpiCounter(it.dpi) 
+            }
+            else -> presets
+        }
     }
     
     /**
@@ -350,6 +440,8 @@ class TableSortingService {
             targetState.labelSort = loaded.labelSort
             targetState.sizeSort = loaded.sizeSort
             targetState.dpiSort = loaded.dpiSort
+            targetState.sizeUsesSort = loaded.sizeUsesSort
+            targetState.dpiUsesSort = loaded.dpiUsesSort
             targetState.listSort = loaded.listSort
             targetState.activeColumn = loaded.activeColumn
         }

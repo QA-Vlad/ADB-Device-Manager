@@ -246,9 +246,19 @@ class TableLoader(
         @Suppress("UNUSED_PARAMETER") isSwitchingMode: Boolean,
         @Suppress("UNUSED_PARAMETER") isSwitchingDuplicatesFilter: Boolean
     ) {
-        val duplicateIndices = duplicateManager.findDuplicateIndices(list.presets)
+        println("ADB_DEBUG: loadCurrentListWithHiddenDuplicates - start")
         
-        list.presets.forEachIndexed { index, preset ->
+        // Применяем сортировку к списку пресетов
+        val sortedPresets = if (tableSortingService != null) {
+            println("ADB_DEBUG: loadCurrentListWithHiddenDuplicates - applying sort")
+            tableSortingService.sortPresets(list.presets, isShowAll = false, isHideDuplicates = true)
+        } else {
+            list.presets
+        }
+        
+        val duplicateIndices = duplicateManager.findDuplicateIndices(sortedPresets)
+        
+        sortedPresets.forEachIndexed { index, preset ->
             if (!duplicateIndices.contains(index)) {
                 addPresetRow(tableModel, preset, null)
             }

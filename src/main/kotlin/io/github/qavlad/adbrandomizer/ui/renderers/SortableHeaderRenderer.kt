@@ -1,8 +1,9 @@
 package io.github.qavlad.adbrandomizer.ui.renderers
 
 import com.intellij.icons.AllIcons
-import com.intellij.ui.JBColor
 import io.github.qavlad.adbrandomizer.ui.services.TableSortingService
+import io.github.qavlad.adbrandomizer.services.SettingsService
+import io.github.qavlad.adbrandomizer.ui.services.TableSortingService.*
 import java.awt.*
 import javax.swing.*
 import javax.swing.table.DefaultTableCellRenderer
@@ -19,7 +20,6 @@ class SortableHeaderRenderer(
     companion object {
         private val SORT_ASC_ICON = AllIcons.General.ArrowUp
         private val SORT_DESC_ICON = AllIcons.General.ArrowDown
-        private val HOVER_COLOR = JBColor(Color(230, 240, 250), Color(60, 63, 65))
     }
     
     init {
@@ -44,7 +44,9 @@ class SortableHeaderRenderer(
         // Проверяем, является ли колонка сортируемой
         val isSortable = when (column) {
             2, 3, 4 -> true // Label, Size, DPI
-            6 -> getShowAllMode() // List только в режиме Show All
+            5 -> SettingsService.getShowCounters() // Size Uses только когда счетчики включены
+            6 -> SettingsService.getShowCounters() || (getShowAllMode() && !SettingsService.getShowCounters()) // DPI Uses когда счетчики включены, или List в Show All без счетчиков
+            8 -> getShowAllMode() && SettingsService.getShowCounters() // List в Show All режиме со счетчиками
             else -> false
         }
         
@@ -60,19 +62,23 @@ class SortableHeaderRenderer(
             
             // Добавляем индикатор сортировки
             when (sortType) {
-                TableSortingService.SortType.LABEL_ASC,
-                TableSortingService.SortType.SIZE_ASC,
-                TableSortingService.SortType.DPI_ASC,
-                TableSortingService.SortType.LIST_ASC -> {
+                SortType.LABEL_ASC,
+                SortType.SIZE_ASC,
+                SortType.DPI_ASC,
+                SortType.SIZE_USES_ASC,
+                SortType.DPI_USES_ASC,
+                SortType.LIST_ASC -> {
                     icon = SORT_ASC_ICON
-                    horizontalTextPosition = SwingConstants.LEFT
+                    horizontalTextPosition = LEFT
                 }
-                TableSortingService.SortType.LABEL_DESC,
-                TableSortingService.SortType.SIZE_DESC,
-                TableSortingService.SortType.DPI_DESC,
-                TableSortingService.SortType.LIST_DESC -> {
+                SortType.LABEL_DESC,
+                SortType.SIZE_DESC,
+                SortType.DPI_DESC,
+                SortType.SIZE_USES_DESC,
+                SortType.DPI_USES_DESC,
+                SortType.LIST_DESC -> {
                     icon = SORT_DESC_ICON
-                    horizontalTextPosition = SwingConstants.LEFT
+                    horizontalTextPosition = LEFT
                 }
                 else -> icon = null
             }
@@ -82,7 +88,13 @@ class SortableHeaderRenderer(
                 2 -> "Click to sort by label"
                 3 -> "Click to sort by size (sum of width and height)"
                 4 -> "Click to sort by DPI value"
-                6 -> "Click to sort by list name"
+                5 -> if (SettingsService.getShowCounters()) "Click to sort by size usage count" else null
+                6 -> when {
+                    SettingsService.getShowCounters() -> "Click to sort by DPI usage count"
+                    getShowAllMode() -> "Click to sort by list name"
+                    else -> null
+                }
+                8 -> if (getShowAllMode() && SettingsService.getShowCounters()) "Click to sort by list name" else null
                 else -> null
             }
         } else {

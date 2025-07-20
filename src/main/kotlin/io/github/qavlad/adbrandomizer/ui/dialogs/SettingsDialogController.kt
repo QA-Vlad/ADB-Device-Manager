@@ -291,15 +291,20 @@ class SettingsDialogController(
                 val columnIndex = table.columnModel.getColumnIndexAtX(e.x)
                 if (columnIndex < 0) return
                 
+                println("ADB_DEBUG: Header clicked - columnIndex: $columnIndex")
+                
                 // Проверяем, является ли колонка сортируемой
                 val hasCounters = SettingsService.getShowCounters()
                 val listColumnIndex = if (hasCounters) 8 else 6 // List колонка сдвигается при наличии счетчиков
                 
                 val isSortable = when (columnIndex) {
                     2, 3, 4 -> true // Label, Size, DPI
+                    5, 6 -> hasCounters // Size Uses, DPI Uses только когда счетчики включены
                     listColumnIndex -> dialogState.isShowAllPresetsMode() // List только в режиме Show All
                     else -> false
                 }
+                
+                println("ADB_DEBUG: Header clicked - isSortable: $isSortable, hasCounters: $hasCounters")
                 
                 if (isSortable) {
                     handleHeaderClick(columnIndex)
@@ -316,13 +321,19 @@ class SettingsDialogController(
         val hasCounters = SettingsService.getShowCounters()
         val listColumnIndex = if (hasCounters) 8 else 6
         
+        println("ADB_DEBUG: handleHeaderClick - columnIndex: $columnIndex, hasCounters: $hasCounters")
+        
         val columnName = when (columnIndex) {
             2 -> "Label"
             3 -> "Size"
             4 -> "DPI"
+            5 -> if (hasCounters) "Size Uses" else null
+            6 -> if (hasCounters) "DPI Uses" else if (dialogState.isShowAllPresetsMode()) "List" else null
             listColumnIndex -> if (dialogState.isShowAllPresetsMode()) "List" else null
             else -> null
         }
+        
+        println("ADB_DEBUG: handleHeaderClick - columnName: $columnName")
         
         if (columnName != null) {
             // Обрабатываем клик через сервис сортировки
