@@ -104,6 +104,50 @@ The plugin consists of two main sections:
 - **Gson** — for settings serialization.
 - **Swing** — for the user interface.
 
+## 🔍 Debugging & Logging
+
+The plugin uses a centralized logging system with configurable log levels. By default, most verbose logs are disabled to avoid spam.
+
+### Enabling Debug Logs
+
+Add these VM options when running your IDE:
+
+```bash
+# Enable DEBUG level for all categories
+-Dadb.randomizer.log.level=DEBUG
+
+# Enable TRACE level for all categories (very verbose)
+-Dadb.randomizer.log.level=TRACE
+
+# Enable DEBUG only for specific category
+-Dadb.randomizer.log.level=DEBUG -Dadb.randomizer.log.category=SYNC_OPERATIONS
+```
+
+### Available Log Categories
+
+- `GENERAL` — General plugin operations
+- `TABLE_OPERATIONS` — Table-related operations
+- `PRESET_SERVICE` — Preset management
+- `SYNC_OPERATIONS` — Data synchronization
+- `UI_EVENTS` — UI events
+- `SCRCPY` — Screen mirroring operations
+- `ADB_CONNECTION` — ADB connection events
+- `DRAG_DROP` — Drag & drop operations
+- `KEYBOARD` — Keyboard shortcuts
+- `SORTING` — Table sorting
+- `COMMAND_HISTORY` — Command history
+
+### Where to Find Logs
+
+IDE logs are located at:
+- **Windows**: `%USERPROFILE%\.IntelliJIdea<version>\system\log\idea.log`
+- **macOS**: `~/Library/Logs/JetBrains/IntelliJIdea<version>/idea.log`
+- **Linux**: `~/.cache/JetBrains/IntelliJIdea<version>/log/idea.log`
+
+Or use **Help → Show Log in Explorer/Finder** in your IDE.
+
+Search for `ADB_Randomizer` to filter plugin-specific logs.
+
 ## 🤝 Contributing
 
 The project is open to community contributions! As the plugin is under active development, your input is especially valuable.

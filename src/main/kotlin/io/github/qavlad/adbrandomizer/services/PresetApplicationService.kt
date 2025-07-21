@@ -54,9 +54,11 @@ object PresetApplicationService {
                 SettingsDialogUpdateNotifier.notifyUpdate()
                 
                 ApplicationManager.getApplication().invokeLater {
-                    // Ищем пресет по label, а не по точному совпадению
-                    val savedPresets = SettingsService.getPresets()
-                    val presetIndex = savedPresets.indexOfFirst { it.label == preset.label }
+                    // Получаем отсортированный список пресетов с учетом текущей сортировки
+                    val sortedPresets = PresetListService.getSortedPresets()
+                    val presetIndex = sortedPresets.indexOfFirst { 
+                        it.label == preset.label && it.size == preset.size && it.dpi == preset.dpi 
+                    }
                     val presetNumber = if (presetIndex >= 0) presetIndex + 1 else 1
                     
                     showPresetApplicationResult(project, preset, presetNumber, presetData.appliedSettings)

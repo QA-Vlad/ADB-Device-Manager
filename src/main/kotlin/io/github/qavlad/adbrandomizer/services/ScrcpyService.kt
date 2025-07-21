@@ -8,6 +8,8 @@ import com.intellij.openapi.project.Project
 import io.github.qavlad.adbrandomizer.config.PluginConfig
 import io.github.qavlad.adbrandomizer.ui.dialogs.ScrcpyCompatibilityDialog
 import io.github.qavlad.adbrandomizer.utils.AdbPathResolver
+import io.github.qavlad.adbrandomizer.utils.PluginLogger
+import io.github.qavlad.adbrandomizer.utils.logging.LogCategory
 import java.io.File
 import java.util.concurrent.TimeUnit
 
@@ -36,25 +38,25 @@ object ScrcpyService {
     fun launchScrcpy(scrcpyPath: String, serialNumber: String, @Suppress("UNUSED_PARAMETER") project: Project): Boolean {
         try {
             if (scrcpyPath.isBlank() || serialNumber.isBlank()) {
-                println("ADB_Randomizer: Empty scrcpy path or serial number provided")
+                PluginLogger.info(LogCategory.SCRCPY, "Empty scrcpy path or serial number provided")
                 return false
             }
 
             val scrcpyFile = File(scrcpyPath)
             if (!scrcpyFile.exists() || !scrcpyFile.canExecute()) {
-                println("ADB_Randomizer: Scrcpy executable not found or not executable at: $scrcpyPath")
+                PluginLogger.info(LogCategory.SCRCPY, "Scrcpy executable not found or not executable at: %s", scrcpyPath)
                 return false
             }
 
-            println("ADB_Randomizer: Starting scrcpy for device: $serialNumber")
+            PluginLogger.info(LogCategory.SCRCPY, "Starting scrcpy for device: %s", serialNumber)
 
             val adbPath = AdbPathResolver.findAdbExecutable()
             if (adbPath == null) {
-                println("ADB_Randomizer: Cannot find ADB executable")
+                PluginLogger.info(LogCategory.SCRCPY, "Cannot find ADB executable")
                 return false
             }
 
-            println("ADB_Randomizer: Using ADB: $adbPath")
+            PluginLogger.info(LogCategory.SCRCPY, "Using ADB: %s", adbPath)
 
             val version = checkScrcpyVersion(scrcpyPath)
             val success = tryDifferentScrcpyMethods(scrcpyPath, serialNumber, adbPath)
@@ -74,7 +76,7 @@ object ScrcpyService {
                 }
 
                 if (retry) {
-                    println("ADB_Randomizer: New scrcpy path selected. Retrying screen mirroring...")
+                    PluginLogger.info(LogCategory.SCRCPY, "New scrcpy path selected. Retrying screen mirroring...")
                     val newPath = findScrcpyExecutable()
                     if (newPath != null) {
                         return launchScrcpy(newPath, serialNumber, project)
@@ -87,7 +89,7 @@ object ScrcpyService {
         } catch (e: ProcessCanceledException) {
             throw e
         } catch (e: Exception) {
-            println("ADB_Randomizer: Unexpected error starting scrcpy: ${e.message}")
+            PluginLogger.info(LogCategory.SCRCPY, "Unexpected error starting scrcpy: %s", e.message)
             e.printStackTrace()
             return false
         }
@@ -104,27 +106,27 @@ object ScrcpyService {
     }
 
     private fun tryScrcpyWithDisplayId(scrcpyPath: String, serialNumber: String, adbPath: String): Boolean {
-        println("ADB_Randomizer: Trying scrcpy with display-id 0...")
+        PluginLogger.info(LogCategory.SCRCPY, "Trying scrcpy with display-id 0...")
         val command = listOf(scrcpyPath, "-s", serialNumber, "--no-audio", "--display-id=0", "--video-codec=h264")
         return launchScrcpyProcess(command, adbPath, scrcpyPath, serialNumber)
     }
 
     private fun tryScrcpyWithV4l2(scrcpyPath: String, serialNumber: String, adbPath: String): Boolean {
-        println("ADB_Randomizer: Trying scrcpy with force software encoder...")
+        PluginLogger.info(LogCategory.SCRCPY, "Trying scrcpy with force software encoder...")
         val command = listOf(scrcpyPath, "-s", serialNumber, "--no-audio", "--video-codec=h264", "--video-encoder=OMX.google.h264.encoder")
         return launchScrcpyProcess(command, adbPath, scrcpyPath, serialNumber)
     }
 
     private fun showScrcpyUpdateMessage() {
-        println("ADB_Randomizer: =================================================")
-        println("ADB_Randomizer: SCRCPY COMPATIBILITY ISSUE DETECTED")
-        println("ADB_Randomizer: Your scrcpy version has known issues with Android 15")
-        println("ADB_Randomizer: Showing compatibility dialog to user...")
-        println("ADB_Randomizer: =================================================")
+        PluginLogger.info(LogCategory.SCRCPY, "=================================================")
+        PluginLogger.info(LogCategory.SCRCPY, "SCRCPY COMPATIBILITY ISSUE DETECTED")
+        PluginLogger.info(LogCategory.SCRCPY, "Your scrcpy version has known issues with Android 15")
+        PluginLogger.info(LogCategory.SCRCPY, "Showing compatibility dialog to user...")
+        PluginLogger.info(LogCategory.SCRCPY, "=================================================")
     }
 
     private fun tryScrcpyWithCompatibilityFlags(scrcpyPath: String, serialNumber: String, adbPath: String): Boolean {
-        println("ADB_Randomizer: Trying scrcpy with compatibility flags...")
+        PluginLogger.info(LogCategory.SCRCPY, "Trying scrcpy with compatibility flags...")
         val command = mutableListOf(scrcpyPath, "-s", serialNumber)
         command.addAll(listOf(
             "--no-audio",
@@ -139,14 +141,14 @@ object ScrcpyService {
     }
 
     private fun tryMinimalScrcpy(scrcpyPath: String, serialNumber: String, adbPath: String): Boolean {
-        println("ADB_Randomizer: Trying minimal scrcpy...")
+        PluginLogger.info(LogCategory.SCRCPY, "Trying minimal scrcpy...")
         val command = listOf(scrcpyPath, "-s", serialNumber, "--no-audio")
         return launchScrcpyProcess(command, adbPath, scrcpyPath, serialNumber)
     }
 
     private fun launchScrcpyProcess(command: List<String>, adbPath: String, scrcpyPath: String, serialNumber: String): Boolean {
         try {
-            println("ADB_Randomizer: Command: ${command.joinToString(" ")}")
+            PluginLogger.info(LogCategory.SCRCPY, "Command: %s", command.joinToString(" "))
             val processBuilder = ProcessBuilder(command)
             processBuilder.environment()["ADB"] = adbPath
             processBuilder.directory(File(scrcpyPath).parentFile)
@@ -156,7 +158,7 @@ object ScrcpyService {
                 try {
                     process.inputStream.bufferedReader().use { reader ->
                         reader.lineSequence().take(PluginConfig.Scrcpy.MAX_LOG_LINES).forEach { line ->
-                            println("ADB_Randomizer: scrcpy stdout: $line")
+                            PluginLogger.info(LogCategory.SCRCPY, "scrcpy stdout: %s", line)
                         }
                     }
                 } catch (_: Exception) { /* Игнорируем ошибки чтения */ }
@@ -166,7 +168,7 @@ object ScrcpyService {
                 try {
                     process.errorStream.bufferedReader().use { reader ->
                         reader.lineSequence().take(PluginConfig.Scrcpy.MAX_LOG_LINES).forEach { line ->
-                            println("ADB_Randomizer: scrcpy stderr: $line")
+                            PluginLogger.info(LogCategory.SCRCPY, "scrcpy stderr: %s", line)
                         }
                     }
                 } catch (_: Exception) { /* Игнорируем ошибки чтения */ }
@@ -179,7 +181,7 @@ object ScrcpyService {
 
             if (!process.isAlive) {
                 val exitCode = process.exitValue()
-                println("ADB_Randomizer: Scrcpy process finished early. Exit code: $exitCode")
+                PluginLogger.info(LogCategory.SCRCPY, "Scrcpy process finished early. Exit code: %s", exitCode)
                 return exitCode == 0
             }
 
@@ -187,30 +189,30 @@ object ScrcpyService {
 
             if (!process.isAlive) {
                 val exitCode = process.exitValue()
-                println("ADB_Randomizer: Scrcpy process closed after startup. Exit code: $exitCode")
+                PluginLogger.info(LogCategory.SCRCPY, "Scrcpy process closed after startup. Exit code: %s", exitCode)
                 return exitCode == 0
             }
 
-            println("ADB_Randomizer: Scrcpy started successfully for device: $serialNumber")
+            PluginLogger.info(LogCategory.SCRCPY, "Scrcpy started successfully for device: %s", serialNumber)
 
             Thread {
                 try {
                     val exitCode = process.waitFor()
-                    println("ADB_Randomizer: Scrcpy for device $serialNumber closed with exit code: $exitCode")
+                    PluginLogger.info(LogCategory.SCRCPY, "Scrcpy for device %s closed with exit code: %s", serialNumber, exitCode)
                     outputReader.join(1000)
                     errorReader.join(1000)
                 } catch (_: InterruptedException) {
-                    println("ADB_Randomizer: Scrcpy monitoring interrupted for device: $serialNumber")
+                    PluginLogger.info(LogCategory.SCRCPY, "Scrcpy monitoring interrupted for device: %s", serialNumber)
                     Thread.currentThread().interrupt()
                 } catch (e: Exception) {
-                    println("ADB_Randomizer: Error monitoring scrcpy process: ${e.message}")
+                    PluginLogger.info(LogCategory.SCRCPY, "Error monitoring scrcpy process: %s", e.message)
                 }
             }.start()
 
             return true
 
         } catch (e: Exception) {
-            println("ADB_Randomizer: Error launching scrcpy process: ${e.message}")
+            PluginLogger.info(LogCategory.SCRCPY, "Error launching scrcpy process: %s", e.message)
             return false
         }
     }
@@ -225,7 +227,7 @@ object ScrcpyService {
                 ""
             }
         } catch (e: Exception) {
-            println("ADB_Randomizer: Could not get scrcpy version: ${e.message}")
+            PluginLogger.info(LogCategory.SCRCPY, "Could not get scrcpy version: %s", e.message)
             ""
         }
     }

@@ -8,6 +8,8 @@ import io.github.qavlad.adbrandomizer.ui.components.CommandHistoryManager
 import io.github.qavlad.adbrandomizer.ui.commands.PresetMoveCommand
 import io.github.qavlad.adbrandomizer.ui.dialogs.DialogStateManager
 import io.github.qavlad.adbrandomizer.utils.PresetUpdateUtils
+import io.github.qavlad.adbrandomizer.utils.PluginLogger
+import io.github.qavlad.adbrandomizer.utils.logging.LogCategory
 import javax.swing.SwingUtilities
 
 /**
@@ -87,21 +89,17 @@ class TableDataSynchronizer(
         historyManager: CommandHistoryManager? = null,
         dialogState: DialogStateManager? = null
     ) {
-        println("ADB_DEBUG: syncTableChangesToTempLists called")
-        println("ADB_DEBUG: Current call stack:")
-        Thread.currentThread().stackTrace.take(10).forEach { element ->
-            println("ADB_DEBUG:   at ${element.className}.${element.methodName}(${element.fileName}:${element.lineNumber})")
-        }
+        PluginLogger.trace(LogCategory.SYNC_OPERATIONS, "syncTableChangesToTempLists called")
         
         val syncCheck = canSync(context)
         if (!syncCheck.canSync) {
-            println("ADB_DEBUG: syncTableChangesToTempLists: ${syncCheck.reason}, skip")
+            PluginLogger.trace(LogCategory.SYNC_OPERATIONS, "syncTableChangesToTempLists: %s, skip", syncCheck.reason)
             return
         }
 
-        println("ADB_DEBUG: syncTableChangesToTempLists - start, isShowAllPresetsMode: ${context.isShowAllPresetsMode}")
-        println("ADB_DEBUG: syncTableChangesToTempLists - currentPresetList before: ${currentPresetList?.name}, presets: ${currentPresetList?.presets?.size}")
-        tempListsManager.getTempLists().forEach { (k, v) -> println("ADB_DEBUG: TEMP_LIST $k: ${v.name}, presets: ${v.presets.size}") }
+        PluginLogger.debug(LogCategory.SYNC_OPERATIONS, "syncTableChangesToTempLists - start, isShowAllPresetsMode: %s", context.isShowAllPresetsMode)
+        PluginLogger.debug(LogCategory.SYNC_OPERATIONS, "syncTableChangesToTempLists - currentPresetList before: %s, presets: %s", currentPresetList?.name, currentPresetList?.presets?.size)
+        tempListsManager.getTempLists().forEach { (k, v) -> PluginLogger.debug(LogCategory.SYNC_OPERATIONS, "TEMP_LIST $k: %s, presets: %s", v.name, v.presets.size) }
 
         // Не синхронизируем при отключении фильтра дубликатов, если количество строк в таблице меньше количества пресетов
         // Это означает, что в таблице показаны только видимые пресеты, а синхронизация испортит скрытые
@@ -111,7 +109,7 @@ class TableDataSynchronizer(
                 firstColumn != "+"
             }
             if (tablePresetCount < currentPresetList.presets.size) {
-                println("ADB_DEBUG: skip sync - filter just disabled, table has $tablePresetCount rows but list has ${currentPresetList.presets.size} presets")
+                PluginLogger.debug(LogCategory.SYNC_OPERATIONS, "skip sync - filter just disabled, table has $tablePresetCount rows but list has %s presets", currentPresetList.presets.size)
                 return
             }
         }
@@ -128,7 +126,7 @@ class TableDataSynchronizer(
                 )
                 
                 // Сохраняем все списки после синхронизации в режиме Show All
-                println("ADB_DEBUG: Saving all preset lists after sync in Show All mode")
+                PluginLogger.debug(LogCategory.SYNC_OPERATIONS, "Saving all preset lists after sync in Show All mode")
                 tempListsManager.getTempLists().values.forEach { list ->
                     PresetListService.savePresetList(list)
                 }
@@ -139,29 +137,29 @@ class TableDataSynchronizer(
                 syncCurrentList(tableModel, list, context, onReloadRequired)
                 
                 // Сохраняем список в файл после синхронизации
-                println("ADB_DEBUG: Saving currentPresetList after sync")
+                PluginLogger.debug(LogCategory.SYNC_OPERATIONS, "Saving currentPresetList after sync")
                 PresetListService.savePresetList(list)
             }
         }
         
-        println("ADB_DEBUG: syncTableChangesToTempLists - after, currentPresetList: ${currentPresetList?.name}, presets: ${currentPresetList?.presets?.size}")
-        tempListsManager.getTempLists().forEach { (k, v) -> println("ADB_DEBUG: TEMP_LIST $k: ${v.name}, presets: ${v.presets.size}") }
+        PluginLogger.debug(LogCategory.SYNC_OPERATIONS, "syncTableChangesToTempLists - after, currentPresetList: %s, presets: %s", currentPresetList?.name, currentPresetList?.presets?.size)
+        tempListsManager.getTempLists().forEach { (k, v) -> PluginLogger.debug(LogCategory.SYNC_OPERATIONS, "TEMP_LIST $k: %s, presets: %s", v.name, v.presets.size) }
 
         // Проверяем, нужно ли обновить таблицу из-за изменения статуса дублей
         if (context.isHideDuplicatesMode && !context.isFirstLoad && !context.isSwitchingDuplicatesFilter) {
             // В режиме Show all всегда проверяем изменение статуса дублей
             // так как дубликаты могут быть в разных списках
             if (context.isShowAllPresetsMode) {
-                println("ADB_DEBUG: In Show all mode with hide duplicates, isDragAndDropInProgress = ${context.isDragAndDropInProgress}")
+                PluginLogger.debug(LogCategory.SYNC_OPERATIONS, "In Show all mode with hide duplicates, isDragAndDropInProgress = %s", context.isDragAndDropInProgress)
                 if (!context.isDragAndDropInProgress) {
-                    println("ADB_DEBUG: Reloading table after sync")
+                    PluginLogger.debug(LogCategory.SYNC_OPERATIONS, "Reloading table after sync")
                     // Перезагружаем таблицу для отображения изменений
                     onReloadRequired()
                 } else {
-                    println("ADB_DEBUG: Skipping table reload - drag and drop in progress")
+                    PluginLogger.debug(LogCategory.SYNC_OPERATIONS, "Skipping table reload - drag and drop in progress")
                 }
             } else if (checkIfDuplicateStatusChanged(tableModel, context, tempListsManager.getTempLists(), currentPresetList)) {
-                println("ADB_DEBUG: Duplicate status changed after edit, reloading table")
+                PluginLogger.debug(LogCategory.SYNC_OPERATIONS, "Duplicate status changed after edit, reloading table")
                 // Перезагружаем таблицу для отображения изменений
                 onReloadRequired()
             }
@@ -209,22 +207,22 @@ class TableDataSynchronizer(
         context: SyncContext,
         onReloadRequired: () -> Unit
     ) {
-        println("ADB_DEBUG: syncCurrentList - start")
-        println("ADB_DEBUG: syncCurrentList - currentList before sync: ${currentList.name}")
+        PluginLogger.debug(LogCategory.SYNC_OPERATIONS, "syncCurrentList - start")
+        PluginLogger.debug(LogCategory.SYNC_OPERATIONS, "syncCurrentList - currentList before sync: %s", currentList.name)
         currentList.presets.forEachIndexed { index, preset ->
-            println("ADB_DEBUG:   before[$index] ${preset.label} | ${preset.size} | ${preset.dpi}")
+            PluginLogger.debug(LogCategory.SYNC_OPERATIONS, "  before[$index] %s | %s | %s", preset.label, preset.size, preset.dpi)
         }
         
         val tablePresets = getPresetsFromTable(tableModel)
         
-        println("ADB_DEBUG: syncCurrentList - table presets:")
+        PluginLogger.debug(LogCategory.SYNC_OPERATIONS, "syncCurrentList - table presets:")
         tablePresets.forEachIndexed { index, preset ->
-            println("ADB_DEBUG:   table[$index] ${preset.label} | ${preset.size} | ${preset.dpi}")
+            PluginLogger.debug(LogCategory.SYNC_OPERATIONS, "  table[$index] %s | %s | %s", preset.label, preset.size, preset.dpi)
         }
         
         // Проверка на пустую таблицу
         if (tablePresets.isEmpty() && currentList.presets.isNotEmpty() && !context.isHideDuplicatesMode) {
-            println("ADB_DEBUG: skip sync, table is empty but current list is not (not in hide duplicates mode)")
+            PluginLogger.debug(LogCategory.SYNC_OPERATIONS, "skip sync, table is empty but current list is not (not in hide duplicates mode)")
             return
         }
         
@@ -234,9 +232,9 @@ class TableDataSynchronizer(
             syncWithoutHiddenDuplicates(tablePresets, currentList)
         }
         
-        println("ADB_DEBUG: syncCurrentList - currentList after sync:")
+        PluginLogger.debug(LogCategory.SYNC_OPERATIONS, "syncCurrentList - currentList after sync:")
         currentList.presets.forEachIndexed { index, preset ->
-            println("ADB_DEBUG:   after[$index] ${preset.label} | ${preset.size} | ${preset.dpi}")
+            PluginLogger.debug(LogCategory.SYNC_OPERATIONS, "  after[$index] %s | %s | %s", preset.label, preset.size, preset.dpi)
         }
     }
     
@@ -262,10 +260,10 @@ class TableDataSynchronizer(
         val originalPresets = currentList.presets.toList()
         val visibleOriginalPresets = getVisiblePresets(originalPresets)
         
-        println("ADB_DEBUG: syncWithHiddenDuplicates - hide duplicates mode")
-        println("ADB_DEBUG:   original presets count: ${originalPresets.size}")
-        println("ADB_DEBUG:   updated table presets count: ${tablePresets.size}")
-        println("ADB_DEBUG:   visible original presets count: ${visibleOriginalPresets.size}")
+        PluginLogger.debug(LogCategory.SYNC_OPERATIONS, "syncWithHiddenDuplicates - hide duplicates mode")
+        PluginLogger.debug(LogCategory.SYNC_OPERATIONS, "  original presets count: %s", originalPresets.size)
+        PluginLogger.debug(LogCategory.SYNC_OPERATIONS, "  updated table presets count: %s", tablePresets.size)
+        PluginLogger.debug(LogCategory.SYNC_OPERATIONS, "  visible original presets count: %s", visibleOriginalPresets.size)
 
         // Проверяем тип операции
         when {
@@ -299,11 +297,11 @@ class TableDataSynchronizer(
         getListNameAtRow: (Int) -> String?,
         saveVisiblePresetsSnapshotForAllLists: () -> Unit
     ) {
-        println("ADB_DEBUG: saveCurrentTableState - start, isShowAllPresetsMode: $isShowAllPresetsMode")
-        println("ADB_DEBUG: saveCurrentTableState - currentPresetList before: ${currentPresetList?.name}, presets: ${currentPresetList?.presets?.size}")
+        PluginLogger.debug(LogCategory.SYNC_OPERATIONS, "saveCurrentTableState - start, isShowAllPresetsMode: $isShowAllPresetsMode")
+        PluginLogger.debug(LogCategory.SYNC_OPERATIONS, "saveCurrentTableState - currentPresetList before: %s, presets: %s", currentPresetList?.name, currentPresetList?.presets?.size)
 
         if (tableModel.rowCount == 0 && currentPresetList?.presets?.isNotEmpty() == true) {
-            println("ADB_DEBUG: skip saveCurrentTableState, table is empty but current list is not")
+            PluginLogger.debug(LogCategory.SYNC_OPERATIONS, "skip saveCurrentTableState, table is empty but current list is not")
             return
         }
 
@@ -350,12 +348,12 @@ class TableDataSynchronizer(
     /**
      * Создает ключ для пресета на основе размера и DPI
      */
-    private fun DevicePreset.toKey(): String = "${this.size}|${this.dpi}"
+    private fun DevicePreset.toKey(): String = "$size|$dpi"
     
     /**
      * Создает полный ключ для пресета (с label)
      */
-    private fun DevicePreset.toFullKey(): String = "${this.label}|${this.size}|${this.dpi}"
+    private fun DevicePreset.toFullKey(): String = "$label|$size|$dpi"
     
     /**
      * Обновляет список пресетов новыми данными
@@ -372,13 +370,13 @@ class TableDataSynchronizer(
         tablePresets: List<DevicePreset>,
         currentList: PresetList
     ) {
-        println("ADB_DEBUG: syncWithoutHiddenDuplicates - simple sync")
-        println("ADB_DEBUG: Table presets (${tablePresets.size}):")
+        PluginLogger.debug(LogCategory.SYNC_OPERATIONS, "syncWithoutHiddenDuplicates - simple sync")
+        PluginLogger.debug(LogCategory.SYNC_OPERATIONS, "Table presets (%s):", tablePresets.size)
         tablePresets.forEachIndexed { index, preset ->
-            println("ADB_DEBUG:   [$index] ${preset.label} | ${preset.size} | ${preset.dpi}")
+            PluginLogger.debug(LogCategory.SYNC_OPERATIONS, "  [$index] %s | %s | %s", preset.label, preset.size, preset.dpi)
         }
         updatePresetList(currentList, tablePresets)
-        println("ADB_DEBUG:   Updated list with ${tablePresets.size} presets")
+        PluginLogger.debug(LogCategory.SYNC_OPERATIONS, "  Updated list with %s presets", tablePresets.size)
     }
     
     /**
@@ -414,7 +412,7 @@ class TableDataSynchronizer(
         currentList: PresetList
     ) {
         val deletedCount = visibleOriginalPresets.size - tablePresets.size
-        println("ADB_DEBUG:   Detected deletion of $deletedCount preset(s)")
+        PluginLogger.debug(LogCategory.SYNC_OPERATIONS, "  Detected deletion of $deletedCount preset(s)")
         
         // Находим какой пресет был удален путем сравнения
         var deletedVisibleIndex = -1
@@ -426,7 +424,7 @@ class TableDataSynchronizer(
             }
         }
         
-        println("ADB_DEBUG:   Deleted visible index: $deletedVisibleIndex")
+        PluginLogger.debug(LogCategory.SYNC_OPERATIONS, "  Deleted visible index: $deletedVisibleIndex")
         
         // Создаем карту обновленных пресетов
         val updatedPresetsMap = mutableMapOf<Int, DevicePreset>()
@@ -458,7 +456,7 @@ class TableDataSynchronizer(
                     if (key == deletedPresetKey && !visibleOriginalPresets.any { it.first == index }) {
                         if (firstHiddenDuplicateIndex == -1) {
                             firstHiddenDuplicateIndex = index
-                            println("ADB_DEBUG:   Found first hidden duplicate at index $index: ${preset.label}")
+                            PluginLogger.debug(LogCategory.SYNC_OPERATIONS, "  Found first hidden duplicate at index $index: %s", preset.label)
                         }
                     }
                 }
@@ -473,17 +471,17 @@ class TableDataSynchronizer(
             when {
                 index == deletedOriginalIndex -> {
                     // Удаленный элемент - пропускаем
-                    println("ADB_DEBUG:   Skipping deleted preset at index $index: ${originalPreset.label}")
+                    PluginLogger.debug(LogCategory.SYNC_OPERATIONS, "  Skipping deleted preset at index $index: %s", originalPreset.label)
                 }
                 updatedPresetsMap.containsKey(index) -> {
                     // Видимый элемент - берем обновленную версию
                     newPresets.add(updatedPresetsMap[index]!!)
-                    println("ADB_DEBUG:   Added updated visible preset from index $index: ${updatedPresetsMap[index]!!.label}")
+                    PluginLogger.debug(LogCategory.SYNC_OPERATIONS, "  Added updated visible preset from index $index: %s", updatedPresetsMap[index]!!.label)
                 }
                 index == firstHiddenDuplicateIndex && deletedPresetKey != null -> {
                     // Первый скрытый дубликат становится видимым на месте удаленного
                     // Пропускаем его здесь, он будет добавлен на место удаленного
-                    println("ADB_DEBUG:   Skipping first hidden duplicate (will be promoted): ${originalPreset.label}")
+                    PluginLogger.debug(LogCategory.SYNC_OPERATIONS, "  Skipping first hidden duplicate (will be promoted): %s", originalPreset.label)
                 }
                 else -> {
                     // Остальные элементы сохраняем как есть
@@ -505,13 +503,13 @@ class TableDataSynchronizer(
                 }
             }
             newPresets.add(insertPosition, promotedDuplicate)
-            println("ADB_DEBUG:   Promoted hidden duplicate to position $insertPosition: ${promotedDuplicate.label}")
+            PluginLogger.debug(LogCategory.SYNC_OPERATIONS, "  Promoted hidden duplicate to position $insertPosition: %s", promotedDuplicate.label)
         }
         
         // Обновляем список
         updatePresetList(currentList, newPresets)
         
-        println("ADB_DEBUG:   Final list size: ${currentList.presets.size}")
+        PluginLogger.debug(LogCategory.SYNC_OPERATIONS, "  Final list size: %s", currentList.presets.size)
         
         // Обновляем снимок
         updateSnapshot(currentList)
@@ -528,7 +526,7 @@ class TableDataSynchronizer(
         onReloadRequired: () -> Unit
     ) {
         val addedCount = tablePresets.size - visibleOriginalPresets.size
-        println("ADB_DEBUG:   Detected addition of $addedCount preset(s)")
+        PluginLogger.debug(LogCategory.SYNC_OPERATIONS, "  Detected addition of $addedCount preset(s)")
         
         // Проверяем, есть ли новые пустые пресеты
         val emptyPresetsInTable = tablePresets.filter { preset ->
@@ -536,7 +534,7 @@ class TableDataSynchronizer(
         }
         
         if (emptyPresetsInTable.isNotEmpty()) {
-            println("ADB_DEBUG:   ${emptyPresetsInTable.size} empty preset(s) detected in table")
+            PluginLogger.debug(LogCategory.SYNC_OPERATIONS, "  %s empty preset(s) detected in table", emptyPresetsInTable.size)
             
             // Обрабатываем добавление новых пустых пресетов
             val newPresets = mergeWithEmptyPresets(
@@ -546,11 +544,11 @@ class TableDataSynchronizer(
             )
             
             updatePresetList(currentList, newPresets)
-            println("ADB_DEBUG:   Updated list now has ${currentList.presets.size} presets")
+            PluginLogger.debug(LogCategory.SYNC_OPERATIONS, "  Updated list now has %s presets", currentList.presets.size)
         } else {
             // Это восстановление после undo или другая операция
-            println("ADB_DEBUG:   Addition/restore detected (not from '+' button)")
-            println("ADB_DEBUG:   Triggering table reload")
+            PluginLogger.debug(LogCategory.SYNC_OPERATIONS, "  Addition/restore detected (not from '+' button)")
+            PluginLogger.debug(LogCategory.SYNC_OPERATIONS, "  Triggering table reload")
             
             SwingUtilities.invokeLater {
                 onReloadRequired()
@@ -567,7 +565,7 @@ class TableDataSynchronizer(
         visibleOriginalPresets: List<Pair<Int, DevicePreset>>,
         currentList: PresetList
     ) {
-        println("ADB_DEBUG:   Regular update without addition/deletion")
+        PluginLogger.debug(LogCategory.SYNC_OPERATIONS, "  Regular update without addition/deletion")
         
         val newPresets = updatePresetsWithMatching(
             tablePresets,
@@ -684,7 +682,7 @@ class TableDataSynchronizer(
         }
         
         duplicateManager.updateSnapshot(list.name, updatedVisibleKeys, fullOrder)
-        println("ADB_DEBUG:   Updated snapshot with ${updatedVisibleKeys.size} visible presets")
+        PluginLogger.debug(LogCategory.SYNC_OPERATIONS, "  Updated snapshot with %s visible presets", updatedVisibleKeys.size)
     }
     
     /**

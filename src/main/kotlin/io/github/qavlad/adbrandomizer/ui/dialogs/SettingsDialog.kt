@@ -7,6 +7,8 @@ import com.intellij.ui.table.JBTable
 import com.intellij.util.ui.JBUI
 import io.github.qavlad.adbrandomizer.config.PluginConfig
 import io.github.qavlad.adbrandomizer.ui.components.TableWithAddButtonPanel
+import io.github.qavlad.adbrandomizer.utils.PluginLogger
+import io.github.qavlad.adbrandomizer.utils.logging.LogCategory
 import java.awt.BorderLayout
 import java.awt.Component
 import java.awt.Dimension
@@ -21,7 +23,7 @@ class SettingsDialog(project: Project?) : DialogWrapper(project) {
     private val controller = SettingsDialogController(project, this)
 
     init {
-        println("ADB_DEBUG: SettingsDialog constructor called")
+        PluginLogger.debug(LogCategory.UI_EVENTS, "SettingsDialog constructor called")
         title = "ADB Randomizer Settings"
         setOKButtonText("Save")
         init()
@@ -34,7 +36,7 @@ class SettingsDialog(project: Project?) : DialogWrapper(project) {
     }
 
     override fun createCenterPanel(): JComponent {
-        println("ADB_DEBUG: createCenterPanel called")
+        PluginLogger.debug(LogCategory.UI_EVENTS, "createCenterPanel called")
         
         // Создаем панель управления списками
         val listManagerPanel = controller.createListManagerPanel()
