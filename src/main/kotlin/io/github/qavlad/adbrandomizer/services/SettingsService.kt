@@ -31,6 +31,12 @@ object SettingsService {
      * @return List<DevicePreset> - список сохраненных пресетов.
      */
     fun getPresets(): List<DevicePreset> {
+        // Проверяем, включен ли режим "Show all presets"
+        if (getShowAllPresetsMode()) {
+            // Возвращаем все пресеты из всех списков
+            return PresetListService.getAllPresetsFromAllLists()
+        }
+        
         // Сначала пытаемся получить из нового сервиса
         val presetsFromNewService = PresetListService.getPresetsForCompatibility()
         if (presetsFromNewService.isNotEmpty()) {

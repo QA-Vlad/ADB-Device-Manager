@@ -377,6 +377,23 @@ object PresetListService {
         activeList.presets = presets.toMutableList()
         savePresetList(activeList)
     }
+    
+    /**
+     * Получает все пресеты из всех списков
+     */
+    fun getAllPresetsFromAllLists(): List<DevicePreset> {
+        val allPresets = mutableListOf<DevicePreset>()
+        val metadata = getAllListsMetadata()
+        
+        metadata.forEach { listMeta ->
+            val list = loadPresetList(listMeta.id)
+            list?.presets?.forEach { preset ->
+                allPresets.add(preset)
+            }
+        }
+        
+        return allPresets
+    }
 
     
     private const val SHOW_ALL_PRESETS_ORDER_KEY = "ADB_RANDOMIZER_SHOW_ALL_PRESETS_ORDER"
