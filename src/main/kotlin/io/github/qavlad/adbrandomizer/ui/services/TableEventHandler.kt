@@ -121,7 +121,7 @@ class TableEventHandler(
         if (preset.dpi.isNotBlank()) {
             val applyDpiItem = JMenuItem("Apply DPI only (${preset.dpi})")
             applyDpiItem.addActionListener { 
-                project?.let { PresetApplicationService.applyPreset(it, preset, setSize = false, setDpi = true) }
+                project?.let { PresetApplicationService.applyPreset(it, preset, setSize = false, setDpi = true, presetNumber = row + 1) }
             }
             popupMenu.add(applyDpiItem)
         }
@@ -129,7 +129,7 @@ class TableEventHandler(
         if (preset.size.isNotBlank()) {
             val applySizeItem = JMenuItem("Apply Size only (${preset.size})")
             applySizeItem.addActionListener { 
-                project?.let { PresetApplicationService.applyPreset(it, preset, setSize = true, setDpi = false) }
+                project?.let { PresetApplicationService.applyPreset(it, preset, setSize = true, setDpi = false, presetNumber = row + 1) }
             }
             popupMenu.add(applySizeItem)
         }
@@ -137,7 +137,7 @@ class TableEventHandler(
         if (preset.dpi.isNotBlank() && preset.size.isNotBlank()) {
             val applyBothItem = JMenuItem("Apply Size and DPI")
             applyBothItem.addActionListener { 
-                project?.let { PresetApplicationService.applyPreset(it, preset, setSize = true, setDpi = true) }
+                project?.let { PresetApplicationService.applyPreset(it, preset, setSize = true, setDpi = true, presetNumber = row + 1) }
             }
             popupMenu.add(applyBothItem)
         }

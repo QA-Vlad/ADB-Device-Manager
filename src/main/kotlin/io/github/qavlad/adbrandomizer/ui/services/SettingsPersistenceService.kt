@@ -122,8 +122,8 @@ class SettingsPersistenceService {
         // Сохраняем восстановленные списки в файлы
         saveAllPresetLists(tempListsManager.getTempLists())
         
-        // Очищаем сохраненный порядок для "Show all presets"
-        PresetListService.saveShowAllPresetsOrder(emptyList())
+        // Не очищаем сохраненный порядок - он должен сохраняться между сессиями
+        // PresetListService.saveShowAllPresetsOrder(emptyList())
         
         println("ADB_DEBUG: Original state restored and saved to files")
     }

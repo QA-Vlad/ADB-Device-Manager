@@ -100,7 +100,7 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
     }
 
     private fun validatePresetsAvailable(): Boolean {
-        val presets = SettingsService.getPresets()
+        val presets = getVisiblePresets()
         if (presets.isEmpty()) {
             NotificationUtils.showInfo(project, "No presets found in settings.")
             return false
@@ -114,7 +114,17 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
         if (!validateDevicesAvailable()) return
 
         val randomPreset = selectRandomPreset(setSize, setDpi) ?: return
-        applyPresetToDevices(randomPreset, setSize, setDpi)
+        
+        // Найти позицию пресета в текущем отображаемом списке
+        val visiblePresets = getVisiblePresets()
+        val presetIndex = visiblePresets.indexOfFirst { 
+            it.label == randomPreset.label && 
+            it.size == randomPreset.size && 
+            it.dpi == randomPreset.dpi 
+        }
+        val presetNumber = if (presetIndex >= 0) presetIndex + 1 else null
+        
+        applyPresetToDevices(randomPreset, setSize, setDpi, presetNumber)
     }
 
     private fun selectRandomPreset(setSize: Boolean, setDpi: Boolean): DevicePreset? {
@@ -140,20 +150,25 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
     }
 
     private fun filterSuitablePresets(setSize: Boolean, setDpi: Boolean): List<DevicePreset> {
-        return SettingsService.getPresets().filter { preset ->
+        return getVisiblePresets().filter { preset ->
             (!setSize || preset.size.isNotBlank()) && (!setDpi || preset.dpi.isNotBlank())
         }
     }
 
     private fun updateCurrentPresetIndex(preset: DevicePreset) {
-        val allPresets = SettingsService.getPresets()
+        val allPresets = getVisiblePresets()
         currentPresetIndex = allPresets.indexOf(preset)
+    }
+    
+    private fun getVisiblePresets(): List<DevicePreset> {
+        // Получаем пресеты с учетом текущего режима отображения и сортировки
+        return PresetListService.getSortedPresets()
     }
 
     private fun navigateToNextPreset() {
         if (!validatePresetsAvailable()) return
 
-        val presets = SettingsService.getPresets()
+        val presets = getVisiblePresets()
         currentPresetIndex = (currentPresetIndex + 1) % presets.size
         applyPresetByIndex(currentPresetIndex)
     }
@@ -161,7 +176,7 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
     private fun navigateToPreviousPreset() {
         if (!validatePresetsAvailable()) return
 
-        val presets = SettingsService.getPresets()
+        val presets = getVisiblePresets()
         currentPresetIndex = if (currentPresetIndex <= 0) presets.size - 1 else currentPresetIndex - 1
         applyPresetByIndex(currentPresetIndex)
     }
@@ -169,18 +184,18 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
     private fun applyPresetByIndex(index: Int) {
         if (!validateDevicesAvailable()) return
 
-        val presets = SettingsService.getPresets()
+        val presets = getVisiblePresets()
         if (index < 0 || index >= presets.size) {
             NotificationUtils.showInfo(project, "Invalid preset index.")
             return
         }
 
-        applyPresetToDevices(presets[index], setSize = true, setDpi = true)
+        applyPresetToDevices(presets[index], setSize = true, setDpi = true, presetNumber = index + 1)
     }
 
-    private fun applyPresetToDevices(preset: DevicePreset, setSize: Boolean, setDpi: Boolean) {
+    private fun applyPresetToDevices(preset: DevicePreset, setSize: Boolean, setDpi: Boolean, presetNumber: Int? = null) {
         lastUsedPreset = preset
-        PresetApplicationService.applyPreset(project, preset, setSize, setDpi)
+        PresetApplicationService.applyPreset(project, preset, setSize, setDpi, presetNumber)
     }
 
     // ==================== RESET ACTIONS ====================

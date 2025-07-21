@@ -10,15 +10,7 @@ import io.github.qavlad.adbrandomizer.utils.ValidationUtils
 
 object PresetApplicationService {
     
-    fun applyPreset(project: Project, preset: DevicePreset, setSize: Boolean, setDpi: Boolean) {
-        println("ADB_DEBUG: PresetApplicationService.applyPreset called!")
-        println("ADB_DEBUG:   preset: ${preset.label} | ${preset.size} | ${preset.dpi}")
-        println("ADB_DEBUG:   setSize: $setSize, setDpi: $setDpi")
-        println("ADB_DEBUG:   Stack trace:")
-        Thread.currentThread().stackTrace.take(15).forEach { element ->
-            println("ADB_DEBUG:     at ${element.className}.${element.methodName}(${element.fileName}:${element.lineNumber})")
-        }
-        
+    fun applyPreset(project: Project, preset: DevicePreset, setSize: Boolean, setDpi: Boolean, presetNumber: Int? = null) {
         object : Task.Backgroundable(project, "Applying preset") {
             override fun run(indicator: ProgressIndicator) {
                 val presetData = validateAndParsePresetData(preset, setSize, setDpi) ?: return
@@ -54,14 +46,17 @@ object PresetApplicationService {
                 SettingsDialogUpdateNotifier.notifyUpdate()
                 
                 ApplicationManager.getApplication().invokeLater {
-                    // Получаем отсортированный список пресетов с учетом текущей сортировки
-                    val sortedPresets = PresetListService.getSortedPresets()
-                    val presetIndex = sortedPresets.indexOfFirst { 
-                        it.label == preset.label && it.size == preset.size && it.dpi == preset.dpi 
+                    // Используем переданный номер пресета или вычисляем его
+                    val displayNumber = presetNumber ?: run {
+                        // Если номер не передан, пытаемся найти его в списке
+                        val sortedPresets = PresetListService.getSortedPresets()
+                        val presetIndex = sortedPresets.indexOfFirst { 
+                            it.label == preset.label && it.size == preset.size && it.dpi == preset.dpi 
+                        }
+                        if (presetIndex >= 0) presetIndex + 1 else 1
                     }
-                    val presetNumber = if (presetIndex >= 0) presetIndex + 1 else 1
                     
-                    showPresetApplicationResult(project, preset, presetNumber, presetData.appliedSettings)
+                    showPresetApplicationResult(project, preset, displayNumber, presetData.appliedSettings)
                     
                     // Уведомляем все открытые диалоги настроек об обновлении
                     SettingsDialogUpdateNotifier.notifyUpdate()
@@ -110,18 +105,14 @@ object PresetApplicationService {
     }
     
     private fun applyPresetToAllDevices(devices: List<IDevice>, preset: DevicePreset, presetData: PresetData, indicator: ProgressIndicator) {
-        println("ADB_DEBUG: applyPresetToAllDevices - applying to ${devices.size} devices")
         devices.forEach { device ->
-            println("ADB_DEBUG: Applying preset to device: ${device.name}")
             indicator.text = "Applying '${preset.label}' to ${device.name}..."
             
             if (presetData.width != null && presetData.height != null) {
-                println("ADB_DEBUG: Setting size: ${presetData.width}x${presetData.height}")
                 AdbService.setSize(device, presetData.width, presetData.height)
             }
             
             if (presetData.dpi != null) {
-                println("ADB_DEBUG: Setting DPI: ${presetData.dpi}")
                 AdbService.setDpi(device, presetData.dpi)
             }
         }
