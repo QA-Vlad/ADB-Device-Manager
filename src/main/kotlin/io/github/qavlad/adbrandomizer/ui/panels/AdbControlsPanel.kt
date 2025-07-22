@@ -115,16 +115,8 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
 
         val randomPreset = selectRandomPreset(setSize, setDpi) ?: return
         
-        // Найти позицию пресета в текущем отображаемом списке
-        val visiblePresets = getVisiblePresets()
-        val presetIndex = visiblePresets.indexOfFirst { 
-            it.label == randomPreset.label && 
-            it.size == randomPreset.size && 
-            it.dpi == randomPreset.dpi 
-        }
-        val presetNumber = if (presetIndex >= 0) presetIndex + 1 else null
-        
-        applyPresetToDevices(randomPreset, setSize, setDpi, presetNumber)
+        // Позиция будет вычислена динамически после обновления счетчиков
+        applyPresetToDevices(randomPreset, setSize, setDpi)
     }
 
     private fun selectRandomPreset(setSize: Boolean, setDpi: Boolean): DevicePreset? {
@@ -190,12 +182,14 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
             return
         }
 
-        applyPresetToDevices(presets[index], setSize = true, setDpi = true, presetNumber = index + 1)
+        val preset = presets[index]
+        // Позиция будет вычислена динамически после обновления счетчиков
+        applyPresetToDevices(preset, setSize = true, setDpi = true)
     }
 
-    private fun applyPresetToDevices(preset: DevicePreset, setSize: Boolean, setDpi: Boolean, presetNumber: Int? = null) {
+    private fun applyPresetToDevices(preset: DevicePreset, setSize: Boolean, setDpi: Boolean) {
         lastUsedPreset = preset
-        PresetApplicationService.applyPreset(project, preset, setSize, setDpi, presetNumber)
+        PresetApplicationService.applyPreset(project, preset, setSize, setDpi)
     }
 
     // ==================== RESET ACTIONS ====================

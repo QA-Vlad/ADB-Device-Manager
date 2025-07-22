@@ -78,6 +78,9 @@ class TableLoader(
                 }
                 
                 println("ADB_DEBUG: loadPresetsIntoTable - done, table has ${tableModel.rowCount} rows")
+                
+                // Обновляем состояние таблицы для отслеживания позиций пресетов
+                TableStateTracker.updateTableState(tableModel)
             } finally {
                 onTableUpdating(false)
             }

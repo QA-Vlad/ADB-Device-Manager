@@ -2,8 +2,8 @@ package io.github.qavlad.adbrandomizer.ui.renderers
 
 import com.intellij.icons.AllIcons
 import io.github.qavlad.adbrandomizer.ui.services.TableSortingService
+import io.github.qavlad.adbrandomizer.ui.services.TableSortingService.SortType
 import io.github.qavlad.adbrandomizer.services.SettingsService
-import io.github.qavlad.adbrandomizer.ui.services.TableSortingService.*
 import java.awt.*
 import javax.swing.*
 import javax.swing.table.DefaultTableCellRenderer
@@ -12,7 +12,6 @@ import javax.swing.table.DefaultTableCellRenderer
  * Рендерер для заголовков колонок с поддержкой индикаторов сортировки
  */
 class SortableHeaderRenderer(
-    private val tableSortingService: TableSortingService,
     private val getShowAllMode: () -> Boolean,
     private val getHideDuplicatesMode: () -> Boolean
 ) : DefaultTableCellRenderer() {
@@ -54,7 +53,7 @@ class SortableHeaderRenderer(
             cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
             
             // Получаем текущий тип сортировки для колонки
-            val sortType = tableSortingService.getCurrentSortType(
+            val sortType = TableSortingService.getCurrentSortType(
                 column,
                 getShowAllMode(),
                 getHideDuplicatesMode()

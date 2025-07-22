@@ -7,10 +7,15 @@ import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.Project
 import io.github.qavlad.adbrandomizer.utils.NotificationUtils
 import io.github.qavlad.adbrandomizer.utils.ValidationUtils
+import io.github.qavlad.adbrandomizer.ui.services.TableStateTracker
+import io.github.qavlad.adbrandomizer.utils.PluginLogger
+import io.github.qavlad.adbrandomizer.utils.logging.LogCategory
+import javax.swing.SwingUtilities
 
 object PresetApplicationService {
     
-    fun applyPreset(project: Project, preset: DevicePreset, setSize: Boolean, setDpi: Boolean, presetNumber: Int? = null) {
+    fun applyPreset(project: Project, preset: DevicePreset, setSize: Boolean, setDpi: Boolean, currentTablePosition: Int? = null) {
+        PluginLogger.debug(LogCategory.PRESET_SERVICE, "applyPreset called - preset: %s, currentTablePosition: %s", preset.label, currentTablePosition)
         object : Task.Backgroundable(project, "Applying preset") {
             override fun run(indicator: ProgressIndicator) {
                 val presetData = validateAndParsePresetData(preset, setSize, setDpi) ?: return
@@ -46,18 +51,45 @@ object PresetApplicationService {
                 SettingsDialogUpdateNotifier.notifyUpdate()
                 
                 ApplicationManager.getApplication().invokeLater {
-                    // Используем переданный номер пресета или вычисляем его
-                    val displayNumber = presetNumber ?: run {
-                        // Если номер не передан, пытаемся найти его в списке
-                        val sortedPresets = PresetListService.getSortedPresets()
-                        val presetIndex = sortedPresets.indexOfFirst { 
-                            it.label == preset.label && it.size == preset.size && it.dpi == preset.dpi 
+                    // Добавляем дополнительную задержку для обеспечения обновления таблицы
+                    SwingUtilities.invokeLater {
+                        // Всегда вычисляем позицию после обновления счетчиков
+                        val displayNumber = run {
+                            PluginLogger.debug(LogCategory.PRESET_SERVICE, "Computing position after counter update, currentTablePosition: %s", currentTablePosition)
+                            
+                            // Если есть currentTablePosition, значит применение из контекстного меню таблицы
+                            // В этом случае используем TableStateTracker для получения актуальной позиции
+                            if (currentTablePosition != null) {
+                                val position = TableStateTracker.getPresetPosition(preset)
+                                PluginLogger.debug(LogCategory.PRESET_SERVICE, "Using TableStateTracker position: %s", position)
+                                position ?: currentTablePosition
+                            } else {
+                            // Иначе получаем позицию из отсортированного списка
+                            val sortedPresets = PresetListService.getSortedPresets()
+                            
+                            PluginLogger.debug(LogCategory.PRESET_SERVICE, "Sorted presets count: %s", sortedPresets.size)
+                            
+                            // Логируем первые 10 пресетов для отладки
+                            sortedPresets.take(10).forEachIndexed { index, p ->
+                                val sizeUses = UsageCounterService.getSizeCounter(p.size)
+                                val dpiUses = UsageCounterService.getDpiCounter(p.dpi)
+                                PluginLogger.debug(LogCategory.PRESET_SERVICE, "  Position %s: %s (%s, %s) - Size Uses: %s, DPI Uses: %s", 
+                                    index + 1, p.label, p.size, p.dpi, sizeUses, dpiUses)
+                            }
+                            
+                            val presetIndex = sortedPresets.indexOfFirst { 
+                                it.label == preset.label && it.size == preset.size && it.dpi == preset.dpi 
+                            }
+                            PluginLogger.debug(LogCategory.PRESET_SERVICE, "Looking for preset: %s (%s, %s)", preset.label, preset.size, preset.dpi)
+                            PluginLogger.debug(LogCategory.PRESET_SERVICE, "Found preset at index: %s", presetIndex)
+                            
+                            if (presetIndex >= 0) presetIndex + 1 else 1
                         }
-                        if (presetIndex >= 0) presetIndex + 1 else 1
                     }
                     
-                    showPresetApplicationResult(project, preset, displayNumber, presetData.appliedSettings)
-                    
+                        PluginLogger.debug(LogCategory.PRESET_SERVICE, "Showing result with displayNumber: %s", displayNumber)
+                        showPresetApplicationResult(project, preset, displayNumber, presetData.appliedSettings)
+                    }
                     // Уведомляем все открытые диалоги настроек об обновлении
                     SettingsDialogUpdateNotifier.notifyUpdate()
                 }

@@ -85,7 +85,7 @@ class SettingsDialogController(
     private val dialogState = DialogStateManager()
     
     // Сервис сортировки таблицы
-    private val tableSortingService = TableSortingService()
+    private val tableSortingService = TableSortingService
     
     // TableLoader зависит от presetOrderManager и tableSortingService
     private val tableLoader = TableLoader(duplicateManager, viewModeManager, presetOrderManager, tableSortingService)
@@ -246,7 +246,6 @@ class SettingsDialogController(
         // Инициализируем менеджер колонок
         tableColumnManager = TableColumnManager(
             tableConfigurator,
-            tableSortingService,
             { dialogState.isShowAllPresetsMode() },
             { dialogState.isHideDuplicatesMode() },
             { SettingsService.getShowCounters() }
@@ -382,6 +381,16 @@ class SettingsDialogController(
         
         // Обновляем заголовки таблицы
         table.tableHeader.repaint()
+    }
+    
+    /**
+     * Синхронизирует состояние сортировки при переключении режима Hide Duplicates
+     */
+    fun syncSortStateForHideDuplicatesToggle(hideDuplicates: Boolean) {
+        tableSortingService.syncSortStateForHideDuplicatesToggle(
+            dialogState.isShowAllPresetsMode(),
+            hideDuplicates
+        )
     }
 
 
@@ -907,10 +916,8 @@ class SettingsDialogController(
             isShowAllPresetsMode = dialogState.isShowAllPresetsMode(),
             onSaveCurrentTableState = { saveCurrentTableState() },
             onSaveShowAllPresetsOrder = { 
-                // Не сохраняем порядок если включен режим скрытия дубликатов
-                if (!dialogState.isHideDuplicatesMode()) {
-                    settingsPersistenceService.saveShowAllPresetsOrder(tableModel)
-                }
+                // Всегда сохраняем порядок для режима Show All
+                settingsPersistenceService.saveShowAllPresetsOrder(tableModel)
             }
         )
     }
@@ -963,17 +970,40 @@ class SettingsDialogController(
      * Сохраняет текущий порядок пресетов в режиме Show all presets
      */
 
+    private var pendingPositionCallback: ((DevicePreset) -> Int?)? = null
+    
     private fun setupUpdateListener() {
         updateListener = {
             SwingUtilities.invokeLater {
                 // Обновляем счетчики в таблице
                 updateTableCounters()
-                table.repaint()
+                
+                // Если есть активная сортировка по счетчикам, нужно пересортировать таблицу
+                val sortState = tableSortingService.getSortState(
+                    dialogState.isShowAllPresetsMode(), 
+                    dialogState.isHideDuplicatesMode()
+                )
+                val activeColumn = sortState.activeColumn
+                if (activeColumn == "Size Uses" || activeColumn == "DPI Uses") {
+                    println("ADB_DEBUG: Reloading table due to counter update with active sort: $activeColumn")
+                    // Перезагружаем таблицу с сохранением текущей сортировки
+                    loadPresetsIntoTable()
+                    
+                    // Если есть ожидающий callback для получения позиции, вызываем его после обновления таблицы
+                    pendingPositionCallback?.let { callback ->
+                        SwingUtilities.invokeLater {
+                            // Вызываем callback после обновления TableStateTracker
+                            pendingPositionCallback = null
+                        }
+                    }
+                } else {
+                    table.repaint()
+                }
             }
         }
         updateListener?.let { SettingsDialogUpdateNotifier.addListener(it) }
     }
-    
+
     /**
      * Обновляет счетчики использования в таблице
      */

@@ -8,7 +8,7 @@ import com.google.gson.Gson
 /**
  * Сервис для управления сортировкой таблицы пресетов
  */
-class TableSortingService {
+object TableSortingService {
     
     /**
      * Типы сортировки
@@ -42,13 +42,11 @@ class TableSortingService {
         var activeColumn: String? = null
     )
     
-    companion object {
-        private const val NORMAL_MODE_SORT_STATE = "NORMAL_MODE_SORT_STATE"
-        private const val SHOW_ALL_SORT_STATE = "SHOW_ALL_SORT_STATE"
-        private const val SHOW_ALL_HIDE_DUP_SORT_STATE = "SHOW_ALL_HIDE_DUP_SORT_STATE"
-        
-        private val gson = Gson()
-    }
+    private const val NORMAL_MODE_SORT_STATE = "NORMAL_MODE_SORT_STATE"
+    private const val SHOW_ALL_SORT_STATE = "SHOW_ALL_SORT_STATE"
+    private const val SHOW_ALL_HIDE_DUP_SORT_STATE = "SHOW_ALL_HIDE_DUP_SORT_STATE"
+    
+    private val gson = Gson()
     
     // Состояния сортировки для разных режимов
     private val normalModeSortState = SortState()
@@ -56,6 +54,10 @@ class TableSortingService {
     private val showAllHideDupSortState = SortState()
     
     init {
+        println("ADB_DEBUG: TableSortingService init")
+        println("ADB_DEBUG:   normalModeSortState id: ${System.identityHashCode(normalModeSortState)}")
+        println("ADB_DEBUG:   showAllModeSortState id: ${System.identityHashCode(showAllModeSortState)}")
+        println("ADB_DEBUG:   showAllHideDupSortState id: ${System.identityHashCode(showAllHideDupSortState)}")
         loadSortStates()
     }
     
@@ -63,11 +65,12 @@ class TableSortingService {
      * Получает текущее состояние сортировки для режима
      */
     fun getSortState(isShowAll: Boolean, isHideDuplicates: Boolean): SortState {
-        return when {
+        val state = when {
             isShowAll && isHideDuplicates -> showAllHideDupSortState
             isShowAll -> showAllModeSortState
             else -> normalModeSortState
         }
+        return state
     }
     
     /**
@@ -242,23 +245,27 @@ class TableSortingService {
             }
             "Size Uses" -> {
                 when (state.sizeUsesSort) {
-                    SortType.SIZE_USES_DESC -> presetsWithLists.sortedByDescending { 
-                        UsageCounterService.getSizeCounter(it.second.size) 
-                    }
-                    SortType.SIZE_USES_ASC -> presetsWithLists.sortedBy { 
-                        UsageCounterService.getSizeCounter(it.second.size) 
-                    }
+                    SortType.SIZE_USES_DESC -> presetsWithLists.sortedWith(
+                        compareByDescending<Pair<String, DevicePreset>> { UsageCounterService.getSizeCounter(it.second.size) }
+                            .thenBy { it.second.label.lowercase() }  // Вторичная сортировка по label для стабильности
+                    )
+                    SortType.SIZE_USES_ASC -> presetsWithLists.sortedWith(
+                        compareBy<Pair<String, DevicePreset>> { UsageCounterService.getSizeCounter(it.second.size) }
+                            .thenBy { it.second.label.lowercase() }  // Вторичная сортировка по label для стабильности
+                    )
                     else -> presetsWithLists
                 }
             }
             "DPI Uses" -> {
                 when (state.dpiUsesSort) {
-                    SortType.DPI_USES_DESC -> presetsWithLists.sortedByDescending { 
-                        UsageCounterService.getDpiCounter(it.second.dpi) 
-                    }
-                    SortType.DPI_USES_ASC -> presetsWithLists.sortedBy { 
-                        UsageCounterService.getDpiCounter(it.second.dpi) 
-                    }
+                    SortType.DPI_USES_DESC -> presetsWithLists.sortedWith(
+                        compareByDescending<Pair<String, DevicePreset>> { UsageCounterService.getDpiCounter(it.second.dpi) }
+                            .thenBy { it.second.label.lowercase() }  // Вторичная сортировка по label для стабильности
+                    )
+                    SortType.DPI_USES_ASC -> presetsWithLists.sortedWith(
+                        compareBy<Pair<String, DevicePreset>> { UsageCounterService.getDpiCounter(it.second.dpi) }
+                            .thenBy { it.second.label.lowercase() }  // Вторичная сортировка по label для стабильности
+                    )
                     else -> presetsWithLists
                 }
             }
@@ -274,10 +281,9 @@ class TableSortingService {
     }
     
     /**
-     * Сбрасывает все сортировки для текущего режима
+     * Сбрасывает состояние сортировки
      */
-    fun resetSort(isShowAll: Boolean, isHideDuplicates: Boolean) {
-        val state = getSortState(isShowAll, isHideDuplicates)
+    private fun resetSortState(state: SortState) {
         state.labelSort = SortType.NONE
         state.sizeSort = SortType.NONE
         state.dpiSort = SortType.NONE
@@ -285,7 +291,64 @@ class TableSortingService {
         state.dpiUsesSort = SortType.NONE
         state.listSort = SortType.NONE
         state.activeColumn = null
+    }
+    
+    /**
+     * Копирует состояние сортировки из одного объекта в другой
+     */
+    private fun copySortState(from: SortState, to: SortState) {
+        to.labelSort = from.labelSort
+        to.sizeSort = from.sizeSort
+        to.dpiSort = from.dpiSort
+        to.sizeUsesSort = from.sizeUsesSort
+        to.dpiUsesSort = from.dpiUsesSort
+        to.listSort = from.listSort
+        to.activeColumn = from.activeColumn
+    }
+    
+    /**
+     * Сбрасывает все сортировки для текущего режима
+     */
+    fun resetSort(isShowAll: Boolean, isHideDuplicates: Boolean) {
+        val state = getSortState(isShowAll, isHideDuplicates)
+        resetSortState(state)
+        
+        // Если мы в режиме Show All, сбрасываем сортировку для обоих состояний
+        // (с Hide Duplicates и без), чтобы сброс сохранялся при переключении
+        if (isShowAll) {
+            resetSortState(showAllModeSortState)
+            resetSortState(showAllHideDupSortState)
+        }
+        
         saveSortStates()
+    }
+    
+    /**
+     * Синхронизирует состояние сортировки при переключении режима Hide Duplicates
+     */
+    fun syncSortStateForHideDuplicatesToggle(isShowAll: Boolean, isHideDuplicates: Boolean) {
+        if (!isShowAll) return // Синхронизация нужна только для режима Show All
+        
+        val fromState = if (isHideDuplicates) showAllModeSortState else showAllHideDupSortState
+        val toState = if (isHideDuplicates) showAllHideDupSortState else showAllModeSortState
+        
+        // Проверяем, была ли сброшена сортировка в исходном состоянии
+        // Если да, то не копируем старое состояние
+        if (fromState.activeColumn == null) {
+            // Сбрасываем целевое состояние тоже
+            resetSortState(toState)
+        } else {
+            // Копируем состояние сортировки только если она активна
+            copySortState(fromState, toState)
+        }
+        
+        saveSortStates()
+        
+        println("ADB_DEBUG: Synced sort state for Hide Duplicates toggle")
+        println("ADB_DEBUG:   fromState.activeColumn: ${fromState.activeColumn}")
+        println("ADB_DEBUG:   toState.activeColumn: ${toState.activeColumn}")
+        println("ADB_DEBUG:   labelSort: ${toState.labelSort}, sizeSort: ${toState.sizeSort}, dpiSort: ${toState.dpiSort}")
+        println("ADB_DEBUG:   sizeUsesSort: ${toState.sizeUsesSort}, dpiUsesSort: ${toState.dpiUsesSort}")
     }
 
     /**
@@ -350,24 +413,28 @@ class TableSortingService {
     
     private fun sortBySizeUses(presets: List<DevicePreset>, sortType: SortType): List<DevicePreset> {
         return when (sortType) {
-            SortType.SIZE_USES_DESC -> presets.sortedByDescending { 
-                UsageCounterService.getSizeCounter(it.size) 
-            }
-            SortType.SIZE_USES_ASC -> presets.sortedBy { 
-                UsageCounterService.getSizeCounter(it.size) 
-            }
+            SortType.SIZE_USES_DESC -> presets.sortedWith(
+                compareByDescending<DevicePreset> { UsageCounterService.getSizeCounter(it.size) }
+                    .thenBy { it.label.lowercase() }  // Вторичная сортировка по label для стабильности
+            )
+            SortType.SIZE_USES_ASC -> presets.sortedWith(
+                compareBy<DevicePreset> { UsageCounterService.getSizeCounter(it.size) }
+                    .thenBy { it.label.lowercase() }  // Вторичная сортировка по label для стабильности
+            )
             else -> presets
         }
     }
     
     private fun sortByDpiUses(presets: List<DevicePreset>, sortType: SortType): List<DevicePreset> {
         return when (sortType) {
-            SortType.DPI_USES_DESC -> presets.sortedByDescending { 
-                UsageCounterService.getDpiCounter(it.dpi) 
-            }
-            SortType.DPI_USES_ASC -> presets.sortedBy { 
-                UsageCounterService.getDpiCounter(it.dpi) 
-            }
+            SortType.DPI_USES_DESC -> presets.sortedWith(
+                compareByDescending<DevicePreset> { UsageCounterService.getDpiCounter(it.dpi) }
+                    .thenBy { it.label.lowercase() }  // Вторичная сортировка по label для стабильности
+            )
+            SortType.DPI_USES_ASC -> presets.sortedWith(
+                compareBy<DevicePreset> { UsageCounterService.getDpiCounter(it.dpi) }
+                    .thenBy { it.label.lowercase() }  // Вторичная сортировка по label для стабильности
+            )
             else -> presets
         }
     }
@@ -411,6 +478,13 @@ class TableSortingService {
         val showAllJson = gson.toJson(showAllModeSortState)
         val showAllHideDupJson = gson.toJson(showAllHideDupSortState)
         
+        println("ADB_DEBUG: Saving sort states:")
+        println("ADB_DEBUG:   normalModeSortState - activeColumn: ${normalModeSortState.activeColumn}")
+        println("ADB_DEBUG:   showAllModeSortState - activeColumn: ${showAllModeSortState.activeColumn}, sizeUsesSort: ${showAllModeSortState.sizeUsesSort}, dpiUsesSort: ${showAllModeSortState.dpiUsesSort}")
+        println("ADB_DEBUG:   showAllHideDupSortState - activeColumn: ${showAllHideDupSortState.activeColumn}, sizeUsesSort: ${showAllHideDupSortState.sizeUsesSort}, dpiUsesSort: ${showAllHideDupSortState.dpiUsesSort}")
+        println("ADB_DEBUG:   showAllJson: $showAllJson")
+        println("ADB_DEBUG:   showAllHideDupJson: $showAllHideDupJson")
+        
         SettingsService.setStringList(NORMAL_MODE_SORT_STATE, listOf(normalJson))
         SettingsService.setStringList(SHOW_ALL_SORT_STATE, listOf(showAllJson))
         SettingsService.setStringList(SHOW_ALL_HIDE_DUP_SORT_STATE, listOf(showAllHideDupJson))
@@ -424,6 +498,10 @@ class TableSortingService {
             loadSortState(NORMAL_MODE_SORT_STATE, normalModeSortState)
             loadSortState(SHOW_ALL_SORT_STATE, showAllModeSortState)
             loadSortState(SHOW_ALL_HIDE_DUP_SORT_STATE, showAllHideDupSortState)
+            
+            println("ADB_DEBUG: Loaded sort states:")
+            println("ADB_DEBUG:   showAllModeSortState - activeColumn: ${showAllModeSortState.activeColumn}, sizeUsesSort: ${showAllModeSortState.sizeUsesSort}, dpiUsesSort: ${showAllModeSortState.dpiUsesSort}")
+            println("ADB_DEBUG:   showAllHideDupSortState - activeColumn: ${showAllHideDupSortState.activeColumn}, sizeUsesSort: ${showAllHideDupSortState.sizeUsesSort}, dpiUsesSort: ${showAllHideDupSortState.dpiUsesSort}")
         } catch (e: Exception) {
             // В случае ошибки используем значения по умолчанию
             println("Error loading sort states: ${e.message}")
@@ -435,15 +513,12 @@ class TableSortingService {
      */
     private fun loadSortState(key: String, targetState: SortState) {
         val json = SettingsService.getStringList(key).firstOrNull()
+        println("ADB_DEBUG: Loading sort state for key: $key")
+        println("ADB_DEBUG:   json: $json")
         if (json != null) {
             val loaded = gson.fromJson(json, SortState::class.java)
-            targetState.labelSort = loaded.labelSort
-            targetState.sizeSort = loaded.sizeSort
-            targetState.dpiSort = loaded.dpiSort
-            targetState.sizeUsesSort = loaded.sizeUsesSort
-            targetState.dpiUsesSort = loaded.dpiUsesSort
-            targetState.listSort = loaded.listSort
-            targetState.activeColumn = loaded.activeColumn
+            copySortState(loaded, targetState)
+            println("ADB_DEBUG:   loaded activeColumn: ${loaded.activeColumn}")
         }
     }
 }

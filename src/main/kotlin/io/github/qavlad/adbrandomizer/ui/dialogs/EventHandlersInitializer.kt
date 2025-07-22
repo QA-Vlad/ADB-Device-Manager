@@ -61,7 +61,6 @@ class EventHandlersInitializer(
                     dialogState = dialogState,
                     duplicateManager = duplicateManager,
                     tableWithButtonPanel = tableWithButtonPanel,
-                    onSyncTableChanges = onSyncTableChanges,
                     onSetupTableColumns = onSetupTableColumns,
                     onLoadPresetsIntoTable = onLoadPresetsIntoTable
                 )
@@ -98,19 +97,14 @@ class EventHandlersInitializer(
         dialogState: DialogStateManager,
         duplicateManager: DuplicateManager,
         tableWithButtonPanel: TableWithAddButtonPanel?,
-        onSyncTableChanges: () -> Unit,
         onSetupTableColumns: () -> Unit,
         onLoadPresetsIntoTable: () -> Unit
     ) {
         controller.stopTableEditing()
         
-        // Сохраняем текущее состояние перед переключением
-        if (controller.isTableInitialized() && !dialogState.isFirstLoad()) {
-            // Only sync when EXITING Show All mode, not when entering it
-            if (!showAll && dialogState.isShowAllPresetsMode()) {
-                onSyncTableChanges()
-            }
-        }
+        // В режиме Show All не нужно синхронизировать изменения обратно в temp lists
+        // так как это может привести к потере дубликатов
+        // Ранее здесь была проверка и вызов onSyncTableChanges(), но это приводило к потере дубликатов
         
         // Сохраняем снимок видимых пресетов ПЕРЕД переключением режима
         if (showAll && dialogState.isHideDuplicatesMode() && 
@@ -164,6 +158,15 @@ class EventHandlersInitializer(
         // Синхронизируем состояние таблицы только при ВКЛЮЧЕНИИ фильтра дубликатов
         if (controller.isTableInitialized() && !dialogState.isFirstLoad() && hideDuplicates) {
             onSyncTableChanges()
+        }
+        
+        // Синхронизируем состояние сортировки при переключении режима
+        // Но НЕ при первой загрузке, чтобы не перезаписать сохраненное состояние
+        if (dialogState.isShowAllPresetsMode() && !dialogState.isFirstLoad()) {
+            println("ADB_DEBUG: Syncing sort state for hide duplicates toggle (not first load)")
+            controller.syncSortStateForHideDuplicatesToggle(hideDuplicates)
+        } else if (dialogState.isFirstLoad()) {
+            println("ADB_DEBUG: Skipping sort state sync during first load to preserve saved state")
         }
         
         dialogState.setHideDuplicatesMode(hideDuplicates)

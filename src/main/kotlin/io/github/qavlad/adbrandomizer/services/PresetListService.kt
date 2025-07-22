@@ -396,56 +396,118 @@ object PresetListService {
      */
     fun getSortedPresets(): List<DevicePreset> {
         val isShowAllMode = SettingsService.getShowAllPresetsMode()
-        SettingsService.getHideDuplicatesMode()
+        val isHideDuplicatesMode = SettingsService.getHideDuplicatesMode()
         
-        PluginLogger.debug(LogCategory.PRESET_SERVICE, "getSortedPresets - isShowAllMode: %s", isShowAllMode)
+        PluginLogger.debug(LogCategory.PRESET_SERVICE, "getSortedPresets - isShowAllMode: %s, isHideDuplicatesMode: %s", isShowAllMode, isHideDuplicatesMode)
         
-        return if (isShowAllMode) {
-            // В режиме Show all используем сохраненный порядок
+        // Получаем базовый список пресетов
+        val basePresets = if (isShowAllMode) {
+            // Проверяем, есть ли сохраненный порядок после drag & drop
             val savedOrder = getShowAllPresetsOrder()
-            PluginLogger.debug(LogCategory.PRESET_SERVICE, "getSortedPresets - savedOrder size: %d", savedOrder.size)
+            
             if (savedOrder.isNotEmpty()) {
-                // Возвращаем пресеты в сохраненном порядке
-                val orderedPresets = mutableListOf<DevicePreset>()
-                savedOrder.forEach { orderKey ->
-                    val parts = orderKey.split("::", limit = 4)
-                    if (parts.size == 4) {
+                // Используем сохраненный порядок (после drag & drop) как базу
+                println("ADB_DEBUG: PresetListService.getSortedPresets - using saved order (${savedOrder.size} items)")
+                val presetsWithLists = mutableListOf<Pair<String, DevicePreset>>()
+                val allLists = getAllListsMetadata().associateBy { it.name }
+                
+                savedOrder.forEach { key ->
+                    val parts = key.split("::")
+                    if (parts.size >= 4) {
                         val listName = parts[0]
-                        val presetLabel = parts[1]
-                        val presetSize = parts[2]
-                        val presetDpi = parts[3]
+                        val label = parts[1]
+                        val size = parts[2]
+                        val dpi = parts[3]
                         
-                        // Находим список по имени
-                        val metadata = getAllListsMetadata()
-                        val listMeta = metadata.find { it.name == listName }
+                        val listMeta = allLists[listName]
                         if (listMeta != null) {
                             val list = loadPresetList(listMeta.id)
-                            val preset = list?.presets?.find { 
-                                it.label == presetLabel && it.size == presetSize && it.dpi == presetDpi 
+                            val preset = list?.presets?.find { p ->
+                                p.label == label && p.size == size && p.dpi == dpi
                             }
                             if (preset != null) {
-                                orderedPresets.add(preset)
+                                presetsWithLists.add(listName to preset)
                             }
                         }
                     }
                 }
-                PluginLogger.debug(LogCategory.PRESET_SERVICE, "getSortedPresets - returning %d presets from saved order", orderedPresets.size)
-                orderedPresets
+                
+                // Проверяем, есть ли активная сортировка
+                val sortState = TableSortingService.getSortState(isShowAll = true, isHideDuplicates = isHideDuplicatesMode)
+                
+                // Если есть активная сортировка, применяем её
+                val sortedPresetsWithLists = if (sortState.activeColumn != null) {
+                    println("ADB_DEBUG: PresetListService.getSortedPresets - applying active sort: ${sortState.activeColumn}")
+                    TableSortingService.sortPresetsWithLists(presetsWithLists, isHideDuplicatesMode)
+                } else {
+                    println("ADB_DEBUG: PresetListService.getSortedPresets - no active sort, using saved order")
+                    presetsWithLists
+                }
+                
+                processSortedPresetsWithLists(sortedPresetsWithLists, isHideDuplicatesMode)
             } else {
-                // Если нет сохраненного порядка, возвращаем все пресеты из всех списков
-                val allPresets = getAllPresetsFromAllLists()
-                PluginLogger.debug(LogCategory.PRESET_SERVICE, "getSortedPresets - no saved order, returning all %d presets", allPresets.size)
-                allPresets
+                // Обычная логика - собираем и сортируем
+                val allLists = getAllListsMetadata()
+                val presetsWithLists = mutableListOf<Pair<String, DevicePreset>>()
+                
+                allLists.forEach { listMeta ->
+                    val list = loadPresetList(listMeta.id)
+                    list?.presets?.forEach { preset ->
+                        presetsWithLists.add(listMeta.name to preset)
+                    }
+                }
+                
+                println("ADB_DEBUG: PresetListService.getSortedPresets - collected ${presetsWithLists.size} presets from all lists")
+                
+                // Применяем сортировку через TableSortingService
+                val sortedPresetsWithLists = TableSortingService.sortPresetsWithLists(presetsWithLists, isHideDuplicatesMode)
+                
+                processSortedPresetsWithLists(sortedPresetsWithLists, isHideDuplicatesMode)
             }
         } else {
             // В обычном режиме получаем пресеты из активного списка
             val activeList = getActivePresetList()
-            activeList?.presets ?: emptyList()
+            val presets = activeList?.presets ?: emptyList()
+            
+            // Применяем сортировку
+            TableSortingService.sortPresets(presets, isShowAll = false, isHideDuplicates = false)
         }
+        
+        PluginLogger.debug(LogCategory.PRESET_SERVICE, "getSortedPresets - returning %d presets", basePresets.size)
+        return basePresets
     }
 
     
     private const val SHOW_ALL_PRESETS_ORDER_KEY = "ADB_RANDOMIZER_SHOW_ALL_PRESETS_ORDER"
+    
+    private fun processSortedPresetsWithLists(
+        sortedPresetsWithLists: List<Pair<String, DevicePreset>>,
+        isHideDuplicatesMode: Boolean
+    ): List<DevicePreset> {
+        println("ADB_DEBUG: PresetListService.getSortedPresets - after sorting, first 5 presets:")
+        sortedPresetsWithLists.take(5).forEachIndexed { index, (listName, p) ->
+            val dpiUses = UsageCounterService.getDpiCounter(p.dpi)
+            println("ADB_DEBUG:   ${index + 1}. ${p.label} (${p.size}, ${p.dpi}) from $listName - DPI Uses: $dpiUses")
+        }
+        
+        // Извлекаем только пресеты
+        val sortedPresets = sortedPresetsWithLists.map { it.second }
+        
+        // Фильтруем дубликаты если нужно
+        return if (isHideDuplicatesMode) {
+            val seen = mutableSetOf<String>()
+            sortedPresets.filter { preset ->
+                if (preset.size.isNotBlank() && preset.dpi.isNotBlank()) {
+                    val key = "${preset.size}|${preset.dpi}"
+                    seen.add(key)
+                } else {
+                    true
+                }
+            }
+        } else {
+            sortedPresets
+        }
+    }
     
     /**
      * Получает сохраненный порядок пресетов для режима Show all presets

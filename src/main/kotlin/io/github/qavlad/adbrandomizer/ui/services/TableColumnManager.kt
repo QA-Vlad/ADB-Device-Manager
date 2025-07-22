@@ -13,7 +13,6 @@ import javax.swing.table.TableColumn
  */
 class TableColumnManager(
     private val tableConfigurator: TableConfigurator,
-    private val tableSortingService: TableSortingService? = null,
     private val getShowAllMode: () -> Boolean = { false },
     private val getHideDuplicatesMode: () -> Boolean = { false },
     private val getShowCounters: () -> Boolean = { true }
@@ -68,15 +67,13 @@ class TableColumnManager(
         tableConfigurator.configureColumns()
         
         // Настраиваем рендереры для сортируемых колонок
-        if (tableSortingService != null) {
-            val headerRenderer = SortableHeaderRenderer(
-                tableSortingService,
-                getShowAllMode,
-                getHideDuplicatesMode
-            )
-            
-            // Устанавливаем рендерер для сортируемых колонок
-            if (table.columnModel.columnCount > 2) {
+        val headerRenderer = SortableHeaderRenderer(
+            getShowAllMode,
+            getHideDuplicatesMode
+        )
+        
+        // Устанавливаем рендерер для сортируемых колонок
+        if (table.columnModel.columnCount > 2) {
                 table.columnModel.getColumn(2).headerRenderer = headerRenderer // Label
             }
             if (table.columnModel.columnCount > 3) {
@@ -104,7 +101,6 @@ class TableColumnManager(
                     table.columnModel.getColumn(listColumnIndex).headerRenderer = headerRenderer // List
                 }
             }
-        }
         
         println("ADB_DEBUG: reconfigureColumns - done")
     }

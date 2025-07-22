@@ -179,6 +179,9 @@ class TableDataSynchronizer(
                 dialogState?.endDragAndDrop()
             }
         }
+        
+        // Обновляем состояние таблицы для отслеживания позиций пресетов
+        TableStateTracker.updateTableState(tableModel)
     }
 
     /**
@@ -343,6 +346,9 @@ class TableDataSynchronizer(
                 }
             }
         }
+        
+        // Обновляем состояние таблицы для отслеживания позиций пресетов
+        TableStateTracker.updateTableState(tableModel)
     }
     
     /**

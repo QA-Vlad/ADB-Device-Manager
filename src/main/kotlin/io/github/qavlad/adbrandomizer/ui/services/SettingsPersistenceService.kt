@@ -1,6 +1,7 @@
 package io.github.qavlad.adbrandomizer.ui.services
 
 import com.intellij.ui.table.JBTable
+import io.github.qavlad.adbrandomizer.services.DevicePreset
 import io.github.qavlad.adbrandomizer.services.PresetList
 import io.github.qavlad.adbrandomizer.services.PresetListService
 import io.github.qavlad.adbrandomizer.ui.components.DevicePresetTableModel
@@ -74,7 +75,7 @@ class SettingsPersistenceService {
      * Сохраняет порядок пресетов для режима Show All из модели таблицы
      */
     fun saveShowAllPresetsOrder(tableModel: DevicePresetTableModel) {
-        val presetsOrder = mutableListOf<String>()
+        val presetsWithLists = mutableListOf<Pair<String, DevicePreset>>()
         
         for (row in 0 until tableModel.rowCount) {
             val firstColumn = tableModel.getValueAt(row, 0) as? String ?: ""
@@ -93,14 +94,14 @@ class SettingsPersistenceService {
             if (listName.isNotEmpty()) {
                 val preset = tableModel.getPresetAt(row)
                 if (preset != null) {
-                    // Сохраняем в формате: listName::label::size::dpi (формат должен совпадать с ViewModeManager)
-                    presetsOrder.add("$listName::${preset.label}::${preset.size}::${preset.dpi}")
+                    presetsWithLists.add(listName to preset)
                 }
             }
         }
         
-        PresetListService.saveShowAllPresetsOrder(presetsOrder)
-        println("ADB_DEBUG: Saved show all presets order with ${presetsOrder.size} items")
+        // Используем PresetOrderManager для правильного сохранения с индексами для дубликатов
+        PresetOrderManager().saveShowAllModeOrder(presetsWithLists)
+        println("ADB_DEBUG: Saved show all presets order with ${presetsWithLists.size} items")
     }
     
     /**

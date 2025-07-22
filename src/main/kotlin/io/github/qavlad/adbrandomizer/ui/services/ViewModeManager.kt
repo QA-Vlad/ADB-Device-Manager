@@ -12,6 +12,65 @@ class ViewModeManager(
 ) {
     
     /**
+     * Добавляет новые пресеты, которых нет в указанном порядке
+     */
+    private fun addNewPresetsNotInOrder(
+        tempPresetLists: Map<String, PresetList>,
+        allPresets: MutableList<Pair<String, DevicePreset>>,
+        orderToCheck: List<String>
+    ) {
+        val addedPresets = mutableListOf<Pair<String, DevicePreset>>()
+        allPresets.forEach { pair ->
+            addedPresets.add(pair)
+        }
+        
+        tempPresetLists.forEach { (_, list) ->
+            // Группируем пресеты для определения дубликатов
+            val presetGroups = mutableMapOf<String, MutableList<Int>>()
+            list.presets.forEachIndexed { index, preset ->
+                val key = "${preset.label}::${preset.size}::${preset.dpi}"
+                presetGroups.getOrPut(key) { mutableListOf() }.add(index)
+            }
+            
+            list.presets.forEachIndexed { index, preset ->
+                val baseKey = "${list.name}::${preset.label}::${preset.size}::${preset.dpi}"
+                val groupKey = "${preset.label}::${preset.size}::${preset.dpi}"
+                val group = presetGroups[groupKey] ?: listOf()
+                
+                // Проверяем, добавлен ли уже этот пресет
+                val alreadyAdded = if (group.size > 1) {
+                    // Для дубликатов проверяем с индексом
+                    val indexInGroup = group.indexOf(index)
+                    val keyWithIndex = "$baseKey::$indexInGroup"
+                    orderToCheck.contains(keyWithIndex) || addedPresets.any { 
+                        it.first == list.name && it.second === preset 
+                    }
+                } else {
+                    // Для уникальных проверяем без индекса
+                    orderToCheck.contains(baseKey) || addedPresets.any { 
+                        it.first == list.name && it.second === preset 
+                    }
+                }
+                
+                if (!alreadyAdded) {
+                    // Для фиксированного порядка добавляем после пресетов из того же списка
+                    val isFixedOrder = orderToCheck === presetOrderManager.getFixedShowAllOrder()
+                    if (isFixedOrder) {
+                        val lastIndexOfSameList = allPresets.indexOfLast { it.first == list.name }
+                        if (lastIndexOfSameList >= 0) {
+                            allPresets.add(lastIndexOfSameList + 1, list.name to preset)
+                        } else {
+                            allPresets.add(list.name to preset)
+                        }
+                    } else {
+                        allPresets.add(list.name to preset)
+                    }
+                }
+            }
+        }
+    }
+    
+    /**
      * Подготавливает модель таблицы для режима Show All
      */
     fun prepareShowAllTableModel(
@@ -37,21 +96,7 @@ class ViewModeManager(
             }
             
             // Добавляем новые пресеты, которых нет в сохраненном порядке
-            val addedKeys = mutableSetOf<String>()
-            allPresets.forEach { (listName, preset) ->
-                val key = "${listName}::${preset.label}::${preset.size}::${preset.dpi}"
-                addedKeys.add(key)
-            }
-            
-            tempPresetLists.forEach { (_, list) ->
-                list.presets.forEach { preset ->
-                    val key = "${list.name}::${preset.label}::${preset.size}::${preset.dpi}"
-                    if (!savedOrder.contains(key) && !addedKeys.contains(key)) {
-                        allPresets.add(list.name to preset)
-                        addedKeys.add(key)
-                    }
-                }
-            }
+            addNewPresetsNotInOrder(tempPresetLists, allPresets, savedOrder)
         } else {
             // Если нет savedOrder, пытаемся использовать фиксированный порядок
             val fixedOrder = presetOrderManager.getFixedShowAllOrder()
@@ -64,27 +109,7 @@ class ViewModeManager(
                 }
                 
                 // Добавляем новые пресеты, которых нет в фиксированном порядке
-                val addedKeys = mutableSetOf<String>()
-                allPresets.forEach { (listName, preset) ->
-                    val key = "${listName}::${preset.label}::${preset.size}::${preset.dpi}"
-                    addedKeys.add(key)
-                }
-                
-                tempPresetLists.forEach { (_, list) ->
-                    list.presets.forEach { preset ->
-                        val key = "${list.name}::${preset.label}::${preset.size}::${preset.dpi}"
-                        if (!fixedOrder.contains(key) && !addedKeys.contains(key)) {
-                            // Новый пресет - добавляем его после пресетов из того же списка
-                            val lastIndexOfSameList = allPresets.indexOfLast { it.first == list.name }
-                            if (lastIndexOfSameList >= 0) {
-                                allPresets.add(lastIndexOfSameList + 1, list.name to preset)
-                            } else {
-                                allPresets.add(list.name to preset)
-                            }
-                            addedKeys.add(key)
-                        }
-                    }
-                }
+                addNewPresetsNotInOrder(tempPresetLists, allPresets, fixedOrder)
             } else {
                 // Обычный порядок - по спискам (и фиксируем его)
                 tempPresetLists.forEach { (_, list) ->
@@ -118,14 +143,25 @@ class ViewModeManager(
             val label = parts[1]
             val size = parts[2]
             val dpi = parts[3]
+            val index = if (parts.size >= 5) parts[4].toIntOrNull() else null
             
             val list = tempPresetLists.values.find { it.name == listName }
-            val preset = list?.presets?.find { p ->
-                p.label == label && p.size == size && p.dpi == dpi
-            }
-            
-            if (preset != null) {
-                allPresets.add(listName to preset)
+            if (list != null) {
+                // Находим все пресеты с такими же параметрами
+                val matchingPresets = list.presets.filter { p ->
+                    p.label == label && p.size == size && p.dpi == dpi
+                }
+                
+                // Если есть индекс, используем его, иначе берем первый
+                val preset = if (index != null && index < matchingPresets.size) {
+                    matchingPresets[index]
+                } else {
+                    matchingPresets.firstOrNull()
+                }
+                
+                if (preset != null) {
+                    allPresets.add(listName to preset)
+                }
             }
         } else if (supportOldFormat && parts.size >= 2) {
             // Обратная совместимость со старым форматом
