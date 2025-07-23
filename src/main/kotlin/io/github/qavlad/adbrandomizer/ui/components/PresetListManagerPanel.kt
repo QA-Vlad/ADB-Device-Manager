@@ -7,6 +7,7 @@ import com.intellij.ui.components.JBCheckBox
 import io.github.qavlad.adbrandomizer.services.PresetListService
 import io.github.qavlad.adbrandomizer.services.PresetList
 import io.github.qavlad.adbrandomizer.utils.ButtonUtils
+import io.github.qavlad.adbrandomizer.ui.dialogs.ExportPresetListsDialog
 import java.awt.BorderLayout
 import java.awt.FlowLayout
 import java.awt.event.ItemEvent
@@ -289,35 +290,17 @@ class PresetListManagerPanel(
         val metadata = PresetListService.getAllListsMetadata()
         val listNames = metadata.map { it.name }.toTypedArray()
         
-        // Создаем кастомный диалог с чекбоксами
-        val checkBoxes = mutableListOf<JBCheckBox>()
-        val panel = JPanel().apply {
-            layout = BoxLayout(this, BoxLayout.Y_AXIS)
-            add(JLabel("Select preset lists to export:"))
-            add(Box.createVerticalStrut(10))
-            
-            listNames.forEach { name ->
-                val checkBox = JBCheckBox(name, true)
-                checkBoxes.add(checkBox)
-                add(checkBox)
-            }
-        }
-        
-        // Создаем кастомный диалог
-        val dialog = object : com.intellij.openapi.ui.DialogWrapper(true) {
-            init {
-                title = "Export Preset Lists"
-                init()
-            }
-            
-            override fun createCenterPanel(): JComponent = panel
-        }
+        // Используем новый диалог с поддержкой навигации
+        val dialog = ExportPresetListsDialog(listNames)
         
         if (dialog.showAndGet()) { // OK button clicked
+            val selectedListNames = dialog.getSelectedLists()
             val selectedLists = mutableListOf<String>()
-            checkBoxes.forEachIndexed { index, checkBox ->
-                if (checkBox.isSelected) {
-                    selectedLists.add(metadata[index].id)
+            
+            // Сопоставляем имена с ID
+            selectedListNames.forEach { name ->
+                metadata.find { it.name == name }?.let {
+                    selectedLists.add(it.id)
                 }
             }
             

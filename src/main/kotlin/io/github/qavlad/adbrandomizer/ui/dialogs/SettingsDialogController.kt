@@ -5,6 +5,7 @@ import com.intellij.ui.table.JBTable
 import io.github.qavlad.adbrandomizer.services.*
 import io.github.qavlad.adbrandomizer.ui.components.*
 import io.github.qavlad.adbrandomizer.ui.handlers.KeyboardHandler
+import io.github.qavlad.adbrandomizer.ui.handlers.DialogNavigationHandler
 import io.github.qavlad.adbrandomizer.ui.services.DuplicateManager
 import io.github.qavlad.adbrandomizer.ui.services.TempListsManager
 import io.github.qavlad.adbrandomizer.ui.services.TableDataSynchronizer
@@ -46,6 +47,8 @@ class SettingsDialogController(
     override lateinit var tableModel: DevicePresetTableModel
         private set
     lateinit var keyboardHandler: KeyboardHandler
+        private set
+    lateinit var dialogNavigationHandler: DialogNavigationHandler
         private set
     lateinit var tableConfigurator: TableConfigurator
         private set
@@ -211,6 +214,25 @@ class SettingsDialogController(
             onDuplicate = ::duplicatePreset,
             forceSyncBeforeHistory = ::forceSyncBeforeHistoryOperation
         )
+        
+        dialogNavigationHandler = DialogNavigationHandler(
+            table = table,
+            setTableFocus = { table.requestFocusInWindow() },
+            clearTableSelection = { 
+                hoverState = hoverState.clearTableSelection()
+                table.repaint()
+                println("ADB_DEBUG: Cleared table selection on focus change")
+            },
+            selectFirstCell = {
+                // Выделяем первую ячейку Label (строка 0, колонка 2) если есть строки
+                if (table.rowCount > 1) { // > 1 потому что последняя строка - это кнопка "+"
+                    hoverState = hoverState.withTableSelection(0, 2)
+                    val rect = table.getCellRect(0, 2, false)
+                    table.repaint(rect)
+                    println("ADB_DEBUG: Selected first Label cell (0, 2)")
+                }
+            }
+        )
 
         tableConfigurator = TableConfigurator(
             table = table,
@@ -273,6 +295,9 @@ class SettingsDialogController(
 
         table.addKeyListener(keyboardHandler.createTableKeyListener())
         keyboardHandler.addGlobalKeyListener()
+        
+        // Устанавливаем обработчик навигации по диалогу
+        dialogNavigationHandler.install()
         
         // Добавляем обработчик кликов по заголовкам таблицы
         setupTableHeaderClickListener()
@@ -1080,6 +1105,7 @@ class SettingsDialogController(
     fun dispose() {
         updateListener?.let { SettingsDialogUpdateNotifier.removeListener(it) }
         keyboardHandler.removeGlobalKeyListener()
+        dialogNavigationHandler.uninstall()
 
         // Удаляем глобальный обработчик кликов
         globalClickListener?.let {

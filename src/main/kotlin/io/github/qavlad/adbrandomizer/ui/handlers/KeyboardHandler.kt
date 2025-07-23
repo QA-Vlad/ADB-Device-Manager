@@ -11,6 +11,8 @@ import java.awt.datatransfer.StringSelection
 import java.awt.event.KeyEvent
 import java.awt.event.KeyListener
 import javax.swing.JTable
+import javax.swing.JButton
+import javax.swing.SwingUtilities
 import com.intellij.openapi.util.SystemInfo
 
 class KeyboardHandler(
@@ -38,6 +40,26 @@ class KeyboardHandler(
         keyEventDispatcher = KeyEventDispatcher { e ->
             if (e.id == KeyEvent.KEY_PRESSED) {
                 println("ADB_DEBUG: Global key pressed [dispatcher=$dispatcherId]: ${e.keyCode}, isControlDown=${e.isControlDown}, source=${e.source?.javaClass?.simpleName}")
+                
+                // КОСТЫЛЬ: Для стрелки влево в диалоге экспорта на кнопке Cancel
+                if (e.keyCode == KeyEvent.VK_LEFT && System.getProperty("adbrandomizer.exportDialogOpen") == "true") {
+                    val focusOwner = KeyboardFocusManager.getCurrentKeyboardFocusManager().focusOwner
+                    if (focusOwner is JButton && focusOwner.text == "Cancel") {
+                        println("ADB_DEBUG: LEFT on Cancel in Export dialog - directly switching to OK")
+                        
+                        // Находим кнопку OK и переключаем фокус напрямую
+                        val window = SwingUtilities.getWindowAncestor(focusOwner)
+                        if (window != null) {
+                            val okButton = findButtonInContainer(window, "OK")
+                            if (okButton != null) {
+                                SwingUtilities.invokeLater {
+                                    okButton.requestFocusInWindow()
+                                }
+                                return@KeyEventDispatcher true // Блокируем дальнейшую обработку
+                            }
+                        }
+                    }
+                }
                 when {
                     e.keyCode == KeyEvent.VK_C && e.isControlDown -> {
                         println("ADB_DEBUG: Ctrl+C pressed, selectedRow=${hoverState().selectedTableRow}, selectedColumn=${hoverState().selectedTableColumn}")
@@ -88,6 +110,12 @@ class KeyboardHandler(
                     // Обработка навигационных клавиш
                     e.keyCode == KeyEvent.VK_UP || e.keyCode == KeyEvent.VK_DOWN || 
                     e.keyCode == KeyEvent.VK_LEFT || e.keyCode == KeyEvent.VK_RIGHT -> {
+                        // КОСТЫЛЬ: Если открыт диалог экспорта, не обрабатываем стрелки
+                        if (System.getProperty("adbrandomizer.exportDialogOpen") == "true") {
+                            println("ADB_DEBUG: Export dialog is open, skipping arrow key handling")
+                            return@KeyEventDispatcher false
+                        }
+                        
                         if (!table.isEditing && table.isFocusOwner) {
                             val currentHoverState = hoverState()
                             
@@ -113,7 +141,7 @@ class KeyboardHandler(
                             val selectedRow = hoverState().selectedTableRow
                             val selectedColumn = hoverState().selectedTableColumn
                             if (selectedRow >= 0 && selectedColumn >= 0 && table.isCellEditable(selectedRow, selectedColumn)) {
-                                javax.swing.SwingUtilities.invokeLater {
+                                SwingUtilities.invokeLater {
                                     table.editCellAt(selectedRow, selectedColumn)
                                     table.editorComponent?.requestFocus()
                                 }
@@ -358,5 +386,31 @@ class KeyboardHandler(
         
         val newRect = table.getCellRect(newRow, adjustedColumn, false)
         table.repaint(newRect)
+    }
+
+    private fun findComponentRecursive(container: java.awt.Container, predicate: (java.awt.Component) -> Boolean): java.awt.Component? {
+        for (component in container.components) {
+            if (predicate(component)) {
+                return component
+            }
+            if (component is java.awt.Container) {
+                val found = findComponentRecursive(component, predicate)
+                if (found != null) return found
+            }
+        }
+        return null
+    }
+    
+    private fun findButtonInContainer(container: java.awt.Component, text: String): JButton? {
+        if (container is JButton && container.text == text) {
+            return container
+        }
+        if (container is java.awt.Container) {
+            for (component in container.components) {
+                val found = findButtonInContainer(component, text)
+                if (found != null) return found
+            }
+        }
+        return null
     }
 }
