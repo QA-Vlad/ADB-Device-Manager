@@ -32,6 +32,11 @@ class SettingsDialog(project: Project?) : DialogWrapper(project) {
         SwingUtilities.invokeLater {
             controller.addHoverEffectToDialogButtons(contentPane)
             controller.initialize()
+            
+            // Устанавливаем фокус на таблицу после полной инициализации
+            SwingUtilities.invokeLater {
+                controller.setFocusToTable()
+            }
         }
     }
 

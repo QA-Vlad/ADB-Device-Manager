@@ -83,6 +83,7 @@ class TableConfigurator(
             selectionModel.clearSelection()
             setRowSelectionAllowed(false)
             setCellSelectionEnabled(false)
+            columnModel.selectionModel.selectionMode = ListSelectionModel.SINGLE_SELECTION
 
             val toolTipManager = ToolTipManager.sharedInstance()
             toolTipManager.initialDelay = PluginConfig.UI.TOOLTIP_INITIAL_DELAY_MS
@@ -107,6 +108,7 @@ class TableConfigurator(
             addMouseListener(createMouseListener())
             
             isFocusable = true
+            focusTraversalKeysEnabled = false  // Отключаем стандартную навигацию Tab/Shift+Tab
 
             configureColumns()
             setDefaultRenderer(Object::class.java, validationRenderer)

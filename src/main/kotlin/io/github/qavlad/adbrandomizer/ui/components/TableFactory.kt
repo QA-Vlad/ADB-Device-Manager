@@ -100,6 +100,14 @@ class TableFactory {
 
             override fun changeSelection(rowIndex: Int, columnIndex: Int, toggle: Boolean, extend: Boolean) {
                 println("ADB_DEBUG: changeSelection called - row=$rowIndex, col=$columnIndex")
+                
+                // Предотвращаем стандартное выделение если используем кастомную навигацию
+                val currentHoverState = hoverStateProvider()
+                if (currentHoverState.selectedTableRow >= 0 && currentHoverState.selectedTableColumn >= 0) {
+                    // Не вызываем super.changeSelection() чтобы избежать стандартного выделения
+                    return
+                }
+                
                 if (rowIndex >= 0 && columnIndex >= 0 && columnIndex in 2..4) {
                     val oldRow = selectionModel.leadSelectionIndex
                     val oldColumn = columnModel.selectionModel.leadSelectionIndex

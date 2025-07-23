@@ -17,6 +17,7 @@ class KeyboardHandler(
     private val table: JTable,
     private val tableModel: DevicePresetTableModel,
     private val hoverState: () -> HoverState,
+    private val setHoverState: (HoverState) -> Unit,
     private val historyManager: CommandHistoryManager,
     private val validateFields: () -> Unit,
     private val setEditingCellData: (String?, Int, Int) -> Unit,
@@ -82,6 +83,42 @@ class KeyboardHandler(
                         } else {
                             performRedo()
                             return@KeyEventDispatcher true
+                        }
+                    }
+                    // Обработка навигационных клавиш
+                    e.keyCode == KeyEvent.VK_UP || e.keyCode == KeyEvent.VK_DOWN || 
+                    e.keyCode == KeyEvent.VK_LEFT || e.keyCode == KeyEvent.VK_RIGHT -> {
+                        if (!table.isEditing && table.isFocusOwner) {
+                            val currentHoverState = hoverState()
+                            
+                            // Если ничего не выделено, выделяем первую ячейку Label (0, 2)
+                            if (currentHoverState.selectedTableRow < 0 || currentHoverState.selectedTableColumn < 0) {
+                                // Проверяем, что в таблице есть строки (кроме строки с кнопкой +)
+                                if (table.rowCount > 1) {
+                                    setHoverState(currentHoverState.withTableSelection(0, 2))
+                                    val rect = table.getCellRect(0, 2, false)
+                                    table.repaint(rect)
+                                    println("ADB_DEBUG: No cell selected, selecting first Label cell (0, 2)")
+                                    return@KeyEventDispatcher true
+                                }
+                            } else {
+                                handleNavigationKey(e.keyCode)
+                            }
+                            return@KeyEventDispatcher true
+                        }
+                    }
+                    // Обработка Enter для активации редактирования
+                    e.keyCode == KeyEvent.VK_ENTER -> {
+                        if (!table.isEditing && table.isFocusOwner) {
+                            val selectedRow = hoverState().selectedTableRow
+                            val selectedColumn = hoverState().selectedTableColumn
+                            if (selectedRow >= 0 && selectedColumn >= 0 && table.isCellEditable(selectedRow, selectedColumn)) {
+                                javax.swing.SwingUtilities.invokeLater {
+                                    table.editCellAt(selectedRow, selectedColumn)
+                                    table.editorComponent?.requestFocus()
+                                }
+                                return@KeyEventDispatcher true
+                            }
                         }
                     }
                 }
@@ -254,5 +291,72 @@ class KeyboardHandler(
 
             println("ADB_DEBUG: Очищена ячейка ($selectedRow, $selectedColumn). Старое значение: '$oldValue'")
         }
+    }
+    
+    private fun handleNavigationKey(keyCode: Int) {
+        val currentHoverState = hoverState()
+        val selectedRow = currentHoverState.selectedTableRow
+        val selectedColumn = currentHoverState.selectedTableColumn
+        
+        // Только работаем если есть выделенная ячейка
+        if (selectedRow < 0 || selectedColumn < 0) {
+            return
+        }
+        
+        val newRow = when (keyCode) {
+            KeyEvent.VK_UP -> selectedRow - 1
+            KeyEvent.VK_DOWN -> selectedRow + 1
+            else -> selectedRow
+        }
+        
+        val newColumn = when (keyCode) {
+            KeyEvent.VK_LEFT -> selectedColumn - 1
+            KeyEvent.VK_RIGHT -> selectedColumn + 1
+            else -> selectedColumn
+        }
+        
+        navigateToCell(newRow, newColumn)
+    }
+    
+    private fun navigateToCell(newRow: Int, newColumn: Int) {
+        // Проверяем границы таблицы
+        if (newRow < 0 || newRow >= table.rowCount || newColumn < 0 || newColumn >= table.columnCount) {
+            return
+        }
+        
+        // Пропускаем строку с кнопкой "+"
+        val firstColumnValue = tableModel.getValueAt(newRow, 0)
+        if (firstColumnValue == "+") {
+            return
+        }
+        
+        val currentSelectedColumn = hoverState().selectedTableColumn
+        
+        // Для навигации учитываем только редактируемые колонки (2, 3, 4)
+        val editableColumns = listOf(2, 3, 4)
+        val adjustedColumn = when {
+            newColumn < 2 -> 2
+            newColumn > 4 -> 4
+            newColumn !in editableColumns -> {
+                // Если попали на не редактируемую колонку, двигаемся в нужном направлении
+                if (newColumn < currentSelectedColumn) editableColumns.lastOrNull { it < newColumn } ?: 2
+                else editableColumns.firstOrNull { it > newColumn } ?: 4
+            }
+            else -> newColumn
+        }
+        
+        val oldHoverState = hoverState()
+        
+        // Обновляем состояние выделения
+        setHoverState(oldHoverState.withTableSelection(newRow, adjustedColumn))
+        
+        // Перерисовываем старую и новую ячейки
+        if (oldHoverState.selectedTableRow >= 0 && oldHoverState.selectedTableColumn >= 0) {
+            val oldRect = table.getCellRect(oldHoverState.selectedTableRow, oldHoverState.selectedTableColumn, false)
+            table.repaint(oldRect)
+        }
+        
+        val newRect = table.getCellRect(newRow, adjustedColumn, false)
+        table.repaint(newRect)
     }
 }

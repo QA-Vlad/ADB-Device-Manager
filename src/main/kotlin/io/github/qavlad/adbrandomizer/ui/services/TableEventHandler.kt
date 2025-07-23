@@ -55,6 +55,9 @@ class TableEventHandler(
                 }
                 
                 handlePresetCellClick(table, row, column, clickCount)
+                
+                // Устанавливаем фокус на таблицу для работы навигации клавишами
+                table.requestFocusInWindow()
             }
             // Колонка 5 - это кнопка удаления обрабатывается через ButtonEditor
             // Не обрабатываем клики по ней здесь

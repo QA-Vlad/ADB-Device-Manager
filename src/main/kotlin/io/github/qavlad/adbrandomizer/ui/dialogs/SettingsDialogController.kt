@@ -202,6 +202,7 @@ class SettingsDialogController(
             table = table,
             tableModel = tableModel,
             hoverState = { hoverState },
+            setHoverState = { newState -> hoverState = newState },
             historyManager = historyManager,
             validateFields = ::validateFields,
             setEditingCellData = { oldValue, row, column ->
@@ -393,6 +394,13 @@ class SettingsDialogController(
         )
     }
 
+    /**
+     * Устанавливает фокус на таблицу
+     */
+    fun setFocusToTable() {
+        table.requestFocusInWindow()
+        println("ADB_DEBUG: Focus set to table")
+    }
 
     /**
      * Устанавливает ссылку на панель с таблицей и кнопкой
