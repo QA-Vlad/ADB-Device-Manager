@@ -470,7 +470,22 @@ object PresetListService {
             val presets = activeList?.presets ?: emptyList()
             
             // Применяем сортировку
-            TableSortingService.sortPresets(presets, isShowAll = false, isHideDuplicates = false)
+            val sortedPresets = TableSortingService.sortPresets(presets, isShowAll = false, isHideDuplicates = isHideDuplicatesMode)
+            
+            // Фильтруем дубликаты если нужно
+            if (isHideDuplicatesMode) {
+                val seen = mutableSetOf<String>()
+                sortedPresets.filter { preset ->
+                    if (preset.size.isNotBlank() && preset.dpi.isNotBlank()) {
+                        val key = "${preset.size}|${preset.dpi}"
+                        seen.add(key) // add() возвращает true если элемент был добавлен (не было дубликата)
+                    } else {
+                        true
+                    }
+                }
+            } else {
+                sortedPresets
+            }
         }
         
         PluginLogger.debug(LogCategory.PRESET_SERVICE, "getSortedPresets - returning %d presets", basePresets.size)
@@ -499,7 +514,8 @@ object PresetListService {
             sortedPresets.filter { preset ->
                 if (preset.size.isNotBlank() && preset.dpi.isNotBlank()) {
                     val key = "${preset.size}|${preset.dpi}"
-                    seen.add(key)
+                    // Добавляем в seen и возвращаем true только если это первое вхождение
+                    seen.add(key) // add() возвращает true если элемент был добавлен (не было дубликата)
                 } else {
                     true
                 }
