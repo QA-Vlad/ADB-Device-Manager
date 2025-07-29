@@ -686,6 +686,9 @@ class SettingsDialogController(
         println("ADB_DEBUG: initializeTempPresetLists - start")
         println("ADB_DEBUG:   tempListsManager.size() before clear: ${tempListsManager.size()}")
 
+        // Включаем кэш для оптимизации производительности
+        PresetListService.enableCache()
+
         // Сбрасываем флаг изменения порядка при инициализации
         normalModeOrderChanged = false
         modifiedListIds.clear()
@@ -1683,6 +1686,10 @@ class SettingsDialogController(
     fun dispose() {
         updateListener?.let { SettingsDialogUpdateNotifier.removeListener(it) }
         keyboardHandler.removeGlobalKeyListener()
+        
+        // Отключаем кэш и очищаем его
+        PresetListService.disableCache()
+        
         // Очищаем корзину при закрытии диалога
         presetRecycleBin.clear()
         // Очищаем исходные порядки из файлов
