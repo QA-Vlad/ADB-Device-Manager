@@ -154,5 +154,23 @@ object UsageCounterService {
         dpiCounters.clear()
         saveCounters()
     }
+    
+    /**
+     * Создаёт снимок текущего состояния счётчиков
+     */
+    fun createSnapshot(): Pair<Map<String, Int>, Map<String, Int>> {
+        return Pair(sizeCounters.toMap(), dpiCounters.toMap())
+    }
+    
+    /**
+     * Восстанавливает счётчики из снимка
+     */
+    fun restoreFromSnapshot(snapshot: Pair<Map<String, Int>, Map<String, Int>>) {
+        sizeCounters.clear()
+        sizeCounters.putAll(snapshot.first)
+        dpiCounters.clear()
+        dpiCounters.putAll(snapshot.second)
+        saveCounters()
+    }
 
 }

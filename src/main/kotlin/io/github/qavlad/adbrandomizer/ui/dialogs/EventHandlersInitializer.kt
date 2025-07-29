@@ -297,6 +297,10 @@ class EventHandlersInitializer(
     private fun handleResetCounters(onLoadPresetsIntoTable: () -> Unit) {
         println("ADB_DEBUG: Resetting usage counters")
         
+        // Сохраняем текущее состояние счётчиков перед сбросом
+        val countersSnapshot = UsageCounterService.createSnapshot()
+        controller.saveCountersSnapshot(countersSnapshot)
+        
         // Сбрасываем все счетчики
         UsageCounterService.resetAllCounters()
         

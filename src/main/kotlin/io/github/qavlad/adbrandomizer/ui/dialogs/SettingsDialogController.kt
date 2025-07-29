@@ -122,6 +122,9 @@ class SettingsDialogController(
 
     // Исходное состояние списков для отката при Cancel
     private val originalPresetLists = mutableMapOf<String, PresetList>()
+    
+    // Снимок счётчиков использования для отката при Cancel
+    private var countersSnapshot: Pair<Map<String, Int>, Map<String, Int>>? = null
 
     // Ссылка на слушатель модели, для временного отключения
     private var tableModelListener: javax.swing.event.TableModelListener? = null
@@ -1697,6 +1700,13 @@ class SettingsDialogController(
         // Восстанавливаем состояние сортировки
         TableSortingService.restoreSortStateFromSnapshot()
         
+        // Восстанавливаем счётчики использования, если есть снимок
+        countersSnapshot?.let {
+            println("ADB_DEBUG: Restoring usage counters from snapshot")
+            UsageCounterService.restoreFromSnapshot(it)
+            countersSnapshot = null
+        }
+        
         settingsPersistenceService.restoreOriginalState(
             tempListsManager = tempListsManager,
             originalPresetLists = originalPresetLists,
@@ -1711,6 +1721,13 @@ class SettingsDialogController(
         }
     }
 
+    /**
+     * Сохраняет снимок счётчиков для возможности отката
+     */
+    fun saveCountersSnapshot(snapshot: Pair<Map<String, Int>, Map<String, Int>>) {
+        countersSnapshot = snapshot
+    }
+
     fun dispose() {
         updateListener?.let { SettingsDialogUpdateNotifier.removeListener(it) }
         keyboardHandler.removeGlobalKeyListener()
@@ -1722,6 +1739,8 @@ class SettingsDialogController(
         presetRecycleBin.clear()
         // Очищаем исходные порядки из файлов
         presetOrderManager.clearOriginalFileOrders()
+        // Очищаем снимок счётчиков
+        countersSnapshot = null
         println("ADB_DEBUG: SettingsDialogController disposed - recycle bin and original orders cleared")
         dialogNavigationHandler.uninstall()
 
