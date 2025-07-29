@@ -417,8 +417,29 @@ class TableLoader(
         println("ADB_DEBUG: loadCurrentListNormal - start")
         println("ADB_DEBUG: loadCurrentListNormal - list: ${list.name}, presets count: ${list.presets.size}")
         
-        // Пресеты уже в правильном порядке в файле, поэтому просто используем их
-        val presets = list.presets
+        // Проверяем, есть ли в памяти порядок после drag & drop
+        val memoryOrder = presetOrderManager.getNormalModeOrderInMemory(list.id)
+        val presets = if (memoryOrder != null) {
+            println("ADB_DEBUG: Using in-memory order for list '${list.name}' with ${memoryOrder.size} items")
+            // Создаем карту пресетов по ключу
+            val presetsMap = list.presets.associateBy { "${it.label}|${it.size}|${it.dpi}" }
+            // Восстанавливаем порядок из памяти
+            val orderedPresets = mutableListOf<DevicePreset>()
+            memoryOrder.forEach { key ->
+                presetsMap[key]?.let { orderedPresets.add(it) }
+            }
+            // Добавляем пресеты, которых нет в сохранённом порядке
+            list.presets.forEach { preset ->
+                val key = "${preset.label}|${preset.size}|${preset.dpi}"
+                if (key !in memoryOrder) {
+                    orderedPresets.add(preset)
+                }
+            }
+            orderedPresets
+        } else {
+            // Пресеты уже в правильном порядке в файле, поэтому просто используем их
+            list.presets
+        }
         
         println("ADB_DEBUG: loadCurrentListNormal - presets from list:")
         presets.forEachIndexed { index, preset ->

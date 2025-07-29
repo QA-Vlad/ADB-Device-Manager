@@ -13,6 +13,9 @@ class PresetOrderManager {
     // Храним исходный порядок из файлов для каждого списка
     private val originalFileOrder = mutableMapOf<String, List<String>>()
     
+    // Храним порядок в памяти для обычного режима (после drag & drop)
+    private val normalModeOrderInMemory = mutableMapOf<String, List<String>>()
+    
     companion object {
         private const val NORMAL_MODE_ORDER_PREFIX = "NORMAL_MODE_ORDER_"
         private const val SHOW_ALL_HIDE_DUPLICATES_ORDER = "SHOW_ALL_HIDE_DUPLICATES_ORDER"
@@ -33,67 +36,7 @@ class PresetOrderManager {
         }
         SettingsService.setStringList(key, order)
     }
-    
-    /**
-     * Мигрирует существующий порядок, добавляя недостающие элементы
-     */
-    fun migrateNormalModeOrder(listId: String, currentPresets: List<DevicePreset>): List<String>? {
-        val savedOrder = getNormalModeOrder(listId) ?: return null
-        
-        // Если сохранённый порядок уже содержит все элементы, возвращаем его
-        if (savedOrder.size >= currentPresets.size) {
-            return savedOrder
-        }
-        
-        println("ADB_DEBUG: PresetOrderManager.migrateNormalModeOrder - migrating order for list $listId")
-        println("ADB_DEBUG:   Saved order size: ${savedOrder.size}, current presets size: ${currentPresets.size}")
-        
-        // Создаём множество сохранённых ключей для быстрого поиска
-        val savedKeys = savedOrder.toSet()
-        
-        // Создаём новый порядок, добавляя недостающие элементы
-        val migratedOrder = savedOrder.toMutableList()
-        
-        // Ищем дубликаты для каждого элемента в сохранённом порядке
-        val duplicateGroups = mutableMapOf<String, MutableList<String>>()
-        currentPresets.forEach { preset ->
-            val key = "${preset.label}|${preset.size}|${preset.dpi}"
-            val duplicateKey = preset.getDuplicateKey()
-            duplicateGroups.getOrPut(duplicateKey) { mutableListOf() }.add(key)
-        }
-        
-        // Для каждого элемента в текущих пресетах
-        currentPresets.forEach { preset ->
-            val key = "${preset.label}|${preset.size}|${preset.dpi}"
-            
-            // Если элемент не в сохранённом порядке
-            if (key !in savedKeys && key !in migratedOrder) {
-                val duplicateKey = preset.getDuplicateKey()
-                val duplicates = duplicateGroups[duplicateKey] ?: listOf()
-                
-                // Ищем позицию для вставки - после последнего дубликата в миграционном порядке
-                var insertPosition = migratedOrder.size
-                for (i in migratedOrder.indices.reversed()) {
-                    if (migratedOrder[i] in duplicates) {
-                        insertPosition = i + 1
-                        break
-                    }
-                }
-                
-                migratedOrder.add(insertPosition, key)
-                println("ADB_DEBUG:   Added missing preset '$key' at position $insertPosition (after duplicate at ${insertPosition - 1})")
-            }
-        }
-        
-        // Сохраняем мигрированный порядок
-        saveNormalModeOrder(listId, currentPresets.filter { preset ->
-            val key = "${preset.label}|${preset.size}|${preset.dpi}"
-            key in migratedOrder
-        })
-        
-        return migratedOrder
-    }
-    
+
     /**
      * Получает сохранённый порядок для обычного режима
      */
@@ -253,7 +196,24 @@ class PresetOrderManager {
      */
     fun clearOriginalFileOrders() {
         originalFileOrder.clear()
-        println("ADB_DEBUG: PresetOrderManager.clearOriginalFileOrders - cleared all original file orders")
+        normalModeOrderInMemory.clear()
+        println("ADB_DEBUG: PresetOrderManager.clearOriginalFileOrders - cleared all original file orders and in-memory orders")
+    }
+    
+    /**
+     * Обновляет порядок пресетов в памяти для обычного режима
+     */
+    fun updateNormalModeOrderInMemory(listId: String, presets: List<DevicePreset>) {
+        val order = presets.map { "${it.label}|${it.size}|${it.dpi}" }
+        normalModeOrderInMemory[listId] = order
+        println("ADB_DEBUG: PresetOrderManager.updateNormalModeOrderInMemory - listId: $listId, order size: ${order.size}")
+    }
+    
+    /**
+     * Получает порядок из памяти для обычного режима
+     */
+    fun getNormalModeOrderInMemory(listId: String): List<String>? {
+        return normalModeOrderInMemory[listId]
     }
 
 }

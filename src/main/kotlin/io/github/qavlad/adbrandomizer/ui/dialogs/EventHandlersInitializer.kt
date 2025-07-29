@@ -34,6 +34,28 @@ class EventHandlersInitializer(
                 // Останавливаем редактирование если оно активно
                 controller.stopTableEditing()
                 
+                // Обновляем порядок в памяти перед переключением, если он был изменен
+                if (controller.normalModeOrderChanged && controller.currentPresetList != null && !dialogState.isShowAllPresetsMode()) {
+                    val tablePresets = controller.tableModel.getPresets()
+                    if (tablePresets.isNotEmpty()) {
+                        // Только обновляем в памяти, не сохраняем в настройки
+                        controller.presetOrderManager.updateNormalModeOrderInMemory(controller.currentPresetList!!.id, tablePresets)
+                        
+                        // Также обновляем tempList чтобы при переключении обратно порядок сохранился
+                        val tempList = tempListsManager.getTempList(controller.currentPresetList!!.id)
+                        if (tempList != null) {
+                            tempList.presets.clear()
+                            tempList.presets.addAll(tablePresets)
+                            println("ADB_DEBUG: Updated tempList order before switching lists for '${controller.currentPresetList!!.name}'")
+                        }
+                        
+                        println("ADB_DEBUG: Updated in-memory order before switching lists for '${controller.currentPresetList!!.name}' with ${tablePresets.size} presets")
+                    }
+                }
+                
+                // НЕ сбрасываем флаг - он должен остаться true чтобы при OK сохранить изменения
+                // controller.normalModeOrderChanged = false
+                
                 // Добавляем слушатель к модели
                 controller.addTableModelListener()
                 
@@ -124,13 +146,22 @@ class EventHandlersInitializer(
             controller.saveCurrentShowAllOrderFromTable()
         }
         
-        // В обычном режиме сохраняем порядок только если он был изменен через drag & drop
+        // В обычном режиме обновляем порядок в памяти только если он был изменен через drag & drop
         if (controller.isTableInitialized() && !dialogState.isShowAllPresetsMode() && showAll) {
             if (controller.normalModeOrderChanged && controller.currentPresetList != null) {
                 val tablePresets = controller.tableModel.getPresets()
                 if (tablePresets.isNotEmpty()) {
-                    controller.presetOrderManager.saveNormalModeOrder(controller.currentPresetList!!.id, tablePresets)
-                    println("ADB_DEBUG: Saved normal mode order before switching to Show All for list '${controller.currentPresetList!!.name}' with ${tablePresets.size} presets")
+                    // Только обновляем в памяти, не сохраняем в настройки
+                    controller.presetOrderManager.updateNormalModeOrderInMemory(controller.currentPresetList!!.id, tablePresets)
+                    
+                    // Также обновляем tempList
+                    val tempList = controller.tempListsManager.getTempList(controller.currentPresetList!!.id)
+                    if (tempList != null) {
+                        tempList.presets.clear()
+                        tempList.presets.addAll(tablePresets)
+                    }
+                    
+                    println("ADB_DEBUG: Updated in-memory order before switching to Show All for list '${controller.currentPresetList!!.name}' with ${tablePresets.size} presets")
                 }
             } else {
                 println("ADB_DEBUG: Switching from normal to Show All mode - normal order not changed via drag & drop")

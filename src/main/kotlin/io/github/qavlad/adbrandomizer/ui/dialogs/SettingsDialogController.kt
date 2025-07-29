@@ -102,6 +102,9 @@ class SettingsDialogController(
     // Флаг для отслеживания изменений порядка в обычном режиме через drag & drop
     internal var normalModeOrderChanged = false
     
+    // Набор ID списков, в которых был изменён порядок через drag & drop
+    private val modifiedListIds = mutableSetOf<String>()
+    
     // TableLoader зависит от presetOrderManager и tableSortingService
     private val tableLoader = TableLoader(viewModeManager, presetOrderManager, tableSortingService)
     private var updateListener: (() -> Unit)? = null
@@ -112,7 +115,7 @@ class SettingsDialogController(
     private lateinit var tableColumnManager: TableColumnManager
 
     // Менеджер временных списков
-    private val tempListsManager = TempListsManager()
+    internal val tempListsManager = TempListsManager()
     
     // Корзина для удалённых пресетов
     private val presetRecycleBin = PresetRecycleBin()
@@ -676,7 +679,8 @@ class SettingsDialogController(
 
         // Сбрасываем флаг изменения порядка при инициализации
         normalModeOrderChanged = false
-        println("ADB_DEBUG: Reset normalModeOrderChanged = false")
+        modifiedListIds.clear()
+        println("ADB_DEBUG: Reset normalModeOrderChanged = false and cleared modifiedListIds")
 
         // Проверяем, что дефолтные списки существуют
         PresetListService.ensureDefaultListsExist()
@@ -740,6 +744,22 @@ class SettingsDialogController(
                 println("ADB_DEBUG: Saved initial normal mode order for list '${list.name}' with ${list.presets.size} presets")
             } else {
                 println("ADB_DEBUG: Normal mode order already exists for list '${list.name}' with ${existingOrder.size} items - not overwriting")
+                // Загружаем существующий порядок в память для использования при отображении
+                val presetsMap = list.presets.associateBy { "${it.label}|${it.size}|${it.dpi}" }
+                val orderedPresets = mutableListOf<DevicePreset>()
+                existingOrder.forEach { key ->
+                    presetsMap[key]?.let { orderedPresets.add(it) }
+                }
+                // Добавляем пресеты, которых нет в сохранённом порядке
+                list.presets.forEach { preset ->
+                    val key = "${preset.label}|${preset.size}|${preset.dpi}"
+                    if (key !in existingOrder) {
+                        orderedPresets.add(preset)
+                    }
+                }
+                if (orderedPresets.isNotEmpty()) {
+                    presetOrderManager.updateNormalModeOrderInMemory(list.id, orderedPresets)
+                }
             }
         }
         
@@ -1093,7 +1113,7 @@ class SettingsDialogController(
             // В обычном режиме сохраняем новый порядок
             if (!dialogState.isShowAllPresetsMode() && currentPresetList != null) {
                 // Получаем текущий порядок из таблицы
-                val tablePresets = tableModel.getPresets()
+                val currentTablePresets = tableModel.getPresets()
                 
                 // Если включено скрытие дублей, нужно восстановить полный список с дублями
                 val presetsToSave = if (dialogState.isHideDuplicatesMode()) {
@@ -1101,11 +1121,11 @@ class SettingsDialogController(
                     val tempList = tempListsManager.getTempList(currentPresetList!!.id)
                     if (tempList != null) {
                         // Создаём новый порядок, сохраняя позиции видимых элементов
-                        val visibleKeys = tablePresets.map { "${it.label}|${it.size}|${it.dpi}" }.toSet()
+                        val visibleKeys = currentTablePresets.map { "${it.label}|${it.size}|${it.dpi}" }.toSet()
                         val fullOrderedList = mutableListOf<DevicePreset>()
                         
                         // Проходим по видимым пресетам и добавляем их вместе с их скрытыми дублями
-                        tablePresets.forEach { visiblePreset ->
+                        currentTablePresets.forEach { visiblePreset ->
                             val visibleKey = "${visiblePreset.label}|${visiblePreset.size}|${visiblePreset.dpi}"
                             val duplicateKey = visiblePreset.getDuplicateKey()
                             
@@ -1130,22 +1150,37 @@ class SettingsDialogController(
                             }
                         }
                         
-                        println("ADB_DEBUG: Reconstructed full order with ${fullOrderedList.size} presets (${tablePresets.size} visible)")
+                        println("ADB_DEBUG: Reconstructed full order with ${fullOrderedList.size} presets (${currentTablePresets.size} visible)")
                         fullOrderedList
                     } else {
-                        tablePresets
+                        currentTablePresets
                     }
                 } else {
-                    tablePresets
+                    currentTablePresets
                 }
                 
                 // НЕ сохраняем в файл при drag & drop в обычном режиме - только в памяти для отката
                 // presetOrderManager.saveNormalModeOrder(currentPresetList!!.id, presetsToSave)
+                
+                // Обновляем порядок в памяти для использования при переключении списков
+                presetOrderManager.updateNormalModeOrderInMemory(currentPresetList!!.id, presetsToSave)
                 println("ADB_DEBUG: Updated normal mode order in memory after drag & drop for list '${currentPresetList!!.name}' with ${presetsToSave.size} presets")
+                
+                // Обновляем порядок в tempLists, чтобы он соответствовал текущему порядку в таблице
+                val tempList = tempListsManager.getTempList(currentPresetList!!.id)
+                if (tempList != null) {
+                    tempList.presets.clear()
+                    tempList.presets.addAll(presetsToSave)
+                    println("ADB_DEBUG: Updated tempList order for '${tempList.name}' with ${presetsToSave.size} presets")
+                }
+                
+                // НЕ сохраняем порядок сразу - только при нажатии OK
+                // presetOrderManager.saveNormalModeOrder(currentPresetList!!.id, presetsToSave)
                 
                 // Устанавливаем флаг, что порядок был изменен через drag & drop
                 normalModeOrderChanged = true
-                println("ADB_DEBUG: Set normalModeOrderChanged = true")
+                modifiedListIds.add(currentPresetList!!.id)
+                println("ADB_DEBUG: Set normalModeOrderChanged = true, added list '${currentPresetList!!.name}' to modified lists")
             }
         }
         
@@ -1320,6 +1355,19 @@ class SettingsDialogController(
                 }
             }
             
+            // Сначала сохраняем порядок для обычного режима, если он был изменён
+            if (normalModeOrderChanged) {
+                // Сохраняем порядок для всех изменённых списков
+                modifiedListIds.forEach { listId ->
+                    val tempList = tempListsManager.getTempList(listId)
+                    if (tempList != null && tempList.presets.isNotEmpty()) {
+                        presetOrderManager.saveNormalModeOrder(listId, tempList.presets)
+                        println("ADB_DEBUG: Saved normal mode order for modified list '${tempList.name}' in Show All mode")
+                    }
+                }
+                println("ADB_DEBUG: Saved normal mode order for ${modifiedListIds.size} modified lists in Show All mode")
+            }
+            
             // Теперь сохраняем порядок при Save
             if (dialogState.isHideDuplicatesMode()) {
                 // В режиме Hide Duplicates нужно восстановить полный порядок с дубликатами
@@ -1363,13 +1411,29 @@ class SettingsDialogController(
                 presetOrderManager.updateFixedShowAllOrder(allPresetsWithLists)
             }
         } else {
-            // В обычном режиме сохраняем порядок только если он был изменен через drag & drop
-            if (normalModeOrderChanged && currentPresetList != null) {
-                val tablePresets = tableModel.getPresets()
-                if (tablePresets.isNotEmpty()) {
-                    presetOrderManager.saveNormalModeOrder(currentPresetList!!.id, tablePresets)
-                    println("ADB_DEBUG: Saved normal mode order after drag & drop for list '${currentPresetList!!.name}' with ${tablePresets.size} presets")
+            // В обычном режиме сохраняем порядок для всех изменённых списков
+            if (normalModeOrderChanged) {
+                // Сохраняем порядок для текущего списка из таблицы
+                if (currentPresetList != null) {
+                    val tablePresets = tableModel.getPresets()
+                    if (tablePresets.isNotEmpty()) {
+                        presetOrderManager.saveNormalModeOrder(currentPresetList!!.id, tablePresets)
+                        println("ADB_DEBUG: Saved normal mode order for current list '${currentPresetList!!.name}' with ${tablePresets.size} presets")
+                    }
                 }
+                
+                // Сохраняем порядок для всех изменённых списков
+                modifiedListIds.forEach { listId ->
+                    if (listId != currentPresetList?.id) { // Текущий список уже сохранён выше
+                        val tempList = tempListsManager.getTempList(listId)
+                        if (tempList != null && tempList.presets.isNotEmpty()) {
+                            presetOrderManager.saveNormalModeOrder(listId, tempList.presets)
+                            println("ADB_DEBUG: Saved normal mode order for modified list '${tempList.name}' with ${tempList.presets.size} presets")
+                        }
+                    }
+                }
+                
+                println("ADB_DEBUG: Saved normal mode order for ${modifiedListIds.size} modified lists")
             } else {
                 println("ADB_DEBUG: In normal mode - order not changed via drag & drop, using initial order")
             }
@@ -1387,9 +1451,10 @@ class SettingsDialogController(
             }
         )
         
-        // Сбрасываем флаг после сохранения
+        // Сбрасываем флаг и набор после сохранения
         normalModeOrderChanged = false
-        println("ADB_DEBUG: Reset normalModeOrderChanged flag after saving settings")
+        modifiedListIds.clear()
+        println("ADB_DEBUG: Reset normalModeOrderChanged flag and cleared modifiedListIds after saving settings")
     }
 
     // === Вспомогательные методы ===
@@ -1448,7 +1513,7 @@ class SettingsDialogController(
                     loadPresetsIntoTable()
                     
                     // Если есть ожидающий callback для получения позиции, вызываем его после обновления таблицы
-                    pendingPositionCallback?.let { callback ->
+                    pendingPositionCallback?.let { _ ->
                         SwingUtilities.invokeLater {
                             // Вызываем callback после обновления TableStateTracker
                             pendingPositionCallback = null

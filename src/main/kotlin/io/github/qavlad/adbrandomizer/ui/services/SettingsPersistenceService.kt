@@ -44,13 +44,9 @@ class SettingsPersistenceService {
                 println("ADB_DEBUG: Saving lists in Show All mode with Hide Duplicates - preserving original order")
             }
         } else {
-            // В обычном режиме с Hide Duplicates также сохраняем с оригинальным порядком
-            if (!isHideDuplicatesMode) {
-                saveAllPresetLists(tempLists)
-            } else {
-                println("ADB_DEBUG: Saving lists in normal mode with Hide Duplicates - preserving original order")
-                saveAllPresetListsWithOriginalOrder(tempLists, presetOrderManager)
-            }
+            // В обычном режиме всегда используем saveAllPresetListsWithOriginalOrder
+            // чтобы учесть сохранённый порядок из обычного режима
+            saveAllPresetListsWithOriginalOrder(tempLists, presetOrderManager)
         }
     }
     
@@ -92,20 +88,27 @@ class SettingsPersistenceService {
      */
     private fun saveAllPresetListsWithOriginalOrder(tempLists: Map<String, PresetList>, presetOrderManager: PresetOrderManager) {
         tempLists.values.forEach { tempList ->
-            // Сначала проверяем, есть ли сохранённый порядок из обычного режима
-            val normalOrder = presetOrderManager.getNormalModeOrder(tempList.id)
-            val savedOrder = if (normalOrder != null) {
-                println("ADB_DEBUG: Using saved normal mode order for list '${tempList.name}' with ${normalOrder.size} items")
-                normalOrder
+            // Сначала проверяем порядок в памяти (для несохранённых изменений)
+            val memoryOrder = presetOrderManager.getNormalModeOrderInMemory(tempList.id)
+            val savedOrder = if (memoryOrder != null) {
+                println("ADB_DEBUG: Using in-memory normal mode order for list '${tempList.name}' with ${memoryOrder.size} items")
+                memoryOrder
             } else {
-                // Если сохранённого порядка нет, используем исходный порядок из файла
-                val originalOrder = presetOrderManager.getOriginalFileOrder(tempList.id)
-                if (originalOrder != null) {
-                    println("ADB_DEBUG: Using original file order for list '${tempList.name}' with ${originalOrder.size} items")
-                    originalOrder
+                // Если в памяти нет, проверяем сохранённый порядок из настроек
+                val normalOrder = presetOrderManager.getNormalModeOrder(tempList.id)
+                if (normalOrder != null) {
+                    println("ADB_DEBUG: Using saved normal mode order for list '${tempList.name}' with ${normalOrder.size} items")
+                    normalOrder
                 } else {
-                    println("ADB_DEBUG: No saved order found for list '${tempList.name}'")
-                    null
+                    // Если сохранённого порядка нет, используем исходный порядок из файла
+                    val originalOrder = presetOrderManager.getOriginalFileOrder(tempList.id)
+                    if (originalOrder != null) {
+                        println("ADB_DEBUG: Using original file order for list '${tempList.name}' with ${originalOrder.size} items")
+                        originalOrder
+                    } else {
+                        println("ADB_DEBUG: No saved order found for list '${tempList.name}'")
+                        null
+                    }
                 }
             }
             

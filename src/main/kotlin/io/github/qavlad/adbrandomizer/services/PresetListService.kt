@@ -247,11 +247,10 @@ object PresetListService {
                 val presetList = gson.fromJson(json, PresetList::class.java)
                 
                 // Отладочная информация о загруженных ID
-                // Временно отключено из-за спама при наведении мыши
-                // println("ADB_DEBUG: Loaded preset list ${presetList.name} with ${presetList.presets.size} presets")
-                // presetList.presets.take(3).forEach { preset ->
-                //     println("ADB_DEBUG:   Preset: ${preset.label} | ${preset.size} | ${preset.dpi} | id=${preset.id}")
-                // }
+                println("ADB_DEBUG: Loaded preset list ${presetList.name} from file with ${presetList.presets.size} presets")
+                presetList.presets.forEachIndexed { index, preset ->
+                    println("ADB_DEBUG:   [$index] ${preset.label} | ${preset.size} | ${preset.dpi}")
+                }
                 
                 if (!cacheEnabled) {
                     PluginLogger.debug(LogCategory.PRESET_SERVICE, "Successfully loaded list %s with %d presets", presetList.name, presetList.presets.size)
@@ -279,11 +278,10 @@ object PresetListService {
         PluginLogger.debug(LogCategory.PRESET_SERVICE, "Saving preset list '%s' to: %s", presetList.name, file.absolutePath)
         
         // Отладочная информация о сохраняемых ID
-        // Временно отключено из-за спама
-        // println("ADB_DEBUG: Saving preset list ${presetList.name} with ${presetList.presets.size} presets")
-        // presetList.presets.take(3).forEach { preset ->
-        //     println("ADB_DEBUG:   Preset: ${preset.label} | ${preset.size} | ${preset.dpi} | id=${preset.id}")
-        // }
+        println("ADB_DEBUG: Saving preset list ${presetList.name} with ${presetList.presets.size} presets")
+        presetList.presets.forEachIndexed { index, preset ->
+            println("ADB_DEBUG:   [$index] ${preset.label} | ${preset.size} | ${preset.dpi}")
+        }
         
         try {
             // Убеждаемся, что директория существует
