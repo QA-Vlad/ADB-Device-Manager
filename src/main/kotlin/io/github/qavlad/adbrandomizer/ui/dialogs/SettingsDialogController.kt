@@ -563,7 +563,16 @@ class SettingsDialogController(
         
         // Не сохраняем порядок после синхронизации - используем сохранённый при инициализации
         if (!context.isSwitchingMode && !context.isSwitchingList && !dialogState.isShowAllPresetsMode()) {
-            println("ADB_DEBUG: Not saving order after sync - using initial order")
+            // Но если мы делаем дублирование, нужно обновить порядок в памяти
+            if (isDuplicatingPreset && currentPresetList != null) {
+                val tablePresets = tableModel.getPresets()
+                presetOrderManager.updateNormalModeOrderInMemory(currentPresetList!!.id, tablePresets)
+                normalModeOrderChanged = true
+                modifiedListIds.add(currentPresetList!!.id)
+                println("ADB_DEBUG: Updated normal mode order after sync during duplication for list '${currentPresetList!!.name}' with ${tablePresets.size} presets")
+            } else {
+                println("ADB_DEBUG: Not saving order after sync - using initial order")
+            }
         }
     }
 
@@ -1306,6 +1315,15 @@ class SettingsDialogController(
             )
             
             if (duplicated) {
+                // Обновляем порядок в памяти после дублирования
+                if (!dialogState.isShowAllPresetsMode() && currentPresetList != null) {
+                    val tablePresets = tableModel.getPresets()
+                    presetOrderManager.updateNormalModeOrderInMemory(currentPresetList!!.id, tablePresets)
+                    normalModeOrderChanged = true
+                    modifiedListIds.add(currentPresetList!!.id)
+                    println("ADB_DEBUG: Updated normal mode order after duplication for list '${currentPresetList!!.name}' with ${tablePresets.size} presets")
+                }
+                
                 SwingUtilities.invokeLater {
                     val insertIndex = row + 1
                     table.scrollRectToVisible(table.getCellRect(insertIndex, 0, true))
