@@ -174,6 +174,11 @@ class TableConfigurator(
     
     private fun createMouseListener() = object : MouseAdapter() {
         override fun mouseClicked(e: MouseEvent) {
+            // Игнорируем клики правой кнопкой мыши
+            if (SwingUtilities.isRightMouseButton(e)) {
+                return
+            }
+            
             val row = table.rowAtPoint(e.point)
             val column = table.columnAtPoint(e.point)
             
@@ -188,12 +193,30 @@ class TableConfigurator(
         
         override fun mousePressed(e: MouseEvent) {
             if (e.isPopupTrigger) {
+                // Сначала выделяем ячейку под курсором
+                val row = table.rowAtPoint(e.point)
+                val column = table.columnAtPoint(e.point)
+                
+                if (row >= 0 && column >= 0) {
+                    // Вызываем обработчик клика с clickCount = 0 для выделения без редактирования
+                    onCellClicked(row, column, 0)
+                }
+                
                 showContextMenu(e)
             }
         }
         
         override fun mouseReleased(e: MouseEvent) {
             if (e.isPopupTrigger) {
+                // Сначала выделяем ячейку под курсором
+                val row = table.rowAtPoint(e.point)
+                val column = table.columnAtPoint(e.point)
+                
+                if (row >= 0 && column >= 0) {
+                    // Вызываем обработчик клика с clickCount = 0 для выделения без редактирования
+                    onCellClicked(row, column, 0)
+                }
+                
                 showContextMenu(e)
             }
         }

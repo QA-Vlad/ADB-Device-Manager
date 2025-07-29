@@ -2,6 +2,7 @@ package io.github.qavlad.adbrandomizer.ui.components
 
 import com.intellij.ui.table.JBTable
 import io.github.qavlad.adbrandomizer.ui.theme.ColorScheme
+import io.github.qavlad.adbrandomizer.ui.services.SelectionTracker
 import io.github.qavlad.adbrandomizer.utils.ValidationUtils
 import javax.swing.JComponent
 import javax.swing.table.TableCellRenderer
@@ -105,6 +106,11 @@ class TableFactory {
                 if (rowIndex >= 0) {
                     editingCallbacks.onChangeSelection(rowIndex, columnIndex, "")
                     println("ADB_DEBUG: changeSelection - updated lastInteractedRow to $rowIndex")
+                    
+                    // Сохраняем выделение для восстановления после сортировки
+                    if (columnIndex in 2..4) {
+                        SelectionTracker.saveSelection(this, rowIndex, columnIndex)
+                    }
                 }
                 
                 // Предотвращаем стандартное выделение если используем кастомную навигацию

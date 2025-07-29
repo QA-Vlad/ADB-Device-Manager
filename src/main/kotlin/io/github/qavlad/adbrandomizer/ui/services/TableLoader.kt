@@ -4,6 +4,7 @@ import io.github.qavlad.adbrandomizer.services.DevicePreset
 import io.github.qavlad.adbrandomizer.services.PresetList
 import io.github.qavlad.adbrandomizer.services.PresetListService
 import io.github.qavlad.adbrandomizer.ui.components.DevicePresetTableModel
+import javax.swing.JTable
 import javax.swing.SwingUtilities
 
 /**
@@ -32,7 +33,9 @@ class TableLoader(
         onTableUpdating: (Boolean) -> Unit,
         onAddButtonRow: () -> Unit,
         inMemoryOrder: List<String>? = null,
-        initialHiddenDuplicates: Map<String, Set<String>>? = null
+        initialHiddenDuplicates: Map<String, Set<String>>? = null,
+        table: JTable? = null,
+        onClearTableSelection: (() -> Unit)? = null
     ) {
         println("ADB_DEBUG: TableLoader.loadPresetsIntoTable called")
         println("ADB_DEBUG:   isShowAllMode: $isShowAllMode")
@@ -99,6 +102,18 @@ class TableLoader(
                 
                 // Обновляем состояние таблицы для отслеживания позиций пресетов
                 TableStateTracker.updateTableState(tableModel)
+                
+                // Восстанавливаем выделение, если таблица передана
+                if (table != null && SelectionTracker.hasSelection()) {
+                    // Очищаем старое выделение из HoverState перед восстановлением
+                    onClearTableSelection?.invoke()
+                    
+                    // Задерживаем восстановление выделения, чтобы убедиться,
+                    // что таблица полностью обновилась
+                    SwingUtilities.invokeLater {
+                        SelectionTracker.restoreSelection(table)
+                    }
+                }
             } finally {
                 onTableUpdating(false)
             }
@@ -323,7 +338,7 @@ class TableLoader(
         val originalOrder = processedPairs.map { it.second.id }
         
         // Создаем временную копию списка для позиционирования (не изменяем оригинал)
-        val tempList = PresetList(
+        PresetList(
             id = list.id,
             name = list.name,
             isDefault = list.isDefault

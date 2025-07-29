@@ -5,6 +5,7 @@ import io.github.qavlad.adbrandomizer.ui.components.*
 import io.github.qavlad.adbrandomizer.services.PresetListService
 import io.github.qavlad.adbrandomizer.ui.services.DuplicateManager
 import io.github.qavlad.adbrandomizer.ui.services.TempListsManager
+import io.github.qavlad.adbrandomizer.ui.services.SelectionTracker
 
 /**
  * Инициализатор обработчиков событий для диалога настроек.
@@ -101,6 +102,10 @@ class EventHandlersInitializer(
         onLoadPresetsIntoTable: () -> Unit
     ) {
         controller.stopTableEditing()
+        
+        // Очищаем выделение при смене режима
+        SelectionTracker.clearSelection()
+        controller.clearTableSelection()
         
         // В режиме Show All не нужно синхронизировать изменения обратно в temp lists
         // так как это может привести к потере дубликатов

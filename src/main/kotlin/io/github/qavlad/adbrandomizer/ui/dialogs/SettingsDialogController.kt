@@ -13,6 +13,7 @@ import io.github.qavlad.adbrandomizer.ui.services.ViewModeManager
 import io.github.qavlad.adbrandomizer.ui.services.PresetOperationsService
 import io.github.qavlad.adbrandomizer.ui.services.TableEventHandler
 import io.github.qavlad.adbrandomizer.ui.services.SnapshotManager
+import io.github.qavlad.adbrandomizer.ui.services.SelectionTracker
 import io.github.qavlad.adbrandomizer.ui.services.ValidationService
 import io.github.qavlad.adbrandomizer.ui.services.TableLoader
 import io.github.qavlad.adbrandomizer.ui.services.StateManager
@@ -197,6 +198,9 @@ class SettingsDialogController(
     fun initializeHandlers() {
         println("ADB_DEBUG: initializeHandlers called")
 
+        // Очищаем SelectionTracker при инициализации нового диалога
+        SelectionTracker.clearSelection()
+        
         // ВАЖНО: инициализируем временные списки ДО загрузки таблицы
         initializeTempPresetLists()
         // Гарантируем, что currentPresetList валиден
@@ -312,7 +316,15 @@ class SettingsDialogController(
 
         // Настраиваем колонки таблицы, включая заголовки для сортировки
         setupTableColumns()
-
+        
+        // Устанавливаем функцию обновления HoverState для SelectionTracker
+        SelectionTracker.setHoverStateUpdater { row, column ->
+            hoverState = hoverState.withTableSelection(row, column)
+            val rect = table.getCellRect(row, column, false)
+            table.repaint(rect)
+            println("ADB_DEBUG: SelectionTracker updated HoverState - row: $row, column: $column")
+        }
+        
         // Загружаем данные после полной инициализации
         println("ADB_DEBUG: Before loadPresetsIntoTable in initializeHandlers - currentPresetList: ${currentPresetList?.name}, presets: ${currentPresetList?.presets?.size}")
         loadPresetsIntoTable()
@@ -753,6 +765,11 @@ class SettingsDialogController(
             }
         }
         
+        // Очищаем выделение при смене режимов
+        if (dialogState.isSwitchingMode() || dialogState.isSwitchingList()) {
+            SelectionTracker.clearSelection()
+        }
+        
         tableLoader.loadPresetsIntoTable(
             tableModel = tableModel,
             currentPresetList = currentPresetList,
@@ -791,6 +808,11 @@ class SettingsDialogController(
             } else {
                 // Иначе используем начальное состояние
                 initialHiddenDuplicates
+            },
+            table = table,
+            onClearTableSelection = {
+                hoverState = hoverState.clearTableSelection()
+                table.repaint()
             }
         )
         
@@ -1768,6 +1790,11 @@ class SettingsDialogController(
             } else {
                 // Иначе используем начальное состояние
                 initialHiddenDuplicates
+            },
+            table = table,
+            onClearTableSelection = {
+                hoverState = hoverState.clearTableSelection()
+                table.repaint()
             }
         )
         
@@ -1894,6 +1921,14 @@ class SettingsDialogController(
     fun stopTableEditing() {
         if (::table.isInitialized && table.isEditing) {
             table.cellEditor.stopCellEditing()
+        }
+    }
+    
+    fun clearTableSelection() {
+        // Очищаем выделение из HoverState
+        hoverState = hoverState.clearTableSelection()
+        if (::table.isInitialized) {
+            table.repaint()
         }
     }
     

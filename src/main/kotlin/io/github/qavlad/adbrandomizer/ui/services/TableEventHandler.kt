@@ -171,7 +171,14 @@ class TableEventHandler(
         val currentHoverState = getHoverState()
         val isCellSelected = currentHoverState?.isTableCellSelected(row, column) ?: false
         
-        if (clickCount == 1) {
+        if (clickCount == 0) {
+            // Клик от ПКМ - только выделяем ячейку, без редактирования
+            setHoverState?.invoke(currentHoverState?.withTableSelection(row, column) ?: HoverState().withTableSelection(row, column))
+            
+            // Перерисовываем таблицу для отображения выделения
+            val rect = table.getCellRect(row, column, false)
+            table.repaint(rect)
+        } else if (clickCount == 1) {
             if (isCellSelected) {
                 // Если ячейка уже выделена, начинаем редактирование
                 SwingUtilities.invokeLater {
