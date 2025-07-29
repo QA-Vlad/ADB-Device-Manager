@@ -421,17 +421,16 @@ class TableLoader(
         val memoryOrder = presetOrderManager.getNormalModeOrderInMemory(list.id)
         val presets = if (memoryOrder != null) {
             println("ADB_DEBUG: Using in-memory order for list '${list.name}' with ${memoryOrder.size} items")
-            // Создаем карту пресетов по ключу
-            val presetsMap = list.presets.associateBy { "${it.label}|${it.size}|${it.dpi}" }
+            // Создаем карту пресетов по ID
+            val presetsMap = list.presets.associateBy { it.id }
             // Восстанавливаем порядок из памяти
             val orderedPresets = mutableListOf<DevicePreset>()
-            memoryOrder.forEach { key ->
-                presetsMap[key]?.let { orderedPresets.add(it) }
+            memoryOrder.forEach { presetId ->
+                presetsMap[presetId]?.let { orderedPresets.add(it) }
             }
-            // Добавляем пресеты, которых нет в сохранённом порядке
+            // Добавляем пресеты, которых нет в сохранённом порядке (новые пресеты)
             list.presets.forEach { preset ->
-                val key = "${preset.label}|${preset.size}|${preset.dpi}"
-                if (key !in memoryOrder) {
+                if (preset.id !in memoryOrder) {
                     orderedPresets.add(preset)
                 }
             }

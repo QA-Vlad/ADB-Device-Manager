@@ -27,8 +27,8 @@ class PresetOrderManager {
      * Сохраняет порядок пресетов для текущего списка в обычном режиме
      */
     fun saveNormalModeOrder(listId: String, presets: List<DevicePreset>) {
-        // Используем комбинацию label, size и dpi для уникальной идентификации
-        val order = presets.map { "${it.label}|${it.size}|${it.dpi}" }
+        // Используем ID для уникальной идентификации пресетов
+        val order = presets.map { it.id }
         val key = "$NORMAL_MODE_ORDER_PREFIX$listId"
         println("ADB_DEBUG: PresetOrderManager.saveNormalModeOrder - listId: $listId, order size: ${order.size}")
         order.forEachIndexed { index, item ->
@@ -179,7 +179,7 @@ class PresetOrderManager {
      * Сохраняет исходный порядок пресетов из файла для списка
      */
     fun saveOriginalFileOrder(listId: String, presets: List<DevicePreset>) {
-        val order = presets.map { "${it.label}|${it.size}|${it.dpi}" }
+        val order = presets.map { it.id }
         originalFileOrder[listId] = order
         println("ADB_DEBUG: PresetOrderManager.saveOriginalFileOrder - saved original order for listId: $listId, size: ${order.size}")
     }
@@ -204,7 +204,7 @@ class PresetOrderManager {
      * Обновляет порядок пресетов в памяти для обычного режима
      */
     fun updateNormalModeOrderInMemory(listId: String, presets: List<DevicePreset>) {
-        val order = presets.map { "${it.label}|${it.size}|${it.dpi}" }
+        val order = presets.map { it.id }
         normalModeOrderInMemory[listId] = order
         println("ADB_DEBUG: PresetOrderManager.updateNormalModeOrderInMemory - listId: $listId, order size: ${order.size}")
     }

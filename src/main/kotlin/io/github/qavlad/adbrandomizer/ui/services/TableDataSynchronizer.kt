@@ -242,11 +242,11 @@ class TableDataSynchronizer(
         if (context.isHideDuplicatesMode) {
             syncWithHiddenDuplicates(tablePresets, currentList, onReloadRequired)
         } else {
-            // В обычном режиме при drag & drop не изменяем порядок в самом списке
+            // В обычном режиме при drag & drop или history операциях не изменяем порядок в самом списке
             // Порядок сохраняется отдельно через PresetOrderManager
-            if (context.isDragAndDropInProgress) {
-                PluginLogger.debug(LogCategory.SYNC_OPERATIONS, "syncCurrentList - drag & drop in progress, skipping sync to preserve original order")
-                // Не синхронизируем при drag & drop - порядок сохраняется только через PresetOrderManager
+            if (context.isDragAndDropInProgress || context.isPerformingHistoryOperation) {
+                PluginLogger.debug(LogCategory.SYNC_OPERATIONS, "syncCurrentList - drag & drop or history operation in progress, skipping sync to preserve original order")
+                // Не синхронизируем при drag & drop или history операциях - порядок сохраняется только через PresetOrderManager
                 return
             } else {
                 syncWithoutHiddenDuplicates(tablePresets, currentList)

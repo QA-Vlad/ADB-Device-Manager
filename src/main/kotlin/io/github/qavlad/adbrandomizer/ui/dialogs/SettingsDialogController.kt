@@ -562,7 +562,7 @@ class SettingsDialogController(
         }
         
         // Не сохраняем порядок после синхронизации - используем сохранённый при инициализации
-        if (!context.isSwitchingMode && !context.isSwitchingList && !dialogState.isShowAllPresetsMode()) {
+        if (!context.isSwitchingMode && !context.isSwitchingList && !dialogState.isShowAllPresetsMode() && !context.isPerformingHistoryOperation) {
             // Но если мы делаем дублирование, нужно обновить порядок в памяти
             if (isDuplicatingPreset && currentPresetList != null) {
                 val tablePresets = tableModel.getPresets()
@@ -573,6 +573,8 @@ class SettingsDialogController(
             } else {
                 println("ADB_DEBUG: Not saving order after sync - using initial order")
             }
+        } else if (context.isPerformingHistoryOperation) {
+            println("ADB_DEBUG: Not saving order during history operation - preserving original order")
         }
     }
 
@@ -760,18 +762,41 @@ class SettingsDialogController(
             } else {
                 println("ADB_DEBUG: Normal mode order already exists for list '${list.name}' with ${existingOrder.size} items - not overwriting")
                 // Загружаем существующий порядок в память для использования при отображении
-                val presetsMap = list.presets.associateBy { "${it.label}|${it.size}|${it.dpi}" }
                 val orderedPresets = mutableListOf<DevicePreset>()
+                
+                // Пробуем сначала как ID (новый формат)
+                val presetsById = list.presets.associateBy { it.id }
+                var foundByIds = false
+                
                 existingOrder.forEach { key ->
-                    presetsMap[key]?.let { orderedPresets.add(it) }
-                }
-                // Добавляем пресеты, которых нет в сохранённом порядке
-                list.presets.forEach { preset ->
-                    val key = "${preset.label}|${preset.size}|${preset.dpi}"
-                    if (key !in existingOrder) {
-                        orderedPresets.add(preset)
+                    presetsById[key]?.let { 
+                        orderedPresets.add(it)
+                        foundByIds = true
                     }
                 }
+                
+                // Если не нашли по ID, пробуем старый формат с составным ключом
+                if (!foundByIds) {
+                    val presetsMap = list.presets.associateBy { "${it.label}|${it.size}|${it.dpi}" }
+                    existingOrder.forEach { key ->
+                        presetsMap[key]?.let { orderedPresets.add(it) }
+                    }
+                    // Добавляем пресеты, которых нет в сохранённом порядке
+                    list.presets.forEach { preset ->
+                        val key = "${preset.label}|${preset.size}|${preset.dpi}"
+                        if (key !in existingOrder) {
+                            orderedPresets.add(preset)
+                        }
+                    }
+                } else {
+                    // Добавляем пресеты, которых нет в сохранённом порядке (новые пресеты по ID)
+                    list.presets.forEach { preset ->
+                        if (preset.id !in existingOrder) {
+                            orderedPresets.add(preset)
+                        }
+                    }
+                }
+                
                 if (orderedPresets.isNotEmpty()) {
                     presetOrderManager.updateNormalModeOrderInMemory(list.id, orderedPresets)
                 }
@@ -1499,21 +1524,18 @@ class SettingsDialogController(
                             if (tempList != null) {
                                 val orderedPresets = mutableListOf<DevicePreset>()
                                 
-                                // Восстанавливаем порядок из памяти
-                                memoryOrder.forEach { key ->
-                                    val preset = tempList.presets.find { p ->
-                                        "${p.label}|${p.size}|${p.dpi}" == key
-                                    }
+                                // Восстанавливаем порядок из памяти (по ID)
+                                memoryOrder.forEach { presetId ->
+                                    val preset = tempList.presets.find { p -> p.id == presetId }
                                     if (preset != null) {
                                         orderedPresets.add(preset)
                                     }
                                 }
                                 
                                 // Добавляем новые пресеты, которых не было в сохранённом порядке
-                                val savedKeys = memoryOrder.toSet()
+                                val savedIds = memoryOrder.toSet()
                                 tempList.presets.forEach { preset ->
-                                    val key = "${preset.label}|${preset.size}|${preset.dpi}"
-                                    if (key !in savedKeys) {
+                                    if (preset.id !in savedIds) {
                                         orderedPresets.add(preset)
                                     }
                                 }
