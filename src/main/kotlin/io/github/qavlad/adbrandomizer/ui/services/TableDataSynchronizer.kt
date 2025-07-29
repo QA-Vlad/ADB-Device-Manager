@@ -122,13 +122,19 @@ class TableDataSynchronizer(
                     tempPresetLists = tempListsManager.getMutableTempLists(),
                     isHideDuplicatesMode = context.isHideDuplicatesMode,
                     getListNameAtRow = getListNameAtRow,
-                    saveVisiblePresetsSnapshotForAllLists = saveVisiblePresetsSnapshotForAllLists
+                    saveVisiblePresetsSnapshotForAllLists = saveVisiblePresetsSnapshotForAllLists,
+                    isShowAllMode = true
                 )
                 
                 // Сохраняем все списки после синхронизации в режиме Show All
-                PluginLogger.debug(LogCategory.SYNC_OPERATIONS, "Saving all preset lists after sync in Show All mode")
-                tempListsManager.getTempLists().values.forEach { list ->
-                    PresetListService.savePresetList(list)
+                // НО НЕ при включенном Hide Duplicates, так как в таблице только видимые пресеты
+                if (!context.isHideDuplicatesMode) {
+                    PluginLogger.debug(LogCategory.SYNC_OPERATIONS, "Saving all preset lists after sync in Show All mode")
+                    tempListsManager.getTempLists().values.forEach { list ->
+                        PresetListService.savePresetList(list)
+                    }
+                } else {
+                    PluginLogger.debug(LogCategory.SYNC_OPERATIONS, "NOT saving lists in Show All mode with Hide Duplicates - table contains only visible presets")
                 }
             }
         } else {
@@ -136,9 +142,13 @@ class TableDataSynchronizer(
                 // Всегда используем syncCurrentList для корректной синхронизации
                 syncCurrentList(tableModel, list, context, onReloadRequired)
                 
-                // Сохраняем список в файл после синхронизации
-                PluginLogger.debug(LogCategory.SYNC_OPERATIONS, "Saving currentPresetList after sync")
-                PresetListService.savePresetList(list)
+                // Сохраняем список в файл после синхронизации (но не при drag & drop и не при Hide Duplicates)
+                if (!context.isDragAndDropInProgress && !context.isHideDuplicatesMode) {
+                    PluginLogger.debug(LogCategory.SYNC_OPERATIONS, "Saving currentPresetList after sync")
+                    PresetListService.savePresetList(list)
+                } else if (context.isHideDuplicatesMode) {
+                    PluginLogger.debug(LogCategory.SYNC_OPERATIONS, "NOT saving list with Hide Duplicates - table contains only visible presets")
+                }
             }
         }
         
@@ -232,7 +242,15 @@ class TableDataSynchronizer(
         if (context.isHideDuplicatesMode) {
             syncWithHiddenDuplicates(tablePresets, currentList, onReloadRequired)
         } else {
-            syncWithoutHiddenDuplicates(tablePresets, currentList)
+            // В обычном режиме при drag & drop не изменяем порядок в самом списке
+            // Порядок сохраняется отдельно через PresetOrderManager
+            if (context.isDragAndDropInProgress) {
+                PluginLogger.debug(LogCategory.SYNC_OPERATIONS, "syncCurrentList - drag & drop in progress, skipping sync to preserve original order")
+                // Не синхронизируем при drag & drop - порядок сохраняется только через PresetOrderManager
+                return
+            } else {
+                syncWithoutHiddenDuplicates(tablePresets, currentList)
+            }
         }
         
         PluginLogger.debug(LogCategory.SYNC_OPERATIONS, "syncCurrentList - currentList after sync:")
@@ -315,7 +333,8 @@ class TableDataSynchronizer(
                 tempPresetLists = tempListsManager.getMutableTempLists(),
                 isHideDuplicatesMode = isHideDuplicatesMode,
                 getListNameAtRow = getListNameAtRow,
-                saveVisiblePresetsSnapshotForAllLists = saveVisiblePresetsSnapshotForAllLists
+                saveVisiblePresetsSnapshotForAllLists = saveVisiblePresetsSnapshotForAllLists,
+                isShowAllMode = true
             )
         } else {
             // В обычном режиме обновляем только текущий список
@@ -323,7 +342,7 @@ class TableDataSynchronizer(
                 // Используем ту же логику, что и в syncTableChangesToTempLists
                 if (isHideDuplicatesMode) {
                     // Используем ту же логику, что и в syncTableChangesToTempLists
-                    val originalPresets = list.presets.map { it.copy() }
+                    val originalPresets = list.presets.map { it.copy(id = it.id) }
 
                     // Определяем какие индексы были видимы в таблице
                     val visibleIndices = duplicateManager.findVisibleIndices(originalPresets)
@@ -354,7 +373,7 @@ class TableDataSynchronizer(
     /**
      * Создает ключ для пресета на основе размера и DPI
      */
-    private fun DevicePreset.toKey(): String = "$size|$dpi"
+    private fun DevicePreset.toKey(): String = getDuplicateKey()
     
     /**
      * Создает полный ключ для пресета (с label)
@@ -384,7 +403,7 @@ class TableDataSynchronizer(
         updatePresetList(currentList, tablePresets)
         PluginLogger.debug(LogCategory.SYNC_OPERATIONS, "  Updated list with %s presets", tablePresets.size)
     }
-    
+
     /**
      * Определяет видимые пресеты (первые вхождения каждой комбинации size|dpi)
      */
@@ -406,6 +425,87 @@ class TableDataSynchronizer(
         }
         
         return visiblePresets
+    }
+    
+    /**
+     * Проверяет, является ли добавление появлением бывшего дубликата
+     */
+    private fun checkIfFormerDuplicateAppearing(
+        tablePresets: List<DevicePreset>,
+        originalPresets: List<DevicePreset>,
+        visibleOriginalPresets: List<Pair<Int, DevicePreset>>
+    ): Boolean {
+        // Если добавился ровно один пресет
+        if (tablePresets.size - visibleOriginalPresets.size != 1) {
+            return false
+        }
+        
+        // Находим добавленный пресет
+        val visibleOriginalKeys = visibleOriginalPresets.map { it.second.toFullKey() }.toSet()
+        val addedPreset = tablePresets.find { preset ->
+            !visibleOriginalKeys.contains(preset.toFullKey())
+        } ?: return false
+        
+        // Проверяем, был ли этот пресет в оригинальном списке (как скрытый дубликат)
+        return originalPresets.any { preset ->
+            preset.label == addedPreset.label && 
+            preset.size == addedPreset.size &&
+            preset.dpi == addedPreset.dpi
+        }
+    }
+    
+    /**
+     * Обновляет порядок пресетов в списке согласно их позициям в таблице
+     */
+    private fun updatePresetOrderFromTable(
+        tablePresets: List<DevicePreset>,
+        originalPresets: List<DevicePreset>,
+        currentList: PresetList
+    ) {
+        val newPresets = mutableListOf<DevicePreset>()
+        val processedIds = mutableSetOf<String>()
+        
+        // Сначала добавляем все пресеты из таблицы в том порядке, в котором они отображаются
+        tablePresets.forEach { tablePreset ->
+            // Находим соответствующий пресет в оригинальном списке
+            val originalPreset = originalPresets.find { preset ->
+                preset.label == tablePreset.label && 
+                preset.size == tablePreset.size &&
+                preset.dpi == tablePreset.dpi
+            }
+            
+            if (originalPreset != null) {
+                // Используем оригинальный ID
+                newPresets.add(tablePreset.copy(id = originalPreset.id))
+                processedIds.add(originalPreset.id)
+            } else {
+                // Новый пресет
+                newPresets.add(tablePreset)
+            }
+        }
+        
+        // Добавляем оставшиеся скрытые дубликаты
+        originalPresets.forEach { preset ->
+            if (!processedIds.contains(preset.id)) {
+                // Это скрытый дубликат - добавляем его после видимого пресета с тем же ключом
+                val key = preset.toKey()
+                val visibleIndex = newPresets.indexOfFirst { it.toKey() == key }
+                if (visibleIndex >= 0) {
+                    // Вставляем после видимого пресета
+                    newPresets.add(visibleIndex + 1, preset)
+                } else {
+                    // Если не нашли видимый пресет, добавляем в конец
+                    newPresets.add(preset)
+                }
+            }
+        }
+        
+        updatePresetList(currentList, newPresets)
+        
+        println("ADB_DEBUG: Updated preset order in list '${currentList.name}':")
+        newPresets.forEachIndexed { index, preset ->
+            println("ADB_DEBUG:   [$index] ${preset.label} | ${preset.size} | ${preset.dpi}")
+        }
     }
     
     /**
@@ -449,7 +549,7 @@ class TableDataSynchronizer(
         if (deletedVisibleIndex >= 0 && deletedVisibleIndex < visibleOriginalPresets.size) {
             val deletedPreset = visibleOriginalPresets[deletedVisibleIndex].second
             if (deletedPreset.size.isNotBlank() && deletedPreset.dpi.isNotBlank()) {
-                deletedPresetKey = "${deletedPreset.size}|${deletedPreset.dpi}"
+                deletedPresetKey = deletedPreset.getDuplicateKey()
                 
                 // Ищем первый скрытый дубликат
                 originalPresets.forEachIndexed { index, preset ->
@@ -552,12 +652,25 @@ class TableDataSynchronizer(
             updatePresetList(currentList, newPresets)
             PluginLogger.debug(LogCategory.SYNC_OPERATIONS, "  Updated list now has %s presets", currentList.presets.size)
         } else {
-            // Это восстановление после undo или другая операция
-            PluginLogger.debug(LogCategory.SYNC_OPERATIONS, "  Addition/restore detected (not from '+' button)")
-            PluginLogger.debug(LogCategory.SYNC_OPERATIONS, "  Triggering table reload")
+            // Проверяем, является ли это появлением бывшего дубликата
+            val isFormerDuplicateAppearing = checkIfFormerDuplicateAppearing(tablePresets, originalPresets, visibleOriginalPresets)
             
-            SwingUtilities.invokeLater {
-                onReloadRequired()
+            if (isFormerDuplicateAppearing) {
+                PluginLogger.debug(LogCategory.SYNC_OPERATIONS, "  Former duplicate appearing, updating preset order in list")
+                
+                // Обновляем порядок пресетов в списке согласно их позициям в таблице
+                updatePresetOrderFromTable(tablePresets, originalPresets, currentList)
+                
+                // Обновляем снимок
+                updateSnapshot(currentList)
+            } else {
+                // Это восстановление после undo или другая операция
+                PluginLogger.debug(LogCategory.SYNC_OPERATIONS, "  Addition/restore detected (not from '+' button)")
+                PluginLogger.debug(LogCategory.SYNC_OPERATIONS, "  Triggering table reload")
+                
+                SwingUtilities.invokeLater {
+                    onReloadRequired()
+                }
             }
         }
     }

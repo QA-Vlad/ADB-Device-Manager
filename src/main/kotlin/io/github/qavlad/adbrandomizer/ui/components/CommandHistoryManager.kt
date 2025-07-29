@@ -25,7 +25,50 @@ class CommandHistoryManager(
     }
     
     /**
-     * Добавляет команду редактирования ячейки
+     * Добавляет команду редактирования ячейки с информацией о пресете
+     */
+    fun addCellEdit(row: Int, column: Int, oldValue: String, newValue: String, presetBeforeEdit: DevicePreset) {
+        val cellId = getCellId(row, column)
+        
+        // Определяем имя списка, если мы в режиме Show All
+        val listName = if (controller.tableModel.columnCount > 8) {
+            val listColumnIndex = controller.tableModel.columnCount - 1
+            controller.tableModel.getValueAt(row, listColumnIndex) as? String
+        } else {
+            null
+        }
+        
+        // Находим индекс пресета в списке
+        val targetList = if (listName != null) {
+            controller.getTempPresetLists().values.find { it.name == listName }
+        } else {
+            controller.getCurrentPresetList()
+        }
+        
+        val presetIndex = targetList?.presets?.indexOfFirst { it.id == presetBeforeEdit.id } ?: -1
+        
+        val command = CellEditCommand(
+            controller,
+            cellId,
+            oldValue,
+            newValue,
+            listName,
+            presetBeforeEdit.label,
+            presetBeforeEdit.size,
+            presetBeforeEdit.dpi,
+            column,
+            presetBeforeEdit.id,
+            presetIndex
+        )
+        addCommand(command)
+        
+        println("ADB_DEBUG: Added cell edit command with preset info: ($row, $column) [${cellId.id.substring(0, 8)}...] '$oldValue' -> '$newValue'")
+        println("ADB_DEBUG:   Original preset - label: '${presetBeforeEdit.label}', size: '${presetBeforeEdit.size}', dpi: '${presetBeforeEdit.dpi}'")
+        println("ADB_DEBUG:   Preset index in list: $presetIndex")
+    }
+    
+    /**
+     * Добавляет команду редактирования ячейки (legacy метод для обратной совместимости)
      */
     fun addCellEdit(row: Int, column: Int, oldValue: String, newValue: String) {
         if (oldValue != newValue) {
@@ -38,6 +81,18 @@ class CommandHistoryManager(
                 controller.getCurrentPresetList()?.name
             }
             
+            // Получаем информацию о пресете до изменения
+            val presetAtRow = controller.tableModel.getPresetAt(row)
+            if (presetAtRow == null) {
+                println("ADB_DEBUG: Could not find preset at row $row")
+                return
+            }
+            
+            // Определяем исходные значения пресета
+            val originalLabel = if (column == 2) oldValue else presetAtRow.label
+            val originalSize = if (column == 3) oldValue else presetAtRow.size
+            val originalDpi = if (column == 4) oldValue else presetAtRow.dpi
+            
             // Проверяем, не добавляли ли мы точно такую же команду только что
             val lastCommand = historyStack.lastOrNull()
             if (lastCommand is CellEditCommand && 
@@ -48,7 +103,28 @@ class CommandHistoryManager(
                 return
             }
             
-            val command = CellEditCommand(controller, cellId, oldValue, newValue, listName)
+            // Находим индекс пресета в списке
+            val targetList = if (listName != null && controller.isShowAllPresetsMode()) {
+                controller.getTempPresetLists().values.find { it.name == listName }
+            } else {
+                controller.getCurrentPresetList()
+            }
+            
+            val presetIndex = targetList?.presets?.indexOfFirst { it.id == presetAtRow.id } ?: -1
+            
+            val command = CellEditCommand(
+                controller, 
+                cellId, 
+                oldValue, 
+                newValue, 
+                listName,
+                originalLabel,
+                originalSize,
+                originalDpi,
+                column,
+                presetAtRow.id,
+                presetIndex
+            )
             addCommand(command)
             
             println("ADB_DEBUG: Added cell edit command: ($row, $column) [${cellId.id.substring(0, 8)}...] '$oldValue' -> '$newValue' in list '$listName'")

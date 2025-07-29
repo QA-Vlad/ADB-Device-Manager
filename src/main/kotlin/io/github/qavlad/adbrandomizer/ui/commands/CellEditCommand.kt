@@ -11,7 +11,13 @@ class CellEditCommand(
     val cellId: CellIdentity,
     val oldValue: String,
     val newValue: String,
-    private val listName: String? // Запоминаем имя списка, в котором произошло изменение
+    private val listName: String?, // Запоминаем имя списка, в котором произошло изменение
+    private val originalLabel: String, // Исходный label пресета для точной идентификации
+    private val originalSize: String,  // Исходный size пресета для точной идентификации
+    private val originalDpi: String,   // Исходный dpi пресета для точной идентификации
+    private val editedColumn: Int,     // Какая колонка редактировалась
+    private val presetId: String,      // ID пресета для точной идентификации
+    private val presetIndex: Int       // Индекс пресета в списке на момент создания команды
 ) : AbstractPresetCommand(controller) {
 
     override val description: String
@@ -63,7 +69,7 @@ class CellEditCommand(
         
         if (coords != null) {
             // 3. Обновить значение в tempPresetLists
-            updatePresetInTempList(coords, valueToSet)
+            updatePresetInTempList(valueToSet)
         }
 
         // 4. Перезагрузить таблицу и обновить UI
@@ -77,7 +83,7 @@ class CellEditCommand(
         }
     }
 
-    private fun updatePresetInTempList(coords: Pair<Int, Int>, value: String) {
+    private fun updatePresetInTempList(value: String) {
         // В режиме Show all работаем с конкретным списком по имени
         val targetList = if (isShowAllPresetsMode && listName != null) {
             tempPresetLists.values.find { it.name == listName }
@@ -86,29 +92,65 @@ class CellEditCommand(
         }
         
         targetList?.let { list ->
-            val actualRowIndex = when {
-                isShowAllPresetsMode -> findPresetIndexInList(list, coords)
-                isHideDuplicatesMode -> findPresetIndexInList(list, coords)
-                else -> coords.first
+            // Сначала пытаемся найти по ID
+            var actualRowIndex = list.presets.indexOfFirst { preset ->
+                preset.id == presetId
+            }
+            
+            // Если не нашли по ID, пытаемся найти по индексу и атрибутам
+            if (actualRowIndex < 0 && presetIndex >= 0 && presetIndex < list.presets.size) {
+                val candidatePreset = list.presets[presetIndex]
+                // Проверяем, что пресет на этом индексе имеет подходящие атрибуты
+                val matches = when (editedColumn) {
+                    2 -> candidatePreset.size == originalSize && candidatePreset.dpi == originalDpi
+                    3 -> candidatePreset.label == originalLabel && candidatePreset.dpi == originalDpi
+                    4 -> candidatePreset.label == originalLabel && candidatePreset.size == originalSize
+                    else -> false
+                }
+                if (matches) {
+                    actualRowIndex = presetIndex
+                    println("ADB_DEBUG: Found preset by index $presetIndex and attributes")
+                }
+            }
+            
+            // Если всё ещё не нашли, ищем по атрибутам
+            if (actualRowIndex < 0) {
+                actualRowIndex = list.presets.indexOfFirst { preset ->
+                    when (editedColumn) {
+                        2 -> preset.size == originalSize && preset.dpi == originalDpi
+                        3 -> preset.label == originalLabel && preset.dpi == originalDpi
+                        4 -> preset.label == originalLabel && preset.size == originalSize
+                        else -> false
+                    }
+                }
+                if (actualRowIndex >= 0) {
+                    println("ADB_DEBUG: Found preset by attributes at index $actualRowIndex")
+                }
             }
 
-            if (actualRowIndex >= 0 && actualRowIndex < list.presets.size) {
+            if (actualRowIndex >= 0) {
                 val preset = list.presets[actualRowIndex]
                 // Создаем новый пресет с обновленным значением
-                val updatedPreset = when (coords.second) {
+                val updatedPreset = when (editedColumn) {
                     2 -> preset.copy(label = value)
                     3 -> preset.copy(size = value)
                     4 -> preset.copy(dpi = value)
                     else -> preset
                 }
                 list.presets[actualRowIndex] = updatedPreset
-                println("ADB_DEBUG: Updated preset in temp list '${list.name}': row=$actualRowIndex, col=${coords.second}, value=$value")
+                println("ADB_DEBUG: Updated preset in temp list '${list.name}': row=$actualRowIndex, col=$editedColumn, value=$value")
+                println("ADB_DEBUG: Original values: label='$originalLabel', size='$originalSize', dpi='$originalDpi'")
             } else {
-                // В режиме скрытия дубликатов может быть так, что мы не нашли точное совпадение
-                // Это может произойти если редактируется дубликат
-                println("ADB_DEBUG: Could not find exact preset match in temp list. Coords: $coords")
-                // Обновляем в таблице напрямую - синхронизация произойдет через TableModelListener
-                tableModel.setValueAt(value, coords.first, coords.second)
+                // Не нашли пресет с исходными значениями
+                println("ADB_DEBUG: Could not find preset with original values in list '${list.name}'")
+                val searchCriteria = when (editedColumn) {
+                    2 -> "size='$originalSize', dpi='$originalDpi' (editing label)"
+                    3 -> "label='$originalLabel', dpi='$originalDpi' (editing size)"
+                    4 -> "label='$originalLabel', size='$originalSize' (editing dpi)"
+                    else -> "label='$originalLabel', size='$originalSize', dpi='$originalDpi'"
+                }
+                println("ADB_DEBUG: Looking for preset with: $searchCriteria")
+                logPresetList("Current presets in list", list)
             }
         }
     }
@@ -120,29 +162,6 @@ class CellEditCommand(
         println("ADB_DEBUG: $prefix '${list.name}' has ${list.presets.size} presets")
         list.presets.forEachIndexed { index, preset ->
             println("ADB_DEBUG:   [$index] ${preset.label} | ${preset.size} | ${preset.dpi}")
-        }
-    }
-    
-    /**
-     * Находит индекс пресета в списке по координатам из таблицы
-     * Используется в режимах Show All и Hide Duplicates
-     */
-    private fun findPresetIndexInList(list: PresetList, coords: Pair<Int, Int>): Int {
-        val tableRow = coords.first
-        if (tableRow < 0 || tableRow >= tableModel.rowCount) {
-            return -1
-        }
-        
-        val tablePreset = tableModel.getPresetAt(tableRow) ?: return -1
-        
-        // Ищем пресет в списке, сравнивая по полям в зависимости от редактируемой колонки
-        return list.presets.indexOfFirst { preset ->
-            when (coords.second) {
-                2 -> preset.size == tablePreset.size && preset.dpi == tablePreset.dpi
-                3 -> preset.label == tablePreset.label && preset.dpi == tablePreset.dpi
-                4 -> preset.label == tablePreset.label && preset.size == tablePreset.size
-                else -> false
-            }
         }
     }
 }

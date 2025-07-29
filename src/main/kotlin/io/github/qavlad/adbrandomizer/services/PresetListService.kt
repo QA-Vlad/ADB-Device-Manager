@@ -1,6 +1,12 @@
 package io.github.qavlad.adbrandomizer.services
 
-import com.google.gson.Gson
+import com.google.gson.GsonBuilder
+import com.google.gson.JsonDeserializationContext
+import com.google.gson.JsonDeserializer
+import com.google.gson.JsonElement
+import com.google.gson.JsonObject
+import com.google.gson.JsonSerializationContext
+import com.google.gson.JsonSerializer
 import com.google.gson.reflect.TypeToken
 import com.intellij.ide.util.PropertiesComponent
 import com.intellij.openapi.application.PathManager
@@ -8,8 +14,10 @@ import io.github.qavlad.adbrandomizer.ui.services.TableSortingService
 import io.github.qavlad.adbrandomizer.utils.PluginLogger
 import io.github.qavlad.adbrandomizer.utils.logging.LogCategory
 import java.io.File
+import java.lang.reflect.Type
 import java.nio.file.Files
 import java.nio.file.Paths
+import java.util.UUID
 
 /**
  * Сервис для управления несколькими списками пресетов
@@ -19,7 +27,41 @@ object PresetListService {
     private const val LISTS_METADATA_KEY = "ADB_RANDOMIZER_LISTS_METADATA"
     
     private val properties = PropertiesComponent.getInstance()
-    private val gson = Gson()
+    
+    // Кастомный десериализатор для DevicePreset
+    class DevicePresetDeserializer : JsonDeserializer<DevicePreset> {
+        override fun deserialize(json: JsonElement, typeOfT: Type, context: JsonDeserializationContext): DevicePreset {
+            val jsonObject = json.asJsonObject
+            val label = jsonObject.get("label").asString
+            val size = jsonObject.get("size").asString
+            val dpi = jsonObject.get("dpi").asString
+            val id = if (jsonObject.has("id") && !jsonObject.get("id").isJsonNull) {
+                jsonObject.get("id").asString
+            } else {
+                UUID.randomUUID().toString()
+            }
+            return DevicePreset(label, size, dpi, id)
+        }
+    }
+    
+    class DevicePresetSerializer : JsonSerializer<DevicePreset> {
+        override fun serialize(src: DevicePreset, typeOfSrc: Type, context: JsonSerializationContext): JsonElement {
+            val jsonObject = JsonObject()
+            jsonObject.addProperty("label", src.label)
+            jsonObject.addProperty("size", src.size)
+            jsonObject.addProperty("dpi", src.dpi)
+            jsonObject.addProperty("id", src.id)
+            return jsonObject
+        }
+    }
+    
+    private val gson = GsonBuilder()
+        .registerTypeAdapter(DevicePreset::class.java, DevicePresetSerializer())
+        .registerTypeAdapter(DevicePreset::class.java, DevicePresetDeserializer())
+        .serializeNulls()
+        .setPrettyPrinting()
+        .create()
+        
     private val presetsDir = Paths.get(PathManager.getConfigPath(), "ADBRandomizer", "presets")
     
     // Кэш для загруженных списков, чтобы избежать повторного чтения файлов
@@ -203,6 +245,14 @@ object PresetListService {
             if (file.exists()) {
                 val json = file.readText()
                 val presetList = gson.fromJson(json, PresetList::class.java)
+                
+                // Отладочная информация о загруженных ID
+                // Временно отключено из-за спама при наведении мыши
+                // println("ADB_DEBUG: Loaded preset list ${presetList.name} with ${presetList.presets.size} presets")
+                // presetList.presets.take(3).forEach { preset ->
+                //     println("ADB_DEBUG:   Preset: ${preset.label} | ${preset.size} | ${preset.dpi} | id=${preset.id}")
+                // }
+                
                 if (!cacheEnabled) {
                     PluginLogger.debug(LogCategory.PRESET_SERVICE, "Successfully loaded list %s with %d presets", presetList.name, presetList.presets.size)
                 }
@@ -227,6 +277,14 @@ object PresetListService {
     fun savePresetList(presetList: PresetList) {
         val file = presetsDir.resolve("${presetList.id}.json").toFile()
         PluginLogger.debug(LogCategory.PRESET_SERVICE, "Saving preset list '%s' to: %s", presetList.name, file.absolutePath)
+        
+        // Отладочная информация о сохраняемых ID
+        // Временно отключено из-за спама
+        // println("ADB_DEBUG: Saving preset list ${presetList.name} with ${presetList.presets.size} presets")
+        // presetList.presets.take(3).forEach { preset ->
+        //     println("ADB_DEBUG:   Preset: ${preset.label} | ${preset.size} | ${preset.dpi} | id=${preset.id}")
+        // }
+        
         try {
             // Убеждаемся, что директория существует
             file.parentFile.mkdirs()
@@ -477,7 +535,7 @@ object PresetListService {
                 val seen = mutableSetOf<String>()
                 sortedPresets.filter { preset ->
                     if (preset.size.isNotBlank() && preset.dpi.isNotBlank()) {
-                        val key = "${preset.size}|${preset.dpi}"
+                        val key = preset.getDuplicateKey()
                         seen.add(key) // add() возвращает true если элемент был добавлен (не было дубликата)
                     } else {
                         true
@@ -513,7 +571,7 @@ object PresetListService {
             val seen = mutableSetOf<String>()
             sortedPresets.filter { preset ->
                 if (preset.size.isNotBlank() && preset.dpi.isNotBlank()) {
-                    val key = "${preset.size}|${preset.dpi}"
+                    val key = preset.getDuplicateKey()
                     // Добавляем в seen и возвращаем true только если это первое вхождение
                     seen.add(key) // add() возвращает true если элемент был добавлен (не было дубликата)
                 } else {

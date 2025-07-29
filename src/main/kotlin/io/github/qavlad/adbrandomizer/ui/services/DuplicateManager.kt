@@ -40,7 +40,7 @@ class DuplicateManager {
         
         presets.forEachIndexed { index, preset ->
             if (preset.size.isNotBlank() && preset.dpi.isNotBlank()) {
-                val key = "${preset.size}|${preset.dpi}"
+                val key = preset.getDuplicateKey()
                 if (seen.contains(key)) {
                     duplicateIndices.add(index)
                 } else {
@@ -155,24 +155,7 @@ class DuplicateManager {
         }
         return false
     }
-    
-    /**
-     * Находит глобальные дубликаты во всех списках
-     * @return множество ключей дубликатов
-     */
-    fun findGlobalDuplicateKeys(allPresets: List<Pair<String, DevicePreset>>): Set<String> {
-        val keyCount = mutableMapOf<String, Int>()
-        
-        allPresets.forEach { (_, preset) ->
-            if (preset.size.isNotBlank() && preset.dpi.isNotBlank()) {
-                val key = createPresetKey(preset)
-                keyCount[key] = keyCount.getOrDefault(key, 0) + 1
-            }
-        }
-        
-        return keyCount.filter { it.value > 1 }.keys.toSet()
-    }
-    
+
     /**
      * Находит видимые индексы пресетов (исключая дубликаты)
      */
@@ -197,7 +180,7 @@ class DuplicateManager {
      */
     fun createPresetKey(preset: DevicePreset, index: Int? = null): String {
         return if (preset.size.isNotBlank() && preset.dpi.isNotBlank()) {
-            "${preset.size}|${preset.dpi}"
+            preset.getDuplicateKey()
         } else {
             "unique_${index ?: System.currentTimeMillis()}"
         }

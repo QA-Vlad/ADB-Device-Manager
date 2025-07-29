@@ -101,6 +101,12 @@ class TableFactory {
             override fun changeSelection(rowIndex: Int, columnIndex: Int, toggle: Boolean, extend: Boolean) {
                 println("ADB_DEBUG: changeSelection called - row=$rowIndex, col=$columnIndex")
                 
+                // Всегда обновляем lastInteractedRow для любой валидной строки
+                if (rowIndex >= 0) {
+                    editingCallbacks.onChangeSelection(rowIndex, columnIndex, "")
+                    println("ADB_DEBUG: changeSelection - updated lastInteractedRow to $rowIndex")
+                }
+                
                 // Предотвращаем стандартное выделение если используем кастомную навигацию
                 val currentHoverState = hoverStateProvider()
                 if (currentHoverState.selectedTableRow >= 0 && currentHoverState.selectedTableColumn >= 0) {
@@ -108,14 +114,16 @@ class TableFactory {
                     return
                 }
                 
-                if (rowIndex >= 0 && columnIndex >= 0 && columnIndex in 2..4) {
-                    val oldRow = selectionModel.leadSelectionIndex
-                    val oldColumn = columnModel.selectionModel.leadSelectionIndex
+                if (rowIndex >= 0 && columnIndex >= 0) {
+                    if (columnIndex in 2..4) {
+                        val oldRow = selectionModel.leadSelectionIndex
+                        val oldColumn = columnModel.selectionModel.leadSelectionIndex
 
-                    if (oldRow != rowIndex || oldColumn != columnIndex) {
-                        val oldValue = model.getValueAt(rowIndex, columnIndex) as? String ?: ""
-                        println("ADB_DEBUG: changeSelection - setting editingCellOldValue='$oldValue'")
-                        editingCallbacks.onChangeSelection(rowIndex, columnIndex, oldValue)
+                        if (oldRow != rowIndex || oldColumn != columnIndex) {
+                            val oldValue = model.getValueAt(rowIndex, columnIndex) as? String ?: ""
+                            println("ADB_DEBUG: changeSelection - setting editingCellOldValue='$oldValue'")
+                            editingCallbacks.onChangeSelection(rowIndex, columnIndex, oldValue)
+                        }
                     }
                 }
                 super.changeSelection(rowIndex, columnIndex, toggle, extend)

@@ -521,4 +521,33 @@ object TableSortingService {
             println("ADB_DEBUG:   loaded activeColumn: ${loaded.activeColumn}")
         }
     }
+    
+    /**
+     * Возвращает текущее состояние сортировки для активного режима
+     */
+    fun getCurrentSortState(): SortState? {
+        // Определяем текущий режим
+        val isShowAll = SettingsService.getShowAllPresetsMode()
+        val isHideDuplicates = SettingsService.getHideDuplicatesMode()
+        
+        val state = getSortState(isShowAll, isHideDuplicates)
+        return if (state.activeColumn != null) state else null
+    }
+    
+    /**
+     * Применяет текущую сортировку заново
+     * Используется после операций Undo/Redo для восстановления порядка сортировки
+     */
+    fun reapplyCurrentSort() {
+        println("ADB_DEBUG: TableSortingService.reapplyCurrentSort called")
+        val currentState = getCurrentSortState()
+        if (currentState != null && currentState.activeColumn != null) {
+            println("ADB_DEBUG:   Active column: ${currentState.activeColumn}")
+            println("ADB_DEBUG:   Sort states - label: ${currentState.labelSort}, size: ${currentState.sizeSort}, dpi: ${currentState.dpiSort}")
+            // Сортировка будет применена автоматически при следующей перезагрузке таблицы
+            // через вызов sortPresets или sortPresetsWithLists
+        } else {
+            println("ADB_DEBUG:   No active sort to reapply")
+        }
+    }
 }

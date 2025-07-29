@@ -11,7 +11,6 @@ import javax.swing.SwingUtilities
  * Управляет загрузкой пресетов с учетом различных режимов отображения
  */
 class TableLoader(
-    private val duplicateManager: DuplicateManager,
     private val viewModeManager: ViewModeManager,
     private val presetOrderManager: PresetOrderManager = PresetOrderManager(),
     private val tableSortingService: TableSortingService? = null
@@ -31,11 +30,26 @@ class TableLoader(
         isSwitchingMode: Boolean,
         isSwitchingDuplicatesFilter: Boolean,
         onTableUpdating: (Boolean) -> Unit,
-        onAddButtonRow: () -> Unit
+        onAddButtonRow: () -> Unit,
+        inMemoryOrder: List<String>? = null,
+        initialHiddenDuplicates: Map<String, Set<String>>? = null
     ) {
         println("ADB_DEBUG: TableLoader.loadPresetsIntoTable called")
         println("ADB_DEBUG:   isShowAllMode: $isShowAllMode")
         println("ADB_DEBUG:   currentPresetList: ${currentPresetList?.name}")
+        println("ADB_DEBUG:   tempPresetLists.size: ${tempPresetLists.size}")
+        println("ADB_DEBUG:   tempPresetLists.isEmpty: ${tempPresetLists.isEmpty()}")
+        
+        // Log all tempPresetLists
+        if (tempPresetLists.isEmpty()) {
+            println("ADB_DEBUG:   tempPresetLists is EMPTY!")
+        } else {
+            println("ADB_DEBUG:   tempPresetLists contents:")
+            tempPresetLists.forEach { (listId, list) ->
+                println("ADB_DEBUG:     List '${list.name}' (id: $listId) has ${list.presets.size} presets")
+            }
+        }
+        
         currentPresetList?.let { list ->
             println("ADB_DEBUG:   currentPresetList contents (${list.presets.size} items):")
             list.presets.forEachIndexed { index, preset ->
@@ -47,7 +61,8 @@ class TableLoader(
             onTableUpdating(true)
             
             try {
-                // Очищаем таблицу
+                // Очищаем таблицу и все ID
+                tableModel.clearAllPresetIds()
                 while (tableModel.rowCount > 0) {
                     tableModel.removeRow(0)
                 }
@@ -58,7 +73,9 @@ class TableLoader(
                         tempPresetLists,
                         isHideDuplicatesMode,
                         isFirstLoad,
-                        isSwitchingDuplicatesFilter
+                        isSwitchingDuplicatesFilter,
+                        inMemoryOrder,
+                        initialHiddenDuplicates
                     )
                 } else {
                     loadCurrentListPresets(
@@ -68,7 +85,8 @@ class TableLoader(
                         isFirstLoad,
                         isSwitchingList,
                         isSwitchingMode,
-                        isSwitchingDuplicatesFilter
+                        isSwitchingDuplicatesFilter,
+                        initialHiddenDuplicates
                     )
                 }
                 
@@ -95,15 +113,27 @@ class TableLoader(
         tempPresetLists: Map<String, PresetList>,
         isHideDuplicatesMode: Boolean,
         isFirstLoad: Boolean,
-        isSwitchingDuplicatesFilter: Boolean
+        isSwitchingDuplicatesFilter: Boolean,
+        inMemoryOrder: List<String>? = null,
+        initialHiddenDuplicates: Map<String, Set<String>>? = null
     ) {
         println("ADB_DEBUG: loadPresetsIntoTable - Show all presets mode")
         
-        // Получаем сохраненный порядок
-        val savedOrder = PresetListService.getShowAllPresetsOrder()
+        // Используем порядок из памяти если он есть, иначе из файла
+        val orderToUse = if (!inMemoryOrder.isNullOrEmpty()) {
+            println("ADB_DEBUG: Using in-memory order with ${inMemoryOrder.size} items")
+            inMemoryOrder
+        } else {
+            PresetListService.getShowAllPresetsOrder()
+        }
+        
+        // Собираем все скрытые дубликаты из всех списков
+        val allHiddenDuplicateIds = initialHiddenDuplicates?.values?.flatten()?.toSet()
+        
         val allPresets = viewModeManager.prepareShowAllTableModel(
             tempPresetLists,
-            savedOrder
+            orderToUse,
+            allHiddenDuplicateIds
         )
         
         if (isHideDuplicatesMode) {
@@ -129,7 +159,8 @@ class TableLoader(
         isFirstLoad: Boolean,
         isSwitchingList: Boolean,
         isSwitchingMode: Boolean,
-        isSwitchingDuplicatesFilter: Boolean
+        isSwitchingDuplicatesFilter: Boolean,
+        initialHiddenDuplicates: Map<String, Set<String>>? = null
     ) {
         currentPresetList?.let { list ->
             println("ADB_DEBUG: Loading list: ${list.name}, presets count: ${list.presets.size}")
@@ -141,7 +172,8 @@ class TableLoader(
                     isFirstLoad,
                     isSwitchingList,
                     isSwitchingMode,
-                    isSwitchingDuplicatesFilter
+                    isSwitchingDuplicatesFilter,
+                    initialHiddenDuplicates?.get(list.id)
                 )
             } else {
                 loadCurrentListNormal(tableModel, list)
@@ -180,7 +212,7 @@ class TableLoader(
         var skippedCount = 0
         
         sortedPresets.forEach { (listName, preset) ->
-            val key = "${preset.size}|${preset.dpi}"
+            val key = preset.getDuplicateKey()
             val isEmptyPreset = preset.label.isBlank() && preset.size.isBlank() && preset.dpi.isBlank()
             
             val shouldSkip = when {
@@ -232,7 +264,8 @@ class TableLoader(
         }
         
         println("ADB_DEBUG:   Adding ${sortedPresets.size} rows to table")
-        sortedPresets.forEach { (listName, preset) ->
+        sortedPresets.forEachIndexed { index, (listName, preset) ->
+            println("ADB_DEBUG:   Adding row $index: listName='$listName', preset='${preset.label}'")
             addPresetRow(tableModel, preset, listName)
         }
         println("ADB_DEBUG: loadAllPresetsNormal - done")
@@ -247,7 +280,8 @@ class TableLoader(
         @Suppress("UNUSED_PARAMETER") isFirstLoad: Boolean,
         @Suppress("UNUSED_PARAMETER") isSwitchingList: Boolean,
         @Suppress("UNUSED_PARAMETER") isSwitchingMode: Boolean,
-        @Suppress("UNUSED_PARAMETER") isSwitchingDuplicatesFilter: Boolean
+        @Suppress("UNUSED_PARAMETER") isSwitchingDuplicatesFilter: Boolean,
+        initialHiddenDuplicatesForList: Set<String>? = null
     ) {
         println("ADB_DEBUG: loadCurrentListWithHiddenDuplicates - start")
         
@@ -259,9 +293,96 @@ class TableLoader(
             list.presets
         }
         
-        val duplicateIndices = duplicateManager.findDuplicateIndices(sortedPresets)
+        // Создаем временную копию для позиционирования, не изменяя оригинальный список
+        val listPairs = sortedPresets.map { list.name to it }
+        val processedPairs = mutableListOf<Pair<String, DevicePreset>>()
+        processedPairs.addAll(listPairs)
         
-        sortedPresets.forEachIndexed { index, preset ->
+        // Используем начальные скрытые дубли или вычисляем их
+        val hiddenDuplicatesBeforePositioning = if (initialHiddenDuplicatesForList != null) {
+            println("ADB_DEBUG: Using initial hidden duplicates: ${initialHiddenDuplicatesForList.size} items")
+            initialHiddenDuplicatesForList
+        } else {
+            // Вычисляем, какие пресеты были скрыты как дубли ДО позиционирования
+            val hiddenIds = mutableSetOf<String>()
+            val seenKeysBeforePositioning = mutableSetOf<String>()
+            
+            listPairs.forEach { (_, preset) ->
+                val key = preset.getDuplicateKey()
+                if (seenKeysBeforePositioning.contains(key)) {
+                    hiddenIds.add(preset.id)
+                } else {
+                    seenKeysBeforePositioning.add(key)
+                }
+            }
+            println("ADB_DEBUG: Calculated hidden duplicates: ${hiddenIds.size} items")
+            hiddenIds
+        }
+        
+        // Сохраняем исходный порядок перед позиционированием
+        val originalOrder = processedPairs.map { it.second.id }
+        
+        // Создаем временную копию списка для позиционирования (не изменяем оригинал)
+        val tempList = PresetList(
+            id = list.id,
+            name = list.name,
+            isDefault = list.isDefault
+        ).apply {
+            presets.addAll(list.presets.map { it.copy(id = it.id) })
+        }
+        
+        // Проверяем, активна ли сортировка
+        val isSortingActive = tableSortingService?.getCurrentSortState()?.activeColumn != null
+        
+        // Вызываем handleFormerDuplicatesPositioning с временной копией
+        viewModeManager.handleFormerDuplicatesPositioning(
+            processedPairs,
+            hiddenDuplicatesBeforePositioning,
+            isShowAllMode = false,
+            isSortingActive = isSortingActive
+        )
+        
+        // Проверяем, изменился ли порядок после позиционирования
+        val newOrder = processedPairs.map { it.second.id }
+        val orderChanged = originalOrder != newOrder
+        
+        if (orderChanged) {
+            println("ADB_DEBUG: Order changed after former duplicate positioning in normal mode")
+            
+            // В обычном режиме обновляем порядок в оригинальном списке
+            val newPresets = mutableListOf<DevicePreset>()
+            processedPairs.forEach { (_, preset) ->
+                // Находим оригинальный пресет по ID
+                val originalPreset = list.presets.find { it.id == preset.id }
+                if (originalPreset != null) {
+                    newPresets.add(originalPreset)
+                }
+            }
+            
+            // Заменяем пресеты в списке на новый порядок
+            list.presets.clear()
+            list.presets.addAll(newPresets)
+            
+            // Сохраняем обновленный список в файл
+            println("ADB_DEBUG: Saving list with updated order after former duplicate positioning")
+            PresetListService.savePresetList(list)
+        }
+        
+        // Теперь фильтруем дубликаты после позиционирования
+        val duplicateIndices = mutableSetOf<Int>()
+        val seenKeys = mutableSetOf<String>()
+        
+        processedPairs.forEachIndexed { index, (_, preset) ->
+            val key = preset.getDuplicateKey()
+            if (seenKeys.contains(key)) {
+                duplicateIndices.add(index)
+            } else {
+                seenKeys.add(key)
+            }
+        }
+        
+        // Добавляем только видимые пресеты в таблицу
+        processedPairs.forEachIndexed { index, (_, preset) ->
             if (!duplicateIndices.contains(index)) {
                 addPresetRow(tableModel, preset, null)
             }
@@ -269,6 +390,7 @@ class TableLoader(
         
         println("ADB_DEBUG: Loaded ${tableModel.rowCount} visible presets from ${list.presets.size} total")
     }
+    
     
     /**
      * Загружает пресеты текущего списка в обычном режиме
@@ -323,10 +445,16 @@ class TableLoader(
             else -> tableModel.columnCount > 6              // Normal mode
         }
         val rowData = DevicePresetTableModel.createRowVector(preset, tableModel.rowCount + 1, showCounters)
+        // Закомментированы частые логи
+        // println("ADB_DEBUG: addPresetRow - preset id: ${preset.id}, label: ${preset.label}")
+        // println("ADB_DEBUG: addPresetRow - Initial rowData size: ${rowData.size}, showCounters: $showCounters")
         if (listName != null) {
             rowData.add(listName)
+            // println("ADB_DEBUG: addPresetRow - Added listName '$listName' to rowData. Final rowData size: ${rowData.size}, tableModel.columnCount: ${tableModel.columnCount}")
+            // println("ADB_DEBUG: addPresetRow - rowData contents: ${rowData.joinToString(", ")}")
         }
-        tableModel.addRow(rowData)
+        // Используем новый метод для добавления строки с ID
+        tableModel.addRowWithPresetId(rowData, preset.id)
     }
     
     /**
@@ -337,7 +465,7 @@ class TableLoader(
         
         allPresets.forEach { (_, preset) ->
             if (preset.size.isNotBlank() && preset.dpi.isNotBlank()) {
-                val key = "${preset.size}|${preset.dpi}"
+                val key = preset.getDuplicateKey()
                 keyCount[key] = keyCount.getOrDefault(key, 0) + 1
             }
         }

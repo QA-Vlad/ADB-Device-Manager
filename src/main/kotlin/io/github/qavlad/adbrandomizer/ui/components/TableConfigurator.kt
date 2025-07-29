@@ -58,6 +58,7 @@ class TableConfigurator(
     private val onPresetDeletedFromEditor: (Int) -> Unit,
     private val onDragStarted: () -> Unit = {},
     private val onDragEnded: () -> Unit = {},
+    private val getLastInteractedRow: (() -> Int)? = null,
     private val columnWidthConfig: PluginConfig.UI.ColumnWidthConfig = PluginConfig.UI.ColumnWidthConfig()
 ) {
     
@@ -77,7 +78,8 @@ class TableConfigurator(
                     onRowMoved(fromIndex, toIndex)
                 },
                 onDragStarted = onDragStarted,
-                onDragEnded = onDragEnded
+                onDragEnded = onDragEnded,
+                getLastInteractedRow = getLastInteractedRow
             )
             
             selectionModel.clearSelection()
@@ -377,17 +379,22 @@ private class ButtonEditor(
         button.isContentAreaFilled = false
 
         button.addActionListener {
+            println("ADB_DEBUG: ButtonEditor - Delete button clicked!")
             val modelRow = table.convertRowIndexToModel(table.editingRow)
+            println("ADB_DEBUG: ButtonEditor - editingRow: ${table.editingRow}, modelRow: $modelRow")
             fireEditingStopped()
 
             if (modelRow != -1) {
+                println("ADB_DEBUG: ButtonEditor - Calling onPresetDeletedFromEditor($modelRow)")
                 onPresetDeletedFromEditor(modelRow)
+            } else {
+                println("ADB_DEBUG: ButtonEditor - modelRow is -1, not deleting")
             }
         }
     }
     
     override fun getTableCellEditorComponent(table: JTable, value: Any?, isSelected: Boolean, row: Int, column: Int): Component {
-        // println("ADB_DEBUG: ButtonEditor.getTableCellEditorComponent - row: $row, column: $column")
+        println("ADB_DEBUG: ButtonEditor.getTableCellEditorComponent - row: $row, column: $column")
         // Обновляем состояние кнопки в зависимости от режима
         val showAllMode = isShowAllPresetsMode()
         println("ADB_DEBUG: ButtonEditor - showAllMode: $showAllMode")

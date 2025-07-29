@@ -102,4 +102,14 @@ interface CommandContext {
      * Установить режим Show All
      */
     fun setShowAllMode(enabled: Boolean)
+    
+    /**
+     * Получить сервис сортировки таблицы
+     */
+    fun getTableSortingService(): io.github.qavlad.adbrandomizer.ui.services.TableSortingService?
+    
+    /**
+     * Получить корзину для удалённых пресетов
+     */
+    fun getPresetRecycleBin(): io.github.qavlad.adbrandomizer.ui.services.PresetRecycleBin
 }

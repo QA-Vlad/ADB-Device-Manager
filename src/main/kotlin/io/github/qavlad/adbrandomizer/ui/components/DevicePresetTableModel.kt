@@ -25,12 +25,15 @@ class DevicePresetTableModel : DefaultTableModel {
                 }
                 add("")  // Пустая колонка для кнопки удаления
                 // Колонка List добавляется отдельно в TableLoader для режима Show All
+                // НЕ добавляем ID как видимую колонку - храним его в отдельной структуре
             }
         }
     }
 
     private var isUndoOperation = false
     private val historyManager: CommandHistoryManager
+    // Храним ID пресетов в отдельной структуре вместо видимой колонки
+    private val presetIds = mutableMapOf<Int, String>()
 
     // Конструктор для совместимости с оригинальным SettingsDialog
     constructor(data: Vector<Vector<Any>>, columnNames: Vector<String>, historyManager: CommandHistoryManager) : super(data, columnNames) {
@@ -40,25 +43,44 @@ class DevicePresetTableModel : DefaultTableModel {
 
     override fun isCellEditable(row: Int, column: Int): Boolean {
         // Определяем колонки счетчиков и удаления в зависимости от количества колонок
-        val hasCounters = columnCount > 6
-        val deleteColumnIndex = when {
-            hasCounters && columnCount >= 9 -> 7  // Show All с счетчиками
-            hasCounters && columnCount >= 8 -> 7  // Normal со счетчиками
-            columnCount >= 7 -> 5                  // Show All без счетчиков
-            else -> 5                              // Normal без счетчиков
+        // В Show All режиме: 9 колонок со счетчиками, 7 без счетчиков
+        // В Normal режиме: 8 колонок со счетчиками, 6 без счетчиков
+        val isShowAllMode = columnCount == 9 || columnCount == 7
+        val hasCounters = when {
+            isShowAllMode -> columnCount == 9
+            else -> columnCount == 8
         }
         
-        return when {
+        val deleteColumnIndex = when {
+            hasCounters -> 7                       // Со счетчиками всегда на позиции 7
+            isShowAllMode -> 5                     // Show All без счетчиков на позиции 5
+            else -> 5                              // Normal без счетчиков на позиции 5
+        }
+        
+        val result = when {
             column == 0 || column == 1 -> false    // Drag icon and row number
             hasCounters && (column == 5 || column == 6) -> false  // Size and DPI counters
             column == deleteColumnIndex -> true     // Delete button column should be editable
             column >= deleteColumnIndex -> false    // Columns after delete (like List in Show All)
             else -> true                           // Label, Size, DPI columns
         }
+        
+        // Отладка для колонки удаления
+        if (column == 5 || column == 7) {
+            println("ADB_DEBUG: isCellEditable - row: $row, column: $column, columnCount: $columnCount, isShowAllMode: $isShowAllMode, hasCounters: $hasCounters, deleteColumnIndex: $deleteColumnIndex, result: $result")
+        }
+        
+        return result
     }
 
     override fun setValueAt(aValue: Any?, row: Int, column: Int) {
         val oldValue = getValueAt(row, column)
+        
+        // Захватываем информацию о пресете ДО изменения для истории команд
+        val presetBeforeEdit = if (!isUndoOperation && column in 2..4) {
+            getPresetAt(row)
+        } else null
+        
         super.setValueAt(aValue, row, column)
 
         // Обновляем счетчики при изменении Size или DPI
@@ -86,8 +108,8 @@ class DevicePresetTableModel : DefaultTableModel {
             
             // Записываем в историю только изменения в редактируемых колонках (Label, Size, DPI)
             // Исключаем колонку удаления, так как удаление обрабатывается отдельной командой
-            if (column in 2..4) {
-                historyManager.addCellEdit(row, column, oldValue as? String ?: "", aValue)
+            if (column in 2..4 && presetBeforeEdit != null) {
+                historyManager.addCellEdit(row, column, oldValue as? String ?: "", aValue, presetBeforeEdit)
             }
         }
     }
@@ -119,19 +141,28 @@ class DevicePresetTableModel : DefaultTableModel {
     }
 
     fun getPresets(): List<DevicePreset> {
-        return dataVector.mapNotNull { row ->
+        return dataVector.mapIndexedNotNull { index, row ->
             val rowVector = row as Vector<Any>
             val firstColumn = rowVector.elementAtOrNull(0) as? String ?: ""
 
             // Пропускаем строку с кнопкой
             if (firstColumn == "+") {
-                return@mapNotNull null
+                return@mapIndexedNotNull null
             }
 
+            // Получаем ID из внутренней карты или генерируем новый и сохраняем
+            val id = presetIds[index] ?: run {
+                val newId = UUID.randomUUID().toString()
+                presetIds[index] = newId
+                println("ADB_DEBUG: DevicePresetTableModel.getPresets - Generated new ID for row $index: $newId")
+                newId
+            }
+            
             DevicePreset(
                 label = rowVector.elementAt(2) as? String ?: "",
                 size = rowVector.elementAt(3) as? String ?: "",
-                dpi = rowVector.elementAt(4) as? String ?: ""
+                dpi = rowVector.elementAt(4) as? String ?: "",
+                id = id
             )
         }
     }
@@ -147,10 +178,19 @@ class DevicePresetTableModel : DefaultTableModel {
             return null
         }
 
+        // Получаем ID из внутренней карты или генерируем новый и сохраняем
+        val id = presetIds[row] ?: run {
+            val newId = UUID.randomUUID().toString()
+            presetIds[row] = newId
+            println("ADB_DEBUG: DevicePresetTableModel.getPresetAt - Generated new ID for row $row: $newId")
+            newId
+        }
+        
         return DevicePreset(
             label = rowVector.elementAt(2) as? String ?: "",
             size = rowVector.elementAt(3) as? String ?: "",
-            dpi = rowVector.elementAt(4) as? String ?: ""
+            dpi = rowVector.elementAt(4) as? String ?: "",
+            id = id
         )
     }
 
@@ -183,7 +223,30 @@ class DevicePresetTableModel : DefaultTableModel {
         return duplicatesMap
     }
 
+    /**
+     * Добавляет строку с привязкой ID пресета
+     */
+    fun addRowWithPresetId(rowData: Vector<*>, presetId: String) {
+        val rowIndex = rowCount
+        addRow(rowData)
+        presetIds[rowIndex] = presetId
+        println("ADB_DEBUG: DevicePresetTableModel.addRowWithPresetId - row $rowIndex, presetId: $presetId")
+    }
+    
+    /**
+     * Получает ID пресета по индексу строки
+     */
+    fun getPresetIdAt(row: Int): String? {
+        return presetIds[row]
+    }
+
     override fun addRow(rowData: Vector<*>?) {
+        if (rowData != null) {
+            println("ADB_DEBUG: DevicePresetTableModel.addRow - rowData size: ${rowData.size}, columnCount: $columnCount")
+            if (rowData.size > 6) {
+                println("ADB_DEBUG: DevicePresetTableModel.addRow - last element (should be listName in Show All): '${rowData.last()}'")
+            }
+        }
         super.addRow(rowData)
         // Не обновляем номера строк для строки с кнопкой плюсика
         if (rowData != null && rowData.isNotEmpty() && rowData[0] != "+") {
@@ -193,17 +256,83 @@ class DevicePresetTableModel : DefaultTableModel {
 
     override fun insertRow(row: Int, rowData: Vector<*>?) {
         super.insertRow(row, rowData)
+        // Обновляем карту ID после вставки строки
+        updatePresetIdsAfterInsertion(row)
         updateRowNumbers()
+    }
+    
+    private fun updatePresetIdsAfterInsertion(insertedRow: Int) {
+        val newIds = mutableMapOf<Int, String>()
+        presetIds.forEach { (row, id) ->
+            when {
+                row < insertedRow -> newIds[row] = id
+                row >= insertedRow -> newIds[row + 1] = id
+            }
+        }
+        // Новая строка пока не имеет ID - он будет присвоен при первом обращении
+        presetIds.clear()
+        presetIds.putAll(newIds)
     }
 
     override fun removeRow(row: Int) {
         super.removeRow(row)
+        // Обновляем карту ID после удаления строки
+        updatePresetIdsAfterRemoval(row)
         updateRowNumbers()
+    }
+    
+    /**
+     * Очищает все ID при полной очистке таблицы
+     */
+    fun clearAllPresetIds() {
+        presetIds.clear()
+        println("ADB_DEBUG: DevicePresetTableModel.clearAllPresetIds - Cleared all preset IDs")
     }
 
     override fun moveRow(start: Int, end: Int, to: Int) {
+        // Сохраняем ID перемещаемых строк
+        val movedId = presetIds[start]
+        
         super.moveRow(start, end, to)
+        
+        // Обновляем карту ID после перемещения
+        if (movedId != null) {
+            updatePresetIdsAfterMove(start, to, movedId)
+        }
+        
         updateRowNumbers()
+    }
+    
+    private fun updatePresetIdsAfterRemoval(removedRow: Int) {
+        val newIds = mutableMapOf<Int, String>()
+        presetIds.forEach { (row, id) ->
+            when {
+                row < removedRow -> newIds[row] = id
+                row > removedRow -> newIds[row - 1] = id
+                // row == removedRow is removed, so we skip it
+            }
+        }
+        presetIds.clear()
+        presetIds.putAll(newIds)
+    }
+    
+    private fun updatePresetIdsAfterMove(from: Int, to: Int, movedId: String) {
+        val newIds = mutableMapOf<Int, String>()
+        
+        presetIds.forEach { (row, id) ->
+            when {
+                row == from -> {} // Skip the moved row for now
+                from < to && row > from && row <= to -> newIds[row - 1] = id
+                from > to && row >= to && row < from -> newIds[row + 1] = id
+                else -> newIds[row] = id
+            }
+        }
+        
+        // Place the moved ID at the new position
+        newIds[to] = movedId
+        
+        presetIds.clear()
+        presetIds.putAll(newIds)
     }
 
     fun updateRowNumbers() {

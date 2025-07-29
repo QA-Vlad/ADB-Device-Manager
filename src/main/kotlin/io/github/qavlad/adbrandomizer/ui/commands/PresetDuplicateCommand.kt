@@ -23,7 +23,8 @@ class PresetDuplicateCommand(
         // Добавляем в tempPresetList
         currentPresetList?.let { list ->
             if (duplicateIndex <= list.presets.size) {
-                list.presets.add(duplicateIndex, presetData.copy())
+                // Для дублирования создаем новый пресет с новым ID
+                list.presets.add(duplicateIndex, DevicePreset(presetData.label, presetData.size, presetData.dpi))
                 println("ADB_DEBUG: Duplicated preset to tempPresetList at index $duplicateIndex")
             }
         }

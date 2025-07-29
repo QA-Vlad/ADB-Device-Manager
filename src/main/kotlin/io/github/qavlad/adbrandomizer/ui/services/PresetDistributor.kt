@@ -20,13 +20,19 @@ class PresetDistributor(
         tempPresetLists: MutableMap<String, PresetList>,
         isHideDuplicatesMode: Boolean,
         getListNameAtRow: (Int) -> String?,
-        saveVisiblePresetsSnapshotForAllLists: () -> Unit
+        saveVisiblePresetsSnapshotForAllLists: () -> Unit,
+        isShowAllMode: Boolean = false
     ) {
         println("ADB_DEBUG: Distributing presets to temp lists...")
         println("ADB_DEBUG:   isHideDuplicatesMode: $isHideDuplicatesMode")
+        println("ADB_DEBUG:   isShowAllMode: $isShowAllMode")
         println("ADB_DEBUG:   tableModel row count: ${tableModel.rowCount}")
 
-        if (isHideDuplicatesMode) {
+        if (isShowAllMode) {
+            // В Show all режиме только обновляем содержимое пресетов, но НЕ меняем их порядок
+            println("ADB_DEBUG: Show all mode - preserving original order in each list")
+            updatePresetsContentOnly(tableModel, tempPresetLists, getListNameAtRow, isHideDuplicatesMode)
+        } else if (isHideDuplicatesMode) {
             // Используем специальную логику для режима скрытия дубликатов
             distributeWithHiddenDuplicates(tableModel, tempPresetLists, getListNameAtRow, saveVisiblePresetsSnapshotForAllLists)
         } else {
@@ -36,6 +42,104 @@ class PresetDistributor(
         println("ADB_DEBUG: Distribution finished.")
         tempPresetLists.forEach { (id, list) ->
             println("ADB_DEBUG:   List ${list.name} ($id) now has ${list.presets.size} presets.")
+        }
+    }
+    
+    /**
+     * Обновляет только содержимое пресетов без изменения их порядка (для Show all режима)
+     */
+    private fun updatePresetsContentOnly(
+        tableModel: DevicePresetTableModel,
+        tempPresetLists: MutableMap<String, PresetList>,
+        getListNameAtRow: (Int) -> String?,
+        isHideDuplicatesMode: Boolean
+    ) {
+        // В режиме Show all порядок пресетов в таблице не соответствует порядку в списках
+        // Нужно синхронизировать по содержимому, учитывая что все поля могут быть изменены
+        
+        // Сначала собираем все пресеты из таблицы по спискам
+        val tablePresetsPerList = mutableMapOf<String, MutableList<DevicePreset>>()
+        for (i in 0 until tableModel.rowCount) {
+            val firstColumn = tableModel.getValueAt(i, 0) as? String ?: ""
+            if (firstColumn == "+") continue
+            
+            val listName = getListNameAtRow(i) ?: continue
+            val preset = tableModel.getPresetAt(i) ?: continue
+            
+            tablePresetsPerList.getOrPut(listName) { mutableListOf() }.add(preset)
+        }
+        
+        // Для каждого списка синхронизируем пресеты
+        tempPresetLists.forEach { (_, list) ->
+            val tablePresets = tablePresetsPerList[list.name] ?: emptyList()
+            
+            println("ADB_DEBUG: updatePresetsContentOnly - list: ${list.name}")
+            println("ADB_DEBUG:   original presets count: ${list.presets.size}")
+            println("ADB_DEBUG:   table presets count: ${tablePresets.size}")
+            
+            if (isHideDuplicatesMode) {
+                // В режиме скрытия дубликатов синхронизируем с учетом скрытых элементов
+                syncWithHiddenDuplicates(list, tablePresets)
+            } else {
+                // В обычном Show all режиме обновляем по ID
+                val tablePresetsById = tablePresets.associateBy { it.id }
+                
+                list.presets.forEachIndexed { index, preset ->
+                    tablePresetsById[preset.id]?.let { updatedPreset ->
+                        // Сохраняем тот же ID при копировании
+                        list.presets[index] = updatedPreset.copy(id = preset.id)
+                        println("ADB_DEBUG:   Updated preset by ID: ${updatedPreset.label}|${updatedPreset.size}|${updatedPreset.dpi}")
+                    }
+                }
+                
+                // Добавляем новые пресеты, которых не было в списке
+                val existingIds = list.presets.map { it.id }.toSet()
+                tablePresets.forEach { tablePreset ->
+                    if (tablePreset.id !in existingIds) {
+                        list.presets.add(tablePreset.copy(id = tablePreset.id))
+                        println("ADB_DEBUG:   Added new preset: ${tablePreset.label}|${tablePreset.size}|${tablePreset.dpi}")
+                    }
+                }
+            }
+        }
+    }
+    
+    /**
+     * Синхронизирует список с учетом скрытых дубликатов
+     */
+    private fun syncWithHiddenDuplicates(
+        list: PresetList,
+        tablePresets: List<DevicePreset>
+    ) {
+        // Создаем мапу ID -> пресет для быстрого поиска
+        val tablePresetsById = tablePresets.associateBy { it.getOrGenerateId() }
+        
+        // Определяем видимые пресеты в оригинальном списке
+        val visiblePresets = mutableListOf<DevicePreset>()
+        val seenKeys = mutableSetOf<String>()
+        
+        list.presets.forEach { preset ->
+            val key = if (preset.size.isNotBlank() && preset.dpi.isNotBlank()) {
+                preset.getDuplicateKey()
+            } else {
+                "unique_${preset.id}"
+            }
+            
+            if (!seenKeys.contains(key)) {
+                seenKeys.add(key)
+                visiblePresets.add(preset)
+            }
+        }
+        
+        println("ADB_DEBUG:   Visible presets: ${visiblePresets.size}, table presets: ${tablePresets.size}")
+        
+        // Обновляем пресеты по ID
+        list.presets.forEachIndexed { index, preset ->
+            tablePresetsById[preset.getOrGenerateId()]?.let { updatedPreset ->
+                // Сохраняем тот же ID при копировании
+                list.presets[index] = updatedPreset.copy(id = preset.getOrGenerateId())
+                println("ADB_DEBUG:   Updated preset by ID at index $index: ${updatedPreset.label}|${updatedPreset.size}|${updatedPreset.dpi}")
+            }
         }
     }
     
@@ -64,7 +168,7 @@ class PresetDistributor(
 
             list.presets.forEachIndexed { index, preset ->
                 val key = if (preset.size.isNotBlank() && preset.dpi.isNotBlank()) {
-                    "${preset.size}|${preset.dpi}"
+                    preset.getDuplicateKey()
                 } else {
                     "unique_${listId}_$index"
                 }
@@ -81,7 +185,7 @@ class PresetDistributor(
         // Сохраняем копии оригинальных списков
         val originalLists = mutableMapOf<String, List<DevicePreset>>()
         tempPresetLists.forEach { (_, list) ->
-            originalLists[list.name] = list.presets.map { it.copy() }
+            originalLists[list.name] = list.presets.map { it.copy(id = it.id) }
         }
 
         // Собираем обновленные данные из таблицы по спискам
@@ -173,13 +277,13 @@ class PresetDistributor(
             when {
                 // Element exists in table - use updated version
                 tablePresetsMap.containsKey(presetKey) -> {
-                    newPresets.add(tablePresetsMap[presetKey]!!.copy())
+                    newPresets.add(tablePresetsMap[presetKey]!!.copy(id = tablePresetsMap[presetKey]!!.id))
                     processedTableKeys.add(presetKey)
                     println("ADB_DEBUG:   Preserved visible element: $presetKey")
                 }
                 // Element was hidden (not in visible snapshot) - preserve it
                 !visibleSnapshot.contains(presetKey) -> {
-                    newPresets.add(preset.copy())
+                    newPresets.add(preset.copy(id = preset.id))
                     println("ADB_DEBUG:   Preserved hidden element: $presetKey")
                 }
                 // Element was visible but now deleted - check if hidden duplicate should be revealed
@@ -188,13 +292,13 @@ class PresetDistributor(
                     val isEmptyPreset = preset.label.isBlank() && preset.size.isBlank() && preset.dpi.isBlank()
                     if (isEmptyPreset) {
                         // Empty presets should be preserved as they're unique and don't have duplicates
-                        newPresets.add(preset.copy())
+                        newPresets.add(preset.copy(id = preset.id))
                         println("ADB_DEBUG:   Preserved empty preset: $presetKey")
                     } else {
                         println("ADB_DEBUG:   Element deleted from table: $presetKey")
                         // Check if there's a hidden duplicate that should be revealed
                         val presetCombination = if (preset.size.isNotBlank() && preset.dpi.isNotBlank()) {
-                            "${preset.size}|${preset.dpi}"
+                            preset.getDuplicateKey()
                         } else null
 
                         if (presetCombination != null) {
@@ -202,7 +306,7 @@ class PresetDistributor(
                         val hiddenDuplicate = list.presets.find { p ->
                             val pKey = "${p.label}|${p.size}|${p.dpi}"
                             p.size.isNotBlank() && p.dpi.isNotBlank() &&
-                                "${p.size}|${p.dpi}" == presetCombination &&
+                                p.getDuplicateKey() == presetCombination &&
                                 !visibleSnapshot.contains(pKey) &&
                                 !newPresets.any { np ->
                                     "${np.label}|${np.size}|${np.dpi}" == pKey
@@ -224,7 +328,7 @@ class PresetDistributor(
         updatedPresets.forEach { preset ->
             val key = "${preset.label}|${preset.size}|${preset.dpi}"
             if (!processedTableKeys.contains(key)) {
-                newPresets.add(preset.copy())
+                newPresets.add(preset.copy(id = preset.id))
                 println("ADB_DEBUG:   Added new element: $key")
             }
         }
@@ -245,7 +349,7 @@ class PresetDistributor(
         println("ADB_DEBUG:   Handling update/add case")
 
         // Build a complete picture of what the list should contain
-        val originalPresets = list.presets.map { it.copy() }
+        val originalPresets = list.presets.map { it.copy(id = it.id) }
         val newListContent = mutableListOf<DevicePreset>()
         
         // Create a map of visible snapshot keys to their positions
@@ -270,8 +374,8 @@ class PresetDistributor(
                         
                         if (tableKey != originalKey) {
                             // Check if this is a duplicate situation where table shows a different duplicate
-                            val originalSizeDpi = "${originalPreset.size}|${originalPreset.dpi}"
-                            val tableSizeDpi = "${tablePreset.size}|${tablePreset.dpi}"
+                            val originalSizeDpi = originalPreset.getDuplicateKey()
+                            val tableSizeDpi = tablePreset.getDuplicateKey()
                             
                             if (originalSizeDpi == tableSizeDpi && originalPreset.size.isNotBlank() && originalPreset.dpi.isNotBlank()) {
                                 // This is a duplicate - the table is showing a different duplicate than snapshot expected
@@ -281,12 +385,12 @@ class PresetDistributor(
                             } else {
                                 // This preset was actually edited
                                 println("ADB_DEBUG:   Preset edited at position $snapshotPos: $originalKey -> $tableKey")
-                                newListContent.add(tablePreset.copy())
+                                newListContent.add(tablePreset.copy(id = tablePreset.id))
                             }
                         } else {
                             // Exact match - use the table version
                             println("ADB_DEBUG:   Exact match for visible preset: $originalKey")
-                            newListContent.add(tablePreset.copy())
+                            newListContent.add(tablePreset.copy(id = tablePreset.id))
                         }
                     } else {
                         // Snapshot position out of bounds - keep original
@@ -315,7 +419,7 @@ class PresetDistributor(
             
             if (isNew) {
                 println("ADB_DEBUG:   Adding new preset from table: $tableKey")
-                newListContent.add(tablePreset.copy())
+                newListContent.add(tablePreset.copy(id = tablePreset.id))
             }
         }
         
@@ -353,7 +457,7 @@ class PresetDistributor(
             val preset = tableModel.getPresetAt(i) ?: continue
 
             val presetKey = "${preset.label}|${preset.size}|${preset.dpi}"
-            updatedPresetsPerList.getOrPut(listName) { mutableMapOf() }[presetKey] = preset.copy()
+            updatedPresetsPerList.getOrPut(listName) { mutableMapOf() }[presetKey] = preset.copy(id = preset.id)
         }
 
         // Обновляем списки, сохраняя оригинальный порядок

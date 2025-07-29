@@ -11,16 +11,34 @@ import javax.swing.table.DefaultTableModel
 class PresetTransferHandler(
     private val onRowMoved: ((Int, Int) -> Unit)? = null,
     private val onDragStarted: (() -> Unit)? = null,
-    private val onDragEnded: (() -> Unit)? = null
+    private val onDragEnded: (() -> Unit)? = null,
+    private val getLastInteractedRow: (() -> Int)? = null
 ) : TransferHandler() {
     override fun getSourceActions(c: JComponent?) = MOVE
 
     override fun createTransferable(c: JComponent?): Transferable? {
         val table = c as? JTable ?: return null
-        val selectedRow = table.selectedRow
+        var selectedRow = table.selectedRow
+        
+        // Приоритетно используем lastInteractedRow если он доступен и валиден
+        if (getLastInteractedRow != null) {
+            val lastRow = getLastInteractedRow.invoke()
+            if (lastRow >= 0 && lastRow < table.rowCount) {
+                selectedRow = lastRow
+                println("ADB_DEBUG: PresetTransferHandler.createTransferable - using lastInteractedRow: $selectedRow (table.selectedRow was ${table.selectedRow})")
+            }
+        }
+        
+        // Если lastInteractedRow недоступен или невалиден, используем selectedRow
+        if (selectedRow < 0) {
+            println("ADB_DEBUG: PresetTransferHandler.createTransferable - no valid row to drag")
+            return null
+        }
+        
+        println("ADB_DEBUG: PresetTransferHandler.createTransferable - selectedRow: $selectedRow, rowCount: ${table.rowCount}")
         
         // Проверяем, что это не строка с кнопкой
-        if (selectedRow >= 0 && selectedRow < table.rowCount) {
+        if (selectedRow < table.rowCount) {
             val firstColumnValue = table.getValueAt(selectedRow, 0)
             if (firstColumnValue == "+") {
                 return null // Не позволяем перетаскивать строку с кнопкой
@@ -49,7 +67,8 @@ class PresetTransferHandler(
             if (table != null && dropLocation != null) {
                 val targetRow = dropLocation.row
                 
-                println("ADB_DEBUG: canImport - targetRow: $targetRow, rowCount: ${table.rowCount}")
+                // Закомментирован частый лог
+                // println("ADB_DEBUG: canImport - targetRow: $targetRow, rowCount: ${table.rowCount}")
                 
                 // Проверяем, есть ли строка с плюсиком
                 val lastRow = table.rowCount - 1
@@ -59,7 +78,7 @@ class PresetTransferHandler(
                         // В режиме INSERT_ROWS targetRow может быть равен rowCount (вставка после последней строки)
                         // Разрешаем drop только если targetRow < lastRow (перед строкой с плюсиком)
                         if (targetRow > lastRow) {
-                            println("ADB_DEBUG: canImport - false, targetRow > lastRow with + button")
+                            // println("ADB_DEBUG: canImport - false, targetRow > lastRow with + button")
                             return false
                         }
                     }
@@ -69,7 +88,8 @@ class PresetTransferHandler(
             support.setShowDropLocation(true)
         }
 
-        println("ADB_DEBUG: canImport - returning $canImport")
+        // Закомментирован частый лог
+        // println("ADB_DEBUG: canImport - returning $canImport")
         return canImport
     }
 

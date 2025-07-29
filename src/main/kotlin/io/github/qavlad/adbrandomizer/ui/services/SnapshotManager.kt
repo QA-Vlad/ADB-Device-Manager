@@ -79,7 +79,7 @@ class SnapshotManager(
                 isDefault = list.isDefault
             ).apply {
                 list.presets.forEach { preset ->
-                    presets.add(preset.copy())
+                    presets.add(preset.copy(id = preset.id))
                 }
             }
         }
@@ -103,7 +103,7 @@ class SnapshotManager(
                 isDefault = snapshotList.isDefault
             ).apply {
                 snapshotList.presets.forEach { preset ->
-                    presets.add(preset.copy())
+                    presets.add(preset.copy(id = preset.id))
                 }
             }
         }

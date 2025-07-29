@@ -42,8 +42,8 @@ object PresetApplicationService {
                 }
                 
                 // Отслеживаем какой пресет был применен (сохраняем полную копию текущего состояния пресета)
-                val appliedSizePreset = if (setSize) preset.copy() else null
-                val appliedDpiPreset = if (setDpi) preset.copy() else null
+                val appliedSizePreset = if (setSize) preset.copy(id = preset.id) else null
+                val appliedDpiPreset = if (setDpi) preset.copy(id = preset.id) else null
                 
                 DeviceStateService.setLastAppliedPresets(appliedSizePreset, appliedDpiPreset)
                 

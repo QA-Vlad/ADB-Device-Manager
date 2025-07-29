@@ -18,7 +18,7 @@ data class PresetList(
         return PresetList(
             id = UUID.randomUUID().toString(),
             name = newName,
-            presets = presets.map { it.copy() }.toMutableList(),
+            presets = presets.map { it.copy(id = it.id) }.toMutableList(),
             isDefault = false
         )
     }

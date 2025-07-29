@@ -113,6 +113,17 @@ class EventHandlersInitializer(
             controller.saveVisiblePresetsSnapshotForAllLists()
         }
         
+        // Сохраняем текущий порядок перед переключением режима
+        if (controller.isTableInitialized() && dialogState.isShowAllPresetsMode() && !showAll) {
+            // Переключаемся из Show All в обычный режим - сохраняем порядок Show All
+            controller.saveCurrentShowAllOrderFromTable()
+        }
+        
+        // В обычном режиме порядок уже сохранён при инициализации диалога
+        if (controller.isTableInitialized() && !dialogState.isShowAllPresetsMode() && showAll) {
+            println("ADB_DEBUG: Switching from normal to Show All mode - normal order already saved during initialization")
+        }
+        
         dialogState.withModeSwitching {
             dialogState.withTableUpdate {
                 dialogState.setShowAllPresetsMode(showAll)
@@ -128,12 +139,7 @@ class EventHandlersInitializer(
         if (!showAll) {
             println("ADB_DEBUG: Clearing snapshot when exiting Show all mode")
             duplicateManager.clearSnapshots()
-            
-            // Сохраняем порядок для текущего списка после выхода из режима Show All
-            controller.getCurrentPresetList()?.let { list ->
-                controller.getPresetOrderManager().saveNormalModeOrder(list.id, list.presets)
-                println("ADB_DEBUG: Saved order for list ${list.name} after exiting Show All mode")
-            }
+            // Не сохраняем порядок при выходе из Show All - используем сохранённый при инициализации
         }
     }
     
@@ -155,8 +161,22 @@ class EventHandlersInitializer(
         println("ADB_DEBUG: onHideDuplicatesChanged called with: $hideDuplicates")
         controller.stopTableEditing()
         
+        // Сохраняем текущий порядок таблицы в памяти перед переключением режима
+        // НО НЕ при первой загрузке, так как порядок ещё не был восстановлен из сохранённого
+        if (controller.isTableInitialized() && dialogState.isShowAllPresetsMode() && !dialogState.isFirstLoad()) {
+            println("ADB_DEBUG: Saving current table order to memory before toggling Hide Duplicates")
+            controller.saveCurrentTableOrderToMemory()
+        }
+        
+        // ПЕРЕД включением фильтра дублей сохраняем снимок того, какие дубли будут скрыты
+        if (hideDuplicates && !dialogState.isFirstLoad()) {
+            println("ADB_DEBUG: Saving snapshot BEFORE enabling hide duplicates")
+            controller.saveVisiblePresetsSnapshotForAllLists()
+        }
+        
         // Синхронизируем состояние таблицы только при ВКЛЮЧЕНИИ фильтра дубликатов
-        if (controller.isTableInitialized() && !dialogState.isFirstLoad() && hideDuplicates) {
+        // НО не в режиме Show All, так как это может привести к потере данных
+        if (controller.isTableInitialized() && !dialogState.isFirstLoad() && hideDuplicates && !dialogState.isShowAllPresetsMode()) {
             onSyncTableChanges()
         }
         
@@ -170,12 +190,6 @@ class EventHandlersInitializer(
         }
         
         dialogState.setHideDuplicatesMode(hideDuplicates)
-        
-        // После включения фильтра дублей сохраняем снимок для всех списков
-        if (hideDuplicates && !dialogState.isFirstLoad()) {
-            println("ADB_DEBUG: Saving snapshot after enabling hide duplicates")
-            controller.saveVisiblePresetsSnapshotForAllLists()
-        }
         
         // Проверяем, что таблица инициализирована и не идет процесс дублирования
         if (controller.isTableInitialized() && !controller.isDuplicatingPreset()) {

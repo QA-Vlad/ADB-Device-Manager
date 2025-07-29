@@ -91,15 +91,22 @@ class ValidationRenderer(
         val component = super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column)
         
         // Особая обработка для колонки "List" - определяем правильный индекс
-        val hasCounters = table.columnCount > 7  // Если больше 7 колонок, значит есть счетчики
-        val listColumnIndex = if (hasCounters) 8 else 6  // List - последняя колонка в режиме Show All
+        // В режиме Show All: 9 колонок со счетчиками, 7 без счетчиков
+        // В режиме Normal: 8 колонок со счетчиками, 6 без счетчиков
+        val isShowAllMode = table.columnCount == 9 || table.columnCount == 7  // Точное определение режима Show All
+        when {
+            isShowAllMode -> table.columnCount == 9
+            else -> table.columnCount == 8
+        }
         
-        // Проверяем, что это действительно режим Show All (есть колонка List)
-        val isShowAllMode = table.columnCount >= 7  // Минимум 7 колонок в Show All без счетчиков
+        // List всегда последняя колонка в режиме Show All
+        val listColumnIndex = table.columnCount - 1
         
         if (isShowAllMode && column == listColumnIndex) {
             // Создаем специальный компонент с вертикальной линией
-            val listComponent = ListColumnComponent(value as? String ?: "")
+            val listName = value as? String ?: ""
+            // println("ADB_DEBUG: ValidationRenderer - List column at row $row, column $column, value='$listName'")
+            val listComponent = ListColumnComponent(listName)
             listComponent.background = cellBackground
             return listComponent
         } else {

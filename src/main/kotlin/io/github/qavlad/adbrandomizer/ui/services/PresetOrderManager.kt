@@ -10,37 +10,14 @@ import io.github.qavlad.adbrandomizer.services.SettingsService
  * Обеспечивает независимое сохранение порядка для режимов Show All и обычного режима.
  */
 class PresetOrderManager {
+    // Храним исходный порядок из файлов для каждого списка
+    private val originalFileOrder = mutableMapOf<String, List<String>>()
     
     companion object {
         private const val NORMAL_MODE_ORDER_PREFIX = "NORMAL_MODE_ORDER_"
         private const val SHOW_ALL_HIDE_DUPLICATES_ORDER = "SHOW_ALL_HIDE_DUPLICATES_ORDER"
         private const val SHOW_ALL_FIXED_ORDER = "SHOW_ALL_FIXED_ORDER"
-        
-        /**
-         * Генерирует ключи для пресетов с учетом дубликатов
-         */
-        fun generatePresetKeys(listName: String, presets: List<DevicePreset>): List<String> {
-            // Группируем пресеты по ключу для определения дубликатов
-            val presetGroups = mutableMapOf<String, MutableList<DevicePreset>>()
-            presets.forEach { preset ->
-                val key = "${preset.label}::${preset.size}::${preset.dpi}"
-                presetGroups.getOrPut(key) { mutableListOf() }.add(preset)
-            }
-            
-            // Генерируем ключи с индексами для дубликатов
-            return presets.map { preset ->
-                val key = "${preset.label}::${preset.size}::${preset.dpi}"
-                val group = presetGroups[key] ?: listOf()
-                if (group.size > 1) {
-                    // Есть дубликаты - добавляем индекс
-                    val indexInGroup = group.indexOf(preset)
-                    "${listName}::${preset.label}::${preset.size}::${preset.dpi}::$indexInGroup"
-                } else {
-                    // Нет дубликатов - используем обычный формат
-                    "${listName}::${preset.label}::${preset.size}::${preset.dpi}"
-                }
-            }
-        }
+
     }
     
     /**
@@ -56,35 +33,91 @@ class PresetOrderManager {
         }
         SettingsService.setStringList(key, order)
     }
+    
+    /**
+     * Мигрирует существующий порядок, добавляя недостающие элементы
+     */
+    fun migrateNormalModeOrder(listId: String, currentPresets: List<DevicePreset>): List<String>? {
+        val savedOrder = getNormalModeOrder(listId) ?: return null
+        
+        // Если сохранённый порядок уже содержит все элементы, возвращаем его
+        if (savedOrder.size >= currentPresets.size) {
+            return savedOrder
+        }
+        
+        println("ADB_DEBUG: PresetOrderManager.migrateNormalModeOrder - migrating order for list $listId")
+        println("ADB_DEBUG:   Saved order size: ${savedOrder.size}, current presets size: ${currentPresets.size}")
+        
+        // Создаём множество сохранённых ключей для быстрого поиска
+        val savedKeys = savedOrder.toSet()
+        
+        // Создаём новый порядок, добавляя недостающие элементы
+        val migratedOrder = savedOrder.toMutableList()
+        
+        // Ищем дубликаты для каждого элемента в сохранённом порядке
+        val duplicateGroups = mutableMapOf<String, MutableList<String>>()
+        currentPresets.forEach { preset ->
+            val key = "${preset.label}|${preset.size}|${preset.dpi}"
+            val duplicateKey = preset.getDuplicateKey()
+            duplicateGroups.getOrPut(duplicateKey) { mutableListOf() }.add(key)
+        }
+        
+        // Для каждого элемента в текущих пресетах
+        currentPresets.forEach { preset ->
+            val key = "${preset.label}|${preset.size}|${preset.dpi}"
+            
+            // Если элемент не в сохранённом порядке
+            if (key !in savedKeys && key !in migratedOrder) {
+                val duplicateKey = preset.getDuplicateKey()
+                val duplicates = duplicateGroups[duplicateKey] ?: listOf()
+                
+                // Ищем позицию для вставки - после последнего дубликата в миграционном порядке
+                var insertPosition = migratedOrder.size
+                for (i in migratedOrder.indices.reversed()) {
+                    if (migratedOrder[i] in duplicates) {
+                        insertPosition = i + 1
+                        break
+                    }
+                }
+                
+                migratedOrder.add(insertPosition, key)
+                println("ADB_DEBUG:   Added missing preset '$key' at position $insertPosition (after duplicate at ${insertPosition - 1})")
+            }
+        }
+        
+        // Сохраняем мигрированный порядок
+        saveNormalModeOrder(listId, currentPresets.filter { preset ->
+            val key = "${preset.label}|${preset.size}|${preset.dpi}"
+            key in migratedOrder
+        })
+        
+        return migratedOrder
+    }
+    
+    /**
+     * Получает сохранённый порядок для обычного режима
+     */
+    fun getNormalModeOrder(listId: String): List<String>? {
+        val key = "$NORMAL_MODE_ORDER_PREFIX$listId"
+        val order = SettingsService.getStringList(key)
+        return order.ifEmpty { null }
+    }
 
     /**
      * Сохраняет порядок для режима Show All (без скрытия дубликатов)
      */
     fun saveShowAllModeOrder(allPresets: List<Pair<String, DevicePreset>>) {
-        // Группируем пресеты по списку и ключу для определения дубликатов
-        val listGroups = allPresets.groupBy { it.first }
-        val order = mutableListOf<String>()
+        // Используем ID пресетов для сохранения порядка
+        val order = allPresets.map { (listName, preset) ->
+            "${listName}::${preset.id}"
+        }
         
-        listGroups.forEach { (listName, presetsInList) ->
-            val presetGroups = mutableMapOf<String, MutableList<Int>>()
-            presetsInList.forEachIndexed { index, (_, preset) ->
-                val key = "${preset.label}::${preset.size}::${preset.dpi}"
-                presetGroups.getOrPut(key) { mutableListOf() }.add(index)
-            }
-            
-            presetsInList.forEachIndexed { index, (_, preset) ->
-                val key = "${preset.label}::${preset.size}::${preset.dpi}"
-                val group = presetGroups[key] ?: listOf()
-                
-                if (group.size > 1) {
-                    // Есть дубликаты - добавляем индекс
-                    val indexInGroup = group.indexOf(index)
-                    order.add("${listName}::${preset.label}::${preset.size}::${preset.dpi}::$indexInGroup")
-                } else {
-                    // Нет дубликатов - используем обычный формат
-                    order.add("${listName}::${preset.label}::${preset.size}::${preset.dpi}")
-                }
-            }
+        println("ADB_DEBUG: PresetOrderManager.saveShowAllModeOrder - saving ${order.size} items:")
+        order.take(5).forEachIndexed { index, key ->
+            println("ADB_DEBUG:   [$index] $key")
+        }
+        if (order.size > 5) {
+            println("ADB_DEBUG:   ... and ${order.size - 5} more items")
         }
         
         PresetListService.saveShowAllPresetsOrder(order)
@@ -94,7 +127,7 @@ class PresetOrderManager {
      * Сохраняет порядок для режима Show All со скрытыми дубликатами
      */
     fun saveShowAllHideDuplicatesOrder(visiblePresets: List<Pair<String, DevicePreset>>) {
-        val order = visiblePresets.map { "${it.first}::${it.second.label}::${it.second.size}::${it.second.dpi}" }
+        val order = visiblePresets.map { "${it.first}::${it.second.id}" }
         SettingsService.setStringList(SHOW_ALL_HIDE_DUPLICATES_ORDER, order)
     }
     
@@ -112,7 +145,7 @@ class PresetOrderManager {
     fun hasFixedShowAllOrder(): Boolean {
         return SettingsService.getStringList(SHOW_ALL_FIXED_ORDER).isNotEmpty()
     }
-    
+
     /**
      * Фиксирует текущий порядок пресетов для режима Show All
      * Это делается один раз при первом формировании Show All
@@ -124,7 +157,10 @@ class PresetOrderManager {
         
         val fixedOrder = mutableListOf<String>()
         tempLists.values.forEach { list ->
-            fixedOrder.addAll(generatePresetKeys(list.name, list.presets))
+            // Используем ID для фиксации порядка
+            list.presets.forEach { preset ->
+                fixedOrder.add("${list.name}::${preset.id}")
+            }
         }
         
         SettingsService.setStringList(SHOW_ALL_FIXED_ORDER, fixedOrder)
@@ -142,7 +178,7 @@ class PresetOrderManager {
      */
     fun removeFromFixedOrder(listName: String, preset: DevicePreset) {
         val fixedOrder = getFixedShowAllOrder().toMutableList()
-        val keyToRemove = "${listName}::${preset.label}::${preset.size}::${preset.dpi}"
+        val keyToRemove = "${listName}::${preset.id}"
         fixedOrder.remove(keyToRemove)
         SettingsService.setStringList(SHOW_ALL_FIXED_ORDER, fixedOrder)
     }
@@ -152,7 +188,7 @@ class PresetOrderManager {
      */
     fun addToFixedOrder(listName: String, preset: DevicePreset, afterPreset: DevicePreset?) {
         val fixedOrder = getFixedShowAllOrder().toMutableList()
-        val newKey = "${listName}::${preset.label}::${preset.size}::${preset.dpi}"
+        val newKey = "${listName}::${preset.id}"
         
         // Проверяем, нет ли уже такого ключа в списке
         if (fixedOrder.contains(newKey)) {
@@ -162,7 +198,7 @@ class PresetOrderManager {
         
         if (afterPreset != null) {
             // Ищем позицию пресета, после которого нужно вставить новый
-            val afterKey = "${listName}::${afterPreset.label}::${afterPreset.size}::${afterPreset.dpi}"
+            val afterKey = "${listName}::${afterPreset.id}"
             val index = fixedOrder.indexOf(afterKey)
             if (index >= 0) {
                 fixedOrder.add(index + 1, newKey)
@@ -187,17 +223,37 @@ class PresetOrderManager {
      * Обновляет фиксированный порядок для режима Show All после drag & drop
      */
     fun updateFixedShowAllOrder(allPresets: List<Pair<String, DevicePreset>>) {
-        // Группируем пресеты по списку
-        val listGroups = allPresets.groupBy { it.first }
-        val fixedOrder = mutableListOf<String>()
-        
-        listGroups.forEach { (listName, presetsInList) ->
-            val presets = presetsInList.map { it.second }
-            fixedOrder.addAll(generatePresetKeys(listName, presets))
+        // Используем ID для обновления фиксированного порядка
+        val fixedOrder = allPresets.map { (listName, preset) ->
+            "${listName}::${preset.id}"
         }
         
         SettingsService.setStringList(SHOW_ALL_FIXED_ORDER, fixedOrder)
         println("ADB_DEBUG: PresetOrderManager.updateFixedShowAllOrder - updated fixed order with ${fixedOrder.size} items")
+    }
+
+    /**
+     * Сохраняет исходный порядок пресетов из файла для списка
+     */
+    fun saveOriginalFileOrder(listId: String, presets: List<DevicePreset>) {
+        val order = presets.map { "${it.label}|${it.size}|${it.dpi}" }
+        originalFileOrder[listId] = order
+        println("ADB_DEBUG: PresetOrderManager.saveOriginalFileOrder - saved original order for listId: $listId, size: ${order.size}")
+    }
+    
+    /**
+     * Получает исходный порядок пресетов из файла для списка
+     */
+    fun getOriginalFileOrder(listId: String): List<String>? {
+        return originalFileOrder[listId]
+    }
+    
+    /**
+     * Очищает все исходные порядки (при закрытии диалога)
+     */
+    fun clearOriginalFileOrders() {
+        originalFileOrder.clear()
+        println("ADB_DEBUG: PresetOrderManager.clearOriginalFileOrders - cleared all original file orders")
     }
 
 }

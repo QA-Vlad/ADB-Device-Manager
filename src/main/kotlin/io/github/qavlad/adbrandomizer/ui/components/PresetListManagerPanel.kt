@@ -32,7 +32,7 @@ class PresetListManagerPanel(
     private val listComboBox = ComboBox<PresetListItem>()
     private val showAllPresetsCheckbox = JBCheckBox("Show all presets", false)
     private val hideDuplicatesCheckbox = JBCheckBox("Hide duplicates", false)
-    private val showCountersCheckbox = JBCheckBox("Show usage counters", true)
+    private val showCountersCheckbox = JBCheckBox("Show usage counters", false)
     
     private var isUpdatingComboBox = false
     
@@ -400,6 +400,15 @@ class PresetListManagerPanel(
             hideDuplicatesCheckbox.isSelected = enabled
             // Явно вызываем обработчик, так как программное изменение может не вызвать ItemListener
             onHideDuplicatesChanged(enabled)
+        }
+    }
+    
+    /**
+     * Устанавливает состояние чекбокса "Show usage counters"
+     */
+    fun setShowCounters(enabled: Boolean) {
+        if (showCountersCheckbox.isSelected != enabled) {
+            showCountersCheckbox.isSelected = enabled
         }
     }
     

@@ -167,4 +167,14 @@ object ValidationUtils {
             null
         }
     }
+    
+    /**
+     * Нормализует размер экрана для корректного сравнения
+     * Заменяет все валидные разделители (x, X, х, Х) на стандартный 'x'
+     * @param size строка размера экрана
+     * @return нормализованная строка размера
+     */
+    fun normalizeScreenSize(size: String): String {
+        return size.replace(Regex("[xXхХ]"), "x")
+    }
 }

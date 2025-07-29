@@ -36,6 +36,11 @@ class TempListsManager {
      * Очистить все временные списки
      */
     fun clear() {
+        println("ADB_DEBUG: TempListsManager.clear() called!")
+        println("ADB_DEBUG:   Stack trace:")
+        Thread.currentThread().stackTrace.take(10).forEach { element ->
+            println("ADB_DEBUG:     at $element")
+        }
         tempPresetLists.clear()
     }
 

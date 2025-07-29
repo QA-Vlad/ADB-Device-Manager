@@ -191,11 +191,8 @@ class PresetOperationsService(
      * Получает пресет из строки таблицы
      */
     private fun getPresetFromRow(tableModel: DevicePresetTableModel, row: Int): DevicePreset {
-        return DevicePreset(
-            label = tableModel.getValueAt(row, 2) as? String ?: "",
-            size = tableModel.getValueAt(row, 3) as? String ?: "",
-            dpi = tableModel.getValueAt(row, 4) as? String ?: ""
-        )
+        // Используем метод getPresetAt для получения пресета с ID
+        return tableModel.getPresetAt(row) ?: DevicePreset("", "", "")
     }
     
     /**

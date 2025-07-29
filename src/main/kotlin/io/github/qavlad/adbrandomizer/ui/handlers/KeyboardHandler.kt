@@ -212,10 +212,17 @@ class KeyboardHandler(
                                     println("ADB_DEBUG: Starting edit due to key press")
                                     val row = hoverState().selectedTableRow
                                     val column = hoverState().selectedTableColumn
-                                    if (row >= 0 && column >= 0) {
+                                    if (row >= 0 && column >= 0 && table.isCellEditable(row, column)) {
                                         val oldValue = tableModel.getValueAt(row, column) as? String ?: ""
                                         setEditingCellData(oldValue, row, column)
                                         println("ADB_DEBUG: EDITING WILL START via keyPress - row=$row, column=$column, oldValue='$oldValue'")
+                                        
+                                        // Важно: НЕ используем invokeLater, чтобы текущее событие клавиши
+                                        // было доступно в ClearOnTypeCellEditor через EventQueue.getCurrentEvent()
+                                        table.editCellAt(row, column)
+                                        table.editorComponent?.requestFocus()
+                                        
+                                        // НЕ вызываем e.consume(), чтобы символ был обработан редактором
                                     }
                                 } else {
                                     println("ADB_DEBUG: Key ${e.keyCode} will not start editing")

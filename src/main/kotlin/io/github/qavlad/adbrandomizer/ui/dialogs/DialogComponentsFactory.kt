@@ -3,6 +3,7 @@ package io.github.qavlad.adbrandomizer.ui.dialogs
 import com.intellij.ui.table.JBTable
 import io.github.qavlad.adbrandomizer.ui.components.*
 import javax.swing.Timer
+import javax.swing.SwingUtilities
 import javax.swing.event.TableModelListener
 
 /**
@@ -27,9 +28,10 @@ class DialogComponentsFactory {
         model: DevicePresetTableModel,
         hoverStateProvider: () -> HoverState,
         dialogState: DialogStateManager,
-        historyManager: CommandHistoryManager
+        historyManager: CommandHistoryManager,
+        onLastInteractedRowUpdate: ((Int) -> Unit)? = null
     ): JBTable {
-        val editingCallbacks = createEditingCallbacks(dialogState, historyManager)
+        val editingCallbacks = createEditingCallbacks(dialogState, historyManager, onLastInteractedRowUpdate)
         return tableFactory.createTable(model, hoverStateProvider, editingCallbacks)
     }
     
@@ -42,14 +44,16 @@ class DialogComponentsFactory {
         historyManager: CommandHistoryManager,
         onValidateFields: () -> Unit,
         onSyncTableChanges: () -> Unit,
-        onTableRepaint: () -> Unit
+        onTableRepaint: () -> Unit,
+        controller: SettingsDialogController? = null
     ): TableModelListenerWithTimer {
         return TableModelListenerWithTimer(
             dialogState = dialogState,
             historyManager = historyManager,
             onValidateFields = onValidateFields,
             onSyncTableChanges = onSyncTableChanges,
-            onTableRepaint = onTableRepaint
+            onTableRepaint = onTableRepaint,
+            controller = controller
         )
     }
     
@@ -58,11 +62,14 @@ class DialogComponentsFactory {
      */
     private fun createEditingCallbacks(
         dialogState: DialogStateManager,
-        historyManager: CommandHistoryManager
+        historyManager: CommandHistoryManager,
+        onLastInteractedRowUpdate: ((Int) -> Unit)? = null
     ): TableFactory.EditingCallbacks {
         return object : TableFactory.EditingCallbacks {
             override fun onEditCellAt(row: Int, column: Int, oldValue: String) {
                 dialogState.setEditingCell(row, column, oldValue)
+                onLastInteractedRowUpdate?.invoke(row)
+                println("ADB_DEBUG: onEditCellAt - updated lastInteractedRow to $row")
             }
             
             override fun onRemoveEditor(row: Int, column: Int, oldValue: String?, newValue: String) {
@@ -78,6 +85,8 @@ class DialogComponentsFactory {
                 val editingState = dialogState.getEditingCellState()
                 println("ADB_DEBUG: changeSelection - setting editingCellOldValue='$oldValue' (was: '${editingState.oldValue}')")
                 dialogState.setEditingCell(row, column, oldValue)
+                onLastInteractedRowUpdate?.invoke(row)
+                println("ADB_DEBUG: onChangeSelection - updated lastInteractedRow to $row")
             }
         }
     }
@@ -92,6 +101,7 @@ class TableModelListenerWithTimer(
     private val onValidateFields: () -> Unit,
     private val onSyncTableChanges: () -> Unit,
     private val onTableRepaint: () -> Unit,
+    private val controller: SettingsDialogController? = null,
     private val batchDelay: Int = 50
 ) {
     private var pendingTableUpdates = 0
@@ -146,6 +156,22 @@ class TableModelListenerWithTimer(
         if (e.type == javax.swing.event.TableModelEvent.UPDATE ||
             e.type == javax.swing.event.TableModelEvent.DELETE) {
             onSyncTableChanges()
+            
+            // После синхронизации проверяем, нужно ли применить сортировку
+            if (e.type == javax.swing.event.TableModelEvent.UPDATE && controller != null) {
+                val sortingService = controller.getTableSortingService()
+                val currentSortState = sortingService?.getCurrentSortState()
+                
+                if (currentSortState != null && currentSortState.activeColumn != null) {
+                    println("ADB_DEBUG: Cell edit detected with active sorting on column: ${currentSortState.activeColumn}")
+                    println("ADB_DEBUG: Reloading table to apply sort after cell edit")
+                    
+                    // Перезагружаем таблицу с применением сортировки
+                    SwingUtilities.invokeLater {
+                        controller.loadPresetsIntoTableWithoutNotification()
+                    }
+                }
+            }
         }
         
         onTableRepaint()

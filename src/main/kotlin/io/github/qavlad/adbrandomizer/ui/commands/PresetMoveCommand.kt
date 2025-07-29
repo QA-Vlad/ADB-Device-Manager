@@ -34,9 +34,9 @@ class PresetMoveCommand(
         // Если режим Hide Duplicates включен, сохраняем полное состояние
         if (controller.isHideDuplicatesMode()) {
             tempListsStateBefore = controller.getTempPresetLists().mapValues { (_, list) ->
-                list.presets.map { it.copy() }
+                list.presets.map { it.copy(id = it.id) }
             }
-            visiblePresetsStateBefore = controller.getVisiblePresets().map { it.copy() }
+            visiblePresetsStateBefore = controller.getVisiblePresets().map { it.copy(id = it.id) }
             
             // Сохраняем видимые элементы для каждого списка
             visiblePresetsBefore = extractVisiblePresets(tempListsStateBefore!!)
@@ -59,6 +59,13 @@ class PresetMoveCommand(
         if (needToSaveStateAfter && controller.isHideDuplicatesMode()) {
             println("ADB_DEBUG: PresetMoveCommand.saveStateBeforeSync() - saving state before sync")
             
+            // В обычном режиме (не Show All) не модифицируем tempLists при drag & drop
+            if (!controller.isShowAllPresetsMode()) {
+                println("ADB_DEBUG: PresetMoveCommand.saveStateBeforeSync() - skipping in Normal mode to preserve independent order")
+                needToSaveStateAfter = false
+                return
+            }
+            
             // Сохраняем текущее состояние таблицы (что видит пользователь)
             val tableModel = controller.tableModel
             val visiblePresetsFromTable = mutableListOf<DevicePreset>()
@@ -67,10 +74,10 @@ class PresetMoveCommand(
                 for (i in 0 until tableModel.rowCount) {
                     val firstColumn = tableModel.getValueAt(i, 0) as? String ?: ""
                     if (firstColumn != "+") {
-                        val label = tableModel.getValueAt(i, 2) as? String ?: ""
-                        val size = tableModel.getValueAt(i, 3) as? String ?: ""
-                        val dpi = tableModel.getValueAt(i, 4) as? String ?: ""
-                        visiblePresetsFromTable.add(DevicePreset(label, size, dpi))
+                        val preset = tableModel.getPresetAt(i)
+                        if (preset != null) {
+                            visiblePresetsFromTable.add(preset)
+                        }
                     }
                 }
                 
@@ -86,7 +93,7 @@ class PresetMoveCommand(
                     PresetList(
                         id = tempList.id,
                         name = tempList.name,
-                        presets = tempList.presets.map { it.copy() }.toMutableList()
+                        presets = tempList.presets.map { it.copy(id = it.id) }.toMutableList()
                     )
                 }
                 
@@ -97,7 +104,7 @@ class PresetMoveCommand(
                     
                     // Определяем видимые пресеты
                     tempListCopy.presets.forEach { preset ->
-                        val key = "${preset.size}|${preset.dpi}"
+                        val key = preset.getDuplicateKey()
                         if (!seenKeys.contains(key)) {
                             seenKeys.add(key)
                             visiblePresets.add(preset)
@@ -143,7 +150,7 @@ class PresetMoveCommand(
                     
                     // Сохраняем состояние из копии
                     tempListsStateAfter = tempListsCopy.mapValues { (_, list) ->
-                        list.presets.map { it.copy() }
+                        list.presets.map { it.copy(id = it.id) }
                     }
                     
                     // ВАЖНО: Сохраняем ТОЧНО те элементы, которые видны в таблице после перемещения
@@ -179,9 +186,9 @@ class PresetMoveCommand(
         println("ADB_DEBUG: PresetMoveCommand.saveStateAfter() - isHideDuplicates: ${controller.isHideDuplicatesMode()}")
         if (needToSaveStateAfter && controller.isHideDuplicatesMode()) {
             tempListsStateAfter = controller.getTempPresetLists().mapValues { (_, list) ->
-                list.presets.map { it.copy() }
+                list.presets.map { it.copy(id = it.id) }
             }
-            visiblePresetsStateAfter = controller.getVisiblePresets().map { it.copy() }
+            visiblePresetsStateAfter = controller.getVisiblePresets().map { it.copy(id = it.id) }
             println("ADB_DEBUG: Saved tempListsStateAfter with ${tempListsStateAfter?.size} lists and ${visiblePresetsStateAfter?.size} visible presets")
             needToSaveStateAfter = false
         }
@@ -215,12 +222,37 @@ class PresetMoveCommand(
             controller.isShowAllPresetsMode() -> {
                 controller.tableModel.moveRow(toIndex, toIndex, fromIndex)
                 controller.syncTableChangesToTempLists()
+                
+                // Восстанавливаем выделение строки для корректной работы drag & drop
+                // Делаем это через invokeLater, чтобы выделение применилось после завершения всех обновлений
+                if (fromIndex >= 0 && fromIndex < controller.table.rowCount) {
+                    javax.swing.SwingUtilities.invokeLater {
+                        if (fromIndex < controller.table.rowCount) {
+                            controller.table.setRowSelectionInterval(fromIndex, fromIndex)
+                        }
+                    }
+                }
             }
             else -> {
                 controller.getTempPresetLists()[controller.getCurrentPresetList()?.id]?.let { list ->
                     val preset = list.presets.removeAt(toIndex)
                     list.presets.add(fromIndex, preset)
                     controller.loadPresetsIntoTable(null)
+                    
+                    // Восстанавливаем выделение строки для корректной работы drag & drop
+                    // Делаем это через invokeLater, чтобы выделение применилось после завершения всех обновлений
+                    val tableRowCount = controller.table.rowCount
+                    if (fromIndex >= 0 && fromIndex < tableRowCount) {
+                        println("ADB_DEBUG: PresetMoveCommand.undo() - Scheduling row selection restore to row $fromIndex")
+                        javax.swing.SwingUtilities.invokeLater {
+                            if (fromIndex < controller.table.rowCount) {
+                                println("ADB_DEBUG:   Restoring selection - row: $fromIndex")
+                                println("ADB_DEBUG:   Selected row before: ${controller.table.selectedRow}")
+                                controller.table.setRowSelectionInterval(fromIndex, fromIndex)
+                                println("ADB_DEBUG:   Selected row after: ${controller.table.selectedRow}")
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -273,10 +305,10 @@ class PresetMoveCommand(
             
             println("ADB_DEBUG: extractVisiblePresets for list $listId:")
             presets.forEach { preset ->
-                val key = "${preset.size}|${preset.dpi}"
+                val key = preset.getDuplicateKey()
                 
                 if (preset.size.isBlank() || preset.dpi.isBlank() || !seenKeys.contains(key)) {
-                    visiblePresets.add(preset.copy())
+                    visiblePresets.add(preset.copy(id = preset.id))
                     println("ADB_DEBUG:   Preset '${preset.label}' is visible")
                     if (preset.size.isNotBlank() && preset.dpi.isNotBlank()) {
                         seenKeys.add(key)
@@ -315,7 +347,7 @@ class PresetMoveCommand(
                     println("ADB_DEBUG: Restoring list '$listId' (${list.name}) with ${presets.size} presets")
                     println("ADB_DEBUG:   Order to restore: ${presets.map { it.label }}")
                     list.presets.clear()
-                    list.presets.addAll(presets.map { it.copy() })
+                    list.presets.addAll(presets.map { it.copy(id = it.id) })
                     println("ADB_DEBUG:   After restore: ${list.presets.map { it.label }}")
                 }
             }
@@ -330,6 +362,17 @@ class PresetMoveCommand(
             }
             
             println("ADB_DEBUG: Table now has ${controller.tableModel.rowCount} rows")
+            
+            // Восстанавливаем выделение строки для корректной работы drag & drop
+            // Делаем это через invokeLater, чтобы выделение применилось после завершения всех обновлений
+            if (fromIndex >= 0 && fromIndex < controller.table.rowCount) {
+                javax.swing.SwingUtilities.invokeLater {
+                    if (fromIndex < controller.table.rowCount) {
+                        controller.table.setRowSelectionInterval(fromIndex, fromIndex)
+                        println("ADB_DEBUG: Restored row selection to row $fromIndex")
+                    }
+                }
+            }
         } finally {
             controller.setPerformingHistoryOperation(false)
         }

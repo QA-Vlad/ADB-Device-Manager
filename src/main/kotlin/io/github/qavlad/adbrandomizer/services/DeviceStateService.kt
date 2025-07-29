@@ -48,12 +48,12 @@ object DeviceStateService {
 
     fun setLastAppliedPresets(sizePreset: DevicePreset?, dpiPreset: DevicePreset?) {
         if (sizePreset != null) {
-            lastAppliedSizePreset = sizePreset.copy()
+            lastAppliedSizePreset = sizePreset.copy(id = sizePreset.id)
             lastResetSizePreset = null
             lastResetSizeValue = null // Сбрасываем значение
         }
         if (dpiPreset != null) {
-            lastAppliedDpiPreset = dpiPreset.copy()
+            lastAppliedDpiPreset = dpiPreset.copy(id = dpiPreset.id)
             lastResetDpiPreset = null
             lastResetDpiValue = null // Сбрасываем значение
         }
@@ -61,12 +61,14 @@ object DeviceStateService {
 
     fun handleReset(resetSize: Boolean, resetDpi: Boolean) {
         if (resetSize && lastAppliedSizePreset != null) {
-            lastResetSizePreset = lastAppliedSizePreset?.copy()
+            val sizePresetCopy = lastAppliedSizePreset
+            lastResetSizePreset = sizePresetCopy?.copy(id = sizePresetCopy.id)
             lastResetSizeValue = lastAppliedSizePreset?.size
             lastAppliedSizePreset = null
         }
         if (resetDpi && lastAppliedDpiPreset != null) {
-            lastResetDpiPreset = lastAppliedDpiPreset?.copy()
+            val dpiPresetCopy = lastAppliedDpiPreset
+            lastResetDpiPreset = dpiPresetCopy?.copy(id = dpiPresetCopy.id)
             lastResetDpiValue = lastAppliedDpiPreset?.dpi
             lastAppliedDpiPreset = null
         }

@@ -38,7 +38,7 @@ class PresetAddCommand(
         val targetList = findTargetList(listName)
         val targetListName = listName ?: currentPresetList?.name
         
-        if (targetList != null) {
+        if (targetList != null && targetListName != null) {
             // Для пустых пресетов ищем последний пустой пресет
             if (presetData.label.isBlank() && presetData.size.isBlank() && presetData.dpi.isBlank()) {
                 // Ищем последний пустой пресет
@@ -47,7 +47,16 @@ class PresetAddCommand(
                 }
                 
                 if (indexToRemove >= 0) {
+                    val presetToRemove = targetList.presets[indexToRemove]
                     targetList.presets.removeAt(indexToRemove)
+                    
+                    // Перемещаем в корзину
+                    controller.getPresetRecycleBin().moveToRecycleBin(
+                        presetToRemove,
+                        targetListName,
+                        indexToRemove
+                    )
+                    
                     println("ADB_DEBUG: Removed last empty preset from list '$targetListName' at index $indexToRemove")
                 } else {
                     println("ADB_DEBUG: Failed to find empty preset to remove")
@@ -61,7 +70,16 @@ class PresetAddCommand(
                 }
                 
                 if (indexToRemove >= 0 && indexToRemove < targetList.presets.size) {
+                    val presetToRemove = targetList.presets[indexToRemove]
                     targetList.presets.removeAt(indexToRemove)
+                    
+                    // Перемещаем в корзину
+                    controller.getPresetRecycleBin().moveToRecycleBin(
+                        presetToRemove,
+                        targetListName,
+                        indexToRemove
+                    )
+                    
                     println("ADB_DEBUG: Removed preset from list '$targetListName' at index $indexToRemove")
                 } else {
                     println("ADB_DEBUG: Failed to remove preset - index $indexToRemove out of bounds or not found")
@@ -87,10 +105,20 @@ class PresetAddCommand(
         val targetList = findTargetList(listName)
         val targetListName = listName ?: currentPresetList?.name
         
-        // Добавляем пресет обратно в список
-        targetList?.let { list ->
-            list.presets.add(presetData.copy())
+        if (targetList != null && targetListName != null) {
+            // Сначала пытаемся восстановить из корзины
+            val restoredPreset = controller.getPresetRecycleBin().restoreFromRecycleBin(
+                targetListName,
+                targetList.presets.size, // Добавляем в конец
+                presetData.id
+            )
+            
+            val presetToAdd = restoredPreset ?: presetData.copy(id = presetData.id)
+            
+            // Добавляем пресет обратно в список
+            targetList.presets.add(presetToAdd)
             println("ADB_DEBUG: Re-added preset to list '$targetListName' at end")
+            println("ADB_DEBUG:   Preset restored from recycle bin: ${restoredPreset != null}")
         }
         
         invokeLater {

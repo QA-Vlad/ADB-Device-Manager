@@ -37,9 +37,20 @@ class PresetDeleteCommand(
             if (targetList != null) {
                 // Используем actualListIndex если он есть (для режима скрытия дубликатов), иначе rowIndex
                 val indexToRestore = actualListIndex ?: rowIndex
+                
+                // Сначала пытаемся восстановить из корзины
+                val restoredPreset = controller.getPresetRecycleBin().restoreFromRecycleBin(
+                    targetListName, 
+                    indexToRestore,
+                    presetData.id
+                )
+                
+                val presetToRestore = restoredPreset ?: presetData.copy(id = presetData.id)
+                
                 if (indexToRestore <= targetList.presets.size) {
-                    targetList.presets.add(indexToRestore, presetData.copy())
+                    targetList.presets.add(indexToRestore, presetToRestore)
                     println("ADB_DEBUG: Restored preset to temp list '$targetListName' at index $indexToRestore (actualListIndex=$actualListIndex, rowIndex=$rowIndex)")
+                    println("ADB_DEBUG:   Preset restored from recycle bin: ${restoredPreset != null}")
                 }
 
                 if (!isShowAllPresetsMode && targetListName != currentPresetList?.name) {
@@ -53,8 +64,18 @@ class PresetDeleteCommand(
 
         invokeLater {
             withTableUpdateDisabled {
+                // Сохраняем текущее состояние сортировки перед перезагрузкой
+                val currentSortState = controller.getTableSortingService()?.getCurrentSortState()
+                
                 loadPresetsIntoTable()
                 refreshTable()
+                
+                // Если была активная сортировка, применяем её заново
+                if (currentSortState != null && currentSortState.activeColumn != null) {
+                    println("ADB_DEBUG: Reapplying sort after undo - column: ${currentSortState.activeColumn}")
+                    controller.getTableSortingService()?.reapplyCurrentSort()
+                }
+                
                 updateUI() // Обновляем UI после всех изменений
             }
         }
@@ -71,17 +92,39 @@ class PresetDeleteCommand(
         if (targetListName != null) {
             val targetList = tempPresetLists.values.find { it.name == targetListName }
             if (targetList != null) {
-                if (rowIndex < targetList.presets.size) {
-                    targetList.presets.removeAt(rowIndex)
-                    println("ADB_DEBUG: Removed preset from temp list '$targetListName' at index $rowIndex")
+                // Используем actualListIndex если он есть (для режима скрытия дубликатов), иначе rowIndex
+                val indexToRemove = actualListIndex ?: rowIndex
+                if (indexToRemove < targetList.presets.size) {
+                    val presetToRemove = targetList.presets[indexToRemove]
+                    targetList.presets.removeAt(indexToRemove)
+                    
+                    // Перемещаем удалённый пресет в корзину
+                    controller.getPresetRecycleBin().moveToRecycleBin(
+                        presetToRemove,
+                        targetListName,
+                        indexToRemove
+                    )
+                    
+                    println("ADB_DEBUG: Removed preset from temp list '$targetListName' at index $indexToRemove (actualListIndex=$actualListIndex, rowIndex=$rowIndex)")
+                    println("ADB_DEBUG:   Preset moved to recycle bin")
                 }
             }
         }
 
         invokeLater {
             withTableUpdateDisabled {
+                // Сохраняем текущее состояние сортировки перед перезагрузкой
+                val currentSortState = controller.getTableSortingService()?.getCurrentSortState()
+                
                 loadPresetsIntoTable()
                 refreshTable()
+                
+                // Если была активная сортировка, применяем её заново
+                if (currentSortState != null && currentSortState.activeColumn != null) {
+                    println("ADB_DEBUG: Reapplying sort after redo - column: ${currentSortState.activeColumn}")
+                    controller.getTableSortingService()?.reapplyCurrentSort()
+                }
+                
                 updateUI() // Обновляем UI после всех изменений
             }
         }
