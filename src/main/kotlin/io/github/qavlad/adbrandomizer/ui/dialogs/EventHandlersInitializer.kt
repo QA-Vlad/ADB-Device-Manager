@@ -124,9 +124,17 @@ class EventHandlersInitializer(
             controller.saveCurrentShowAllOrderFromTable()
         }
         
-        // В обычном режиме порядок уже сохранён при инициализации диалога
+        // В обычном режиме сохраняем порядок только если он был изменен через drag & drop
         if (controller.isTableInitialized() && !dialogState.isShowAllPresetsMode() && showAll) {
-            println("ADB_DEBUG: Switching from normal to Show All mode - normal order already saved during initialization")
+            if (controller.normalModeOrderChanged && controller.currentPresetList != null) {
+                val tablePresets = controller.tableModel.getPresets()
+                if (tablePresets.isNotEmpty()) {
+                    controller.presetOrderManager.saveNormalModeOrder(controller.currentPresetList!!.id, tablePresets)
+                    println("ADB_DEBUG: Saved normal mode order before switching to Show All for list '${controller.currentPresetList!!.name}' with ${tablePresets.size} presets")
+                }
+            } else {
+                println("ADB_DEBUG: Switching from normal to Show All mode - normal order not changed via drag & drop")
+            }
         }
         
         dialogState.withModeSwitching {

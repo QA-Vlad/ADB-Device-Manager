@@ -92,19 +92,21 @@ class SettingsPersistenceService {
      */
     private fun saveAllPresetListsWithOriginalOrder(tempLists: Map<String, PresetList>, presetOrderManager: PresetOrderManager) {
         tempLists.values.forEach { tempList ->
-            // Сначала пытаемся получить исходный порядок из файла
-            val originalOrder = presetOrderManager.getOriginalFileOrder(tempList.id)
-            val savedOrder = if (originalOrder != null) {
-                println("ADB_DEBUG: Using original file order for list '${tempList.name}' with ${originalOrder.size} items")
-                originalOrder
-            } else {
-                // Если исходного порядка нет, используем сохранённый normal mode порядок
-                val normalOrder = presetOrderManager.migrateNormalModeOrder(tempList.id, tempList.presets) 
-                    ?: presetOrderManager.getNormalModeOrder(tempList.id)
-                if (normalOrder != null) {
-                    println("ADB_DEBUG: Found saved normal mode order for list '${tempList.name}' with ${normalOrder.size} items")
-                }
+            // Сначала проверяем, есть ли сохранённый порядок из обычного режима
+            val normalOrder = presetOrderManager.getNormalModeOrder(tempList.id)
+            val savedOrder = if (normalOrder != null) {
+                println("ADB_DEBUG: Using saved normal mode order for list '${tempList.name}' with ${normalOrder.size} items")
                 normalOrder
+            } else {
+                // Если сохранённого порядка нет, используем исходный порядок из файла
+                val originalOrder = presetOrderManager.getOriginalFileOrder(tempList.id)
+                if (originalOrder != null) {
+                    println("ADB_DEBUG: Using original file order for list '${tempList.name}' with ${originalOrder.size} items")
+                    originalOrder
+                } else {
+                    println("ADB_DEBUG: No saved order found for list '${tempList.name}'")
+                    null
+                }
             }
             
             if (savedOrder != null) {

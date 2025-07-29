@@ -48,7 +48,7 @@ class SettingsDialogController(
     override lateinit var table: JBTable
         private set
     override lateinit var tableModel: DevicePresetTableModel
-        private set
+        internal set
     lateinit var keyboardHandler: KeyboardHandler
         private set
     lateinit var dialogNavigationHandler: DialogNavigationHandler
@@ -71,7 +71,7 @@ class SettingsDialogController(
     private val tableSynchronizer = TableDataSynchronizer(duplicateManager, presetDistributor)
     
     // Менеджер порядка пресетов (перемещаем сюда для правильной инициализации)
-    private val presetOrderManager = PresetOrderManager()
+    internal val presetOrderManager = PresetOrderManager()
     
     private val viewModeManager = ViewModeManager(presetOrderManager)
 
@@ -99,11 +99,14 @@ class SettingsDialogController(
     // Храним текущий порядок таблицы в памяти для сохранения при переключении режимов
     private var inMemoryTableOrder = listOf<String>()
     
+    // Флаг для отслеживания изменений порядка в обычном режиме через drag & drop
+    internal var normalModeOrderChanged = false
+    
     // TableLoader зависит от presetOrderManager и tableSortingService
     private val tableLoader = TableLoader(viewModeManager, presetOrderManager, tableSortingService)
     private var updateListener: (() -> Unit)? = null
     private var globalClickListener: java.awt.event.AWTEventListener? = null
-    private var currentPresetList: PresetList? = null
+    internal var currentPresetList: PresetList? = null
     
     // Менеджер колонок (инициализируется после создания tableConfigurator)
     private lateinit var tableColumnManager: TableColumnManager
@@ -671,6 +674,10 @@ class SettingsDialogController(
         println("ADB_DEBUG: initializeTempPresetLists - start")
         println("ADB_DEBUG:   tempListsManager.size() before clear: ${tempListsManager.size()}")
 
+        // Сбрасываем флаг изменения порядка при инициализации
+        normalModeOrderChanged = false
+        println("ADB_DEBUG: Reset normalModeOrderChanged = false")
+
         // Проверяем, что дефолтные списки существуют
         PresetListService.ensureDefaultListsExist()
 
@@ -1135,6 +1142,10 @@ class SettingsDialogController(
                 // НЕ сохраняем в файл при drag & drop в обычном режиме - только в памяти для отката
                 // presetOrderManager.saveNormalModeOrder(currentPresetList!!.id, presetsToSave)
                 println("ADB_DEBUG: Updated normal mode order in memory after drag & drop for list '${currentPresetList!!.name}' with ${presetsToSave.size} presets")
+                
+                // Устанавливаем флаг, что порядок был изменен через drag & drop
+                normalModeOrderChanged = true
+                println("ADB_DEBUG: Set normalModeOrderChanged = true")
             }
         }
         
@@ -1352,8 +1363,16 @@ class SettingsDialogController(
                 presetOrderManager.updateFixedShowAllOrder(allPresetsWithLists)
             }
         } else {
-            // В обычном режиме не сохраняем порядок - используем сохранённый при инициализации
-            println("ADB_DEBUG: In normal mode - not saving order, using initial order")
+            // В обычном режиме сохраняем порядок только если он был изменен через drag & drop
+            if (normalModeOrderChanged && currentPresetList != null) {
+                val tablePresets = tableModel.getPresets()
+                if (tablePresets.isNotEmpty()) {
+                    presetOrderManager.saveNormalModeOrder(currentPresetList!!.id, tablePresets)
+                    println("ADB_DEBUG: Saved normal mode order after drag & drop for list '${currentPresetList!!.name}' with ${tablePresets.size} presets")
+                }
+            } else {
+                println("ADB_DEBUG: In normal mode - order not changed via drag & drop, using initial order")
+            }
         }
         
         settingsPersistenceService.saveSettings(
@@ -1367,6 +1386,10 @@ class SettingsDialogController(
                 // Порядок уже сохранен выше
             }
         )
+        
+        // Сбрасываем флаг после сохранения
+        normalModeOrderChanged = false
+        println("ADB_DEBUG: Reset normalModeOrderChanged flag after saving settings")
     }
 
     // === Вспомогательные методы ===
