@@ -1120,37 +1120,45 @@ class SettingsDialogController(
                     // Получаем полный список пресетов из временного списка
                     val tempList = tempListsManager.getTempList(currentPresetList!!.id)
                     if (tempList != null) {
-                        // Создаём новый порядок, сохраняя позиции видимых элементов
-                        val visibleKeys = currentTablePresets.map { "${it.label}|${it.size}|${it.dpi}" }.toSet()
-                        val fullOrderedList = mutableListOf<DevicePreset>()
+                        // Создаём карты для быстрого поиска
+                        currentTablePresets.associateBy { "${it.label}|${it.size}|${it.dpi}" }
+                        tempList.presets.associateBy { "${it.label}|${it.size}|${it.dpi}" }
                         
-                        // Проходим по видимым пресетам и добавляем их вместе с их скрытыми дублями
+                        // Новый список с сохранением порядка
+                        val fullOrderedList = mutableListOf<DevicePreset>()
+                        val addedKeys = mutableSetOf<String>()
+                        
+                        // Проходим по видимым пресетам и восстанавливаем их позиции с дублями
                         currentTablePresets.forEach { visiblePreset ->
-                            val visibleKey = "${visiblePreset.label}|${visiblePreset.size}|${visiblePreset.dpi}"
+                            "${visiblePreset.label}|${visiblePreset.size}|${visiblePreset.dpi}"
                             val duplicateKey = visiblePreset.getDuplicateKey()
                             
-                            // Добавляем видимый пресет
-                            fullOrderedList.add(visiblePreset)
+                            // Сначала добавляем все пресеты с таким же duplicate key из оригинального списка
+                            // в порядке их следования в оригинальном списке
+                            val presetsWithSameDuplicateKey = tempList.presets.filter { preset ->
+                                preset.getDuplicateKey() == duplicateKey
+                            }
                             
-                            // Ищем и добавляем скрытые дубли
-                            tempList.presets.forEach { preset: DevicePreset ->
+                            presetsWithSameDuplicateKey.forEach { preset ->
                                 val presetKey = "${preset.label}|${preset.size}|${preset.dpi}"
-                                if (presetKey != visibleKey && 
-                                    preset.getDuplicateKey() == duplicateKey && 
-                                    presetKey !in visibleKeys) {
+                                if (presetKey !in addedKeys) {
                                     fullOrderedList.add(preset)
+                                    addedKeys.add(presetKey)
                                 }
                             }
                         }
                         
-                        // Добавляем оставшиеся пресеты, которые не являются дублями видимых
-                        tempList.presets.forEach { preset: DevicePreset ->
-                            if (!fullOrderedList.contains(preset)) {
+                        // Добавляем оставшиеся пресеты (которые не были дублями видимых)
+                        tempList.presets.forEach { preset ->
+                            val presetKey = "${preset.label}|${preset.size}|${preset.dpi}"
+                            if (presetKey !in addedKeys) {
                                 fullOrderedList.add(preset)
+                                addedKeys.add(presetKey)
                             }
                         }
                         
                         println("ADB_DEBUG: Reconstructed full order with ${fullOrderedList.size} presets (${currentTablePresets.size} visible)")
+                        println("ADB_DEBUG: Original tempList had ${tempList.presets.size} presets")
                         fullOrderedList
                     } else {
                         currentTablePresets
@@ -1413,22 +1421,84 @@ class SettingsDialogController(
         } else {
             // В обычном режиме сохраняем порядок для всех изменённых списков
             if (normalModeOrderChanged) {
-                // Сохраняем порядок для текущего списка из таблицы
+                // Сохраняем порядок для текущего списка
                 if (currentPresetList != null) {
-                    val tablePresets = tableModel.getPresets()
-                    if (tablePresets.isNotEmpty()) {
-                        presetOrderManager.saveNormalModeOrder(currentPresetList!!.id, tablePresets)
-                        println("ADB_DEBUG: Saved normal mode order for current list '${currentPresetList!!.name}' with ${tablePresets.size} presets")
+                    // В режиме скрытия дубликатов используем полный порядок из памяти
+                    if (dialogState.isHideDuplicatesMode()) {
+                        val memoryOrder = presetOrderManager.getNormalModeOrderInMemory(currentPresetList!!.id)
+                        if (memoryOrder != null) {
+                            val tempList = tempListsManager.getTempList(currentPresetList!!.id)
+                            if (tempList != null) {
+                                val orderedPresets = mutableListOf<DevicePreset>()
+                                
+                                // Восстанавливаем порядок из памяти
+                                memoryOrder.forEach { key ->
+                                    val preset = tempList.presets.find { p ->
+                                        "${p.label}|${p.size}|${p.dpi}" == key
+                                    }
+                                    if (preset != null) {
+                                        orderedPresets.add(preset)
+                                    }
+                                }
+                                
+                                // Добавляем новые пресеты, которых не было в сохранённом порядке
+                                val savedKeys = memoryOrder.toSet()
+                                tempList.presets.forEach { preset ->
+                                    val key = "${preset.label}|${preset.size}|${preset.dpi}"
+                                    if (key !in savedKeys) {
+                                        orderedPresets.add(preset)
+                                    }
+                                }
+                                
+                                if (orderedPresets.isNotEmpty()) {
+                                    presetOrderManager.saveNormalModeOrder(currentPresetList!!.id, orderedPresets)
+                                    println("ADB_DEBUG: Saved normal mode order for current list '${currentPresetList!!.name}' with ${orderedPresets.size} presets (from memory)")
+                                }
+                            }
+                        }
+                    } else {
+                        // Без скрытия дубликатов используем порядок из таблицы
+                        val tablePresets = tableModel.getPresets()
+                        if (tablePresets.isNotEmpty()) {
+                            presetOrderManager.saveNormalModeOrder(currentPresetList!!.id, tablePresets)
+                            println("ADB_DEBUG: Saved normal mode order for current list '${currentPresetList!!.name}' with ${tablePresets.size} presets")
+                        }
                     }
                 }
                 
                 // Сохраняем порядок для всех изменённых списков
                 modifiedListIds.forEach { listId ->
                     if (listId != currentPresetList?.id) { // Текущий список уже сохранён выше
-                        val tempList = tempListsManager.getTempList(listId)
-                        if (tempList != null && tempList.presets.isNotEmpty()) {
-                            presetOrderManager.saveNormalModeOrder(listId, tempList.presets)
-                            println("ADB_DEBUG: Saved normal mode order for modified list '${tempList.name}' with ${tempList.presets.size} presets")
+                        val memoryOrder = presetOrderManager.getNormalModeOrderInMemory(listId)
+                        if (memoryOrder != null) {
+                            val tempList = tempListsManager.getTempList(listId)
+                            if (tempList != null) {
+                                val orderedPresets = mutableListOf<DevicePreset>()
+                                
+                                // Восстанавливаем порядок из памяти
+                                memoryOrder.forEach { key ->
+                                    val preset = tempList.presets.find { p ->
+                                        "${p.label}|${p.size}|${p.dpi}" == key
+                                    }
+                                    if (preset != null) {
+                                        orderedPresets.add(preset)
+                                    }
+                                }
+                                
+                                // Добавляем новые пресеты, которых не было в сохранённом порядке
+                                val savedKeys = memoryOrder.toSet()
+                                tempList.presets.forEach { preset ->
+                                    val key = "${preset.label}|${preset.size}|${preset.dpi}"
+                                    if (key !in savedKeys) {
+                                        orderedPresets.add(preset)
+                                    }
+                                }
+                                
+                                if (orderedPresets.isNotEmpty()) {
+                                    presetOrderManager.saveNormalModeOrder(listId, orderedPresets)
+                                    println("ADB_DEBUG: Saved normal mode order for modified list '${tempList.name}' with ${orderedPresets.size} presets")
+                                }
+                            }
                         }
                     }
                 }

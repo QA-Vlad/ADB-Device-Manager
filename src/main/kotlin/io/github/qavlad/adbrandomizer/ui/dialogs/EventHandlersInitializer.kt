@@ -36,20 +36,26 @@ class EventHandlersInitializer(
                 
                 // Обновляем порядок в памяти перед переключением, если он был изменен
                 if (controller.normalModeOrderChanged && controller.currentPresetList != null && !dialogState.isShowAllPresetsMode()) {
-                    val tablePresets = controller.tableModel.getPresets()
-                    if (tablePresets.isNotEmpty()) {
-                        // Только обновляем в памяти, не сохраняем в настройки
-                        controller.presetOrderManager.updateNormalModeOrderInMemory(controller.currentPresetList!!.id, tablePresets)
-                        
-                        // Также обновляем tempList чтобы при переключении обратно порядок сохранился
-                        val tempList = tempListsManager.getTempList(controller.currentPresetList!!.id)
-                        if (tempList != null) {
-                            tempList.presets.clear()
-                            tempList.presets.addAll(tablePresets)
-                            println("ADB_DEBUG: Updated tempList order before switching lists for '${controller.currentPresetList!!.name}'")
+                    // Если включен режим скрытия дубликатов, не обновляем порядок из таблицы
+                    // так как он уже обновлен в onRowMoved с полным списком
+                    if (!dialogState.isHideDuplicatesMode()) {
+                        val tablePresets = controller.tableModel.getPresets()
+                        if (tablePresets.isNotEmpty()) {
+                            // Только обновляем в памяти, не сохраняем в настройки
+                            controller.presetOrderManager.updateNormalModeOrderInMemory(controller.currentPresetList!!.id, tablePresets)
+                            
+                            // Также обновляем tempList чтобы при переключении обратно порядок сохранился
+                            val tempList = tempListsManager.getTempList(controller.currentPresetList!!.id)
+                            if (tempList != null) {
+                                tempList.presets.clear()
+                                tempList.presets.addAll(tablePresets)
+                                println("ADB_DEBUG: Updated tempList order before switching lists for '${controller.currentPresetList!!.name}'")
+                            }
+                            
+                            println("ADB_DEBUG: Updated in-memory order before switching lists for '${controller.currentPresetList!!.name}' with ${tablePresets.size} presets")
                         }
-                        
-                        println("ADB_DEBUG: Updated in-memory order before switching lists for '${controller.currentPresetList!!.name}' with ${tablePresets.size} presets")
+                    } else {
+                        println("ADB_DEBUG: Skipping order update from table in Hide Duplicates mode - order already updated in onRowMoved with full list")
                     }
                 }
                 
@@ -149,19 +155,25 @@ class EventHandlersInitializer(
         // В обычном режиме обновляем порядок в памяти только если он был изменен через drag & drop
         if (controller.isTableInitialized() && !dialogState.isShowAllPresetsMode() && showAll) {
             if (controller.normalModeOrderChanged && controller.currentPresetList != null) {
-                val tablePresets = controller.tableModel.getPresets()
-                if (tablePresets.isNotEmpty()) {
-                    // Только обновляем в памяти, не сохраняем в настройки
-                    controller.presetOrderManager.updateNormalModeOrderInMemory(controller.currentPresetList!!.id, tablePresets)
-                    
-                    // Также обновляем tempList
-                    val tempList = controller.tempListsManager.getTempList(controller.currentPresetList!!.id)
-                    if (tempList != null) {
-                        tempList.presets.clear()
-                        tempList.presets.addAll(tablePresets)
+                // Если включен режим скрытия дубликатов, не обновляем порядок из таблицы
+                // так как он уже обновлен в onRowMoved с полным списком
+                if (!dialogState.isHideDuplicatesMode()) {
+                    val tablePresets = controller.tableModel.getPresets()
+                    if (tablePresets.isNotEmpty()) {
+                        // Только обновляем в памяти, не сохраняем в настройки
+                        controller.presetOrderManager.updateNormalModeOrderInMemory(controller.currentPresetList!!.id, tablePresets)
+                        
+                        // Также обновляем tempList
+                        val tempList = controller.tempListsManager.getTempList(controller.currentPresetList!!.id)
+                        if (tempList != null) {
+                            tempList.presets.clear()
+                            tempList.presets.addAll(tablePresets)
+                        }
+                        
+                        println("ADB_DEBUG: Updated in-memory order before switching to Show All for list '${controller.currentPresetList!!.name}' with ${tablePresets.size} presets")
                     }
-                    
-                    println("ADB_DEBUG: Updated in-memory order before switching to Show All for list '${controller.currentPresetList!!.name}' with ${tablePresets.size} presets")
+                } else {
+                    println("ADB_DEBUG: Skipping order update from table in Hide Duplicates mode before switching to Show All - order already updated in onRowMoved with full list")
                 }
             } else {
                 println("ADB_DEBUG: Switching from normal to Show All mode - normal order not changed via drag & drop")

@@ -215,5 +215,12 @@ class PresetOrderManager {
     fun getNormalModeOrderInMemory(listId: String): List<String>? {
         return normalModeOrderInMemory[listId]
     }
+    
+    /**
+     * Получает все ключи списков с порядком в памяти
+     */
+    fun getNormalModeOrderInMemory(): Map<String, List<String>> {
+        return normalModeOrderInMemory.toMap()
+    }
 
 }

@@ -43,6 +43,43 @@ class SettingsPersistenceService {
             } else {
                 println("ADB_DEBUG: Saving lists in Show All mode with Hide Duplicates - preserving original order")
             }
+            
+            // Сохраняем обычный порядок для списков, которые были изменены через drag & drop
+            val modifiedListIds = (tempLists.keys.toSet() + presetOrderManager.getNormalModeOrderInMemory().keys).distinct()
+            modifiedListIds.forEach { listId ->
+                val memoryOrder = presetOrderManager.getNormalModeOrderInMemory(listId)
+                if (memoryOrder != null) {
+                    // Сохраняем в настройки для использования после перезапуска
+                    val tempList = tempLists[listId]
+                    if (tempList != null) {
+                        val orderedPresets = mutableListOf<DevicePreset>()
+                        
+                        // Восстанавливаем порядок из памяти
+                        memoryOrder.forEach { key ->
+                            val preset = tempList.presets.find { p ->
+                                "${p.label}|${p.size}|${p.dpi}" == key
+                            }
+                            if (preset != null) {
+                                orderedPresets.add(preset)
+                            }
+                        }
+                        
+                        // Добавляем новые пресеты, которых не было в сохранённом порядке
+                        val savedKeys = memoryOrder.toSet()
+                        tempList.presets.forEach { preset ->
+                            val key = "${preset.label}|${preset.size}|${preset.dpi}"
+                            if (key !in savedKeys) {
+                                orderedPresets.add(preset)
+                            }
+                        }
+                        
+                        if (orderedPresets.isNotEmpty()) {
+                            presetOrderManager.saveNormalModeOrder(listId, orderedPresets)
+                            println("ADB_DEBUG: Saved normal mode order for list id=$listId in Show All mode")
+                        }
+                    }
+                }
+            }
         } else {
             // В обычном режиме всегда используем saveAllPresetListsWithOriginalOrder
             // чтобы учесть сохранённый порядок из обычного режима
