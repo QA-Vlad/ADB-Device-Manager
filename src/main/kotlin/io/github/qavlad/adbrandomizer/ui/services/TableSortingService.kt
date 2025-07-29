@@ -48,6 +48,9 @@ object TableSortingService {
     
     private val gson = Gson()
     
+    // Снимок состояний сортировки для отката при Cancel
+    private var sortStateSnapshot: Map<String, SortState>? = null
+    
     // Состояния сортировки для разных режимов
     private val normalModeSortState = SortState()
     private val showAllModeSortState = SortState()
@@ -550,4 +553,65 @@ object TableSortingService {
             println("ADB_DEBUG:   No active sort to reapply")
         }
     }
+    
+    /**
+     * Создает снимок текущего состояния сортировки для всех режимов
+     */
+    fun createSortStateSnapshot() {
+        sortStateSnapshot = mapOf(
+            "normal" to normalModeSortState.copy(),
+            "showAll" to showAllModeSortState.copy(),
+            "showAllHideDup" to showAllHideDupSortState.copy()
+        )
+        println("ADB_DEBUG: Created sort state snapshot")
+        println("ADB_DEBUG:   Normal mode: activeColumn=${normalModeSortState.activeColumn}")
+        println("ADB_DEBUG:   Show All mode: activeColumn=${showAllModeSortState.activeColumn}")
+        println("ADB_DEBUG:   Show All Hide Dup mode: activeColumn=${showAllHideDupSortState.activeColumn}")
+    }
+    
+    /**
+     * Восстанавливает состояние сортировки из снимка
+     */
+    fun restoreSortStateFromSnapshot() {
+        sortStateSnapshot?.let { snapshot ->
+            snapshot["normal"]?.let { state ->
+                normalModeSortState.labelSort = state.labelSort
+                normalModeSortState.sizeSort = state.sizeSort
+                normalModeSortState.dpiSort = state.dpiSort
+                normalModeSortState.sizeUsesSort = state.sizeUsesSort
+                normalModeSortState.dpiUsesSort = state.dpiUsesSort
+                normalModeSortState.listSort = state.listSort
+                normalModeSortState.activeColumn = state.activeColumn
+            }
+            
+            snapshot["showAll"]?.let { state ->
+                showAllModeSortState.labelSort = state.labelSort
+                showAllModeSortState.sizeSort = state.sizeSort
+                showAllModeSortState.dpiSort = state.dpiSort
+                showAllModeSortState.sizeUsesSort = state.sizeUsesSort
+                showAllModeSortState.dpiUsesSort = state.dpiUsesSort
+                showAllModeSortState.listSort = state.listSort
+                showAllModeSortState.activeColumn = state.activeColumn
+            }
+            
+            snapshot["showAllHideDup"]?.let { state ->
+                showAllHideDupSortState.labelSort = state.labelSort
+                showAllHideDupSortState.sizeSort = state.sizeSort
+                showAllHideDupSortState.dpiSort = state.dpiSort
+                showAllHideDupSortState.sizeUsesSort = state.sizeUsesSort
+                showAllHideDupSortState.dpiUsesSort = state.dpiUsesSort
+                showAllHideDupSortState.listSort = state.listSort
+                showAllHideDupSortState.activeColumn = state.activeColumn
+            }
+            
+            // Сохраняем восстановленные состояния в настройки
+            saveSortStates()
+            
+            println("ADB_DEBUG: Restored sort state from snapshot")
+            println("ADB_DEBUG:   Normal mode: activeColumn=${normalModeSortState.activeColumn}")
+            println("ADB_DEBUG:   Show All mode: activeColumn=${showAllModeSortState.activeColumn}")
+            println("ADB_DEBUG:   Show All Hide Dup mode: activeColumn=${showAllHideDupSortState.activeColumn}")
+        } ?: println("ADB_DEBUG: No sort state snapshot to restore")
+    }
+
 }

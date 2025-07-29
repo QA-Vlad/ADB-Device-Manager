@@ -688,6 +688,9 @@ class SettingsDialogController(
 
         // Включаем кэш для оптимизации производительности
         PresetListService.enableCache()
+        
+        // Создаем снимок состояния сортировки для возможности отката
+        TableSortingService.createSortStateSnapshot()
 
         // Сбрасываем флаг изменения порядка при инициализации
         normalModeOrderChanged = false
@@ -1669,6 +1672,9 @@ class SettingsDialogController(
      * Восстанавливает исходное состояние временных списков при отмене
      */
     fun restoreOriginalState() {
+        // Восстанавливаем состояние сортировки
+        TableSortingService.restoreSortStateFromSnapshot()
+        
         settingsPersistenceService.restoreOriginalState(
             tempListsManager = tempListsManager,
             originalPresetLists = originalPresetLists,
