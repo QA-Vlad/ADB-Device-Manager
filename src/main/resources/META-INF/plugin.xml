@@ -15,10 +15,11 @@
     Very useful for testing UI adaptability and different screen configurations directly from the IDE.
     ]]></description>
 
+    <!-- Версии IDE -->
+    <idea-version since-build="223"/>
+
     <!-- 5. Секция зависимостей. Это критически важно. -->
     <depends>com.intellij.modules.platform</depends>
-    <!-- Зависимость от плагина Android -->
-    <depends>org.jetbrains.android</depends>
 
     <!-- 6. Секция расширений. Здесь мы "встраиваемся" в IDE. -->
     <extensions defaultExtensionNs="com.intellij">
