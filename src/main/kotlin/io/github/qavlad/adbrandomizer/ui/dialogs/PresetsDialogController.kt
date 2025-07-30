@@ -26,6 +26,7 @@ import io.github.qavlad.adbrandomizer.ui.services.TableSortingService
 import io.github.qavlad.adbrandomizer.ui.services.TableStateTracker
 import io.github.qavlad.adbrandomizer.ui.services.PresetRecycleBin
 import io.github.qavlad.adbrandomizer.ui.services.HoverStateManager
+import io.github.qavlad.adbrandomizer.ui.services.CountersStateManager
 import io.github.qavlad.adbrandomizer.ui.renderers.ValidationRenderer
 import io.github.qavlad.adbrandomizer.utils.ButtonUtils
 import java.awt.Container
@@ -96,6 +97,9 @@ class PresetsDialogController(
     // Трекер состояния таблицы
     private val tableStateTracker = TableStateTracker
     
+    // Менеджер состояния счётчиков
+    private val countersStateManager = CountersStateManager(tableSortingService, dialogState)
+    
     // Храним текущий порядок таблицы в памяти для сохранения при переключении режимов
     private var inMemoryTableOrder = listOf<String>()
     
@@ -118,7 +122,6 @@ class PresetsDialogController(
         tableSortingService,
         tempListsManager
     )
-    private var updateListener: (() -> Unit)? = null
     private var globalClickListener: java.awt.event.AWTEventListener? = null
     internal var currentPresetList: PresetList? = null
     
@@ -130,9 +133,6 @@ class PresetsDialogController(
 
     // Исходное состояние списков для отката при Cancel
     private val originalPresetLists = mutableMapOf<String, PresetList>()
-    
-    // Снимок счётчиков использования для отката при Cancel
-    private var countersSnapshot: Pair<Map<String, Int>, Map<String, Int>>? = null
 
     // Ссылка на слушатель модели, для временного отключения
     private var tableModelListener: javax.swing.event.TableModelListener? = null
@@ -154,7 +154,6 @@ class PresetsDialogController(
     fun initialize() {
         // Очищаем кэши при открытии диалога
         PresetListService.clearAllCaches()
-        setupUpdateListener()
         refreshDeviceStatesIfNeeded()
     }
 
@@ -382,6 +381,11 @@ class PresetsDialogController(
         
         // Добавляем обработчик кликов по заголовкам таблицы
         setupTableHeaderClickListener()
+        
+        // Настраиваем слушатель обновлений счётчиков
+        countersStateManager.setupUpdateListener(table, tableModel) {
+            loadPresetsIntoTable()
+        }
         
         validateFields()
     }
@@ -1397,72 +1401,6 @@ class PresetsDialogController(
      * Сохраняет текущий порядок пресетов в режиме Show all presets
      */
 
-    private var pendingPositionCallback: ((DevicePreset) -> Int?)? = null
-    
-    private fun setupUpdateListener() {
-        updateListener = {
-            SwingUtilities.invokeLater {
-                // Обновляем счетчики в таблице
-                updateTableCounters()
-                
-                // Если есть активная сортировка по счетчикам, нужно пересортировать таблицу
-                val sortState = tableSortingService.getSortState(
-                    dialogState.isShowAllPresetsMode(), 
-                    dialogState.isHideDuplicatesMode()
-                )
-                val activeColumn = sortState.activeColumn
-                if (activeColumn == "Size Uses" || activeColumn == "DPI Uses") {
-                    println("ADB_DEBUG: Reloading table due to counter update with active sort: $activeColumn")
-                    // Перезагружаем таблицу с сохранением текущей сортировки
-                    loadPresetsIntoTable()
-                    
-                    // Если есть ожидающий callback для получения позиции, вызываем его после обновления таблицы
-                    pendingPositionCallback?.let { _ ->
-                        SwingUtilities.invokeLater {
-                            // Вызываем callback после обновления TableStateTracker
-                            pendingPositionCallback = null
-                        }
-                    }
-                } else {
-                    table.repaint()
-                }
-            }
-        }
-        updateListener?.let { PresetsDialogUpdateNotifier.addListener(it) }
-    }
-
-    /**
-     * Обновляет счетчики использования в таблице
-     */
-    private fun updateTableCounters() {
-        val showCounters = PresetStorageService.getShowCounters()
-        if (!showCounters || tableModel.columnCount < 7) return  // Нет колонок счетчиков
-        
-        // Обновляем счетчики для всех строк в таблице
-        for (row in 0 until tableModel.rowCount) {
-            // Пропускаем строку с кнопкой добавления
-            if (tableModel.getValueAt(row, 0) == "+") continue
-            
-            val size = tableModel.getValueAt(row, 3) as? String ?: ""
-            val dpi = tableModel.getValueAt(row, 4) as? String ?: ""
-            
-            // Обновляем счетчики напрямую через dataVector, чтобы избежать лишних событий
-            val rowVector = tableModel.dataVector.elementAt(row) as java.util.Vector<Any>
-            
-            if (size.isNotBlank()) {
-                val sizeCounter = UsageCounterService.getSizeCounter(size)
-                rowVector.setElementAt(sizeCounter, 5)
-            }
-            
-            if (dpi.isNotBlank()) {
-                val dpiCounter = UsageCounterService.getDpiCounter(dpi)
-                rowVector.setElementAt(dpiCounter, 6)
-            }
-        }
-        
-        // Уведомляем таблицу об изменении данных
-        tableModel.fireTableDataChanged()
-    }
 
     private fun refreshDeviceStatesIfNeeded() {
         if (project != null) {
@@ -1485,12 +1423,8 @@ class PresetsDialogController(
         // Восстанавливаем состояние сортировки
         TableSortingService.restoreSortStateFromSnapshot()
         
-        // Восстанавливаем счётчики использования, если есть снимок
-        countersSnapshot?.let {
-            println("ADB_DEBUG: Restoring usage counters from snapshot")
-            UsageCounterService.restoreFromSnapshot(it)
-            countersSnapshot = null
-        }
+        // Восстанавливаем счётчики использования
+        countersStateManager.restoreCountersFromSnapshot()
         
         settingsPersistenceService.restoreOriginalState(
             tempListsManager = tempListsManager,
@@ -1510,11 +1444,11 @@ class PresetsDialogController(
      * Сохраняет снимок счётчиков для возможности отката
      */
     fun saveCountersSnapshot(snapshot: Pair<Map<String, Int>, Map<String, Int>>) {
-        countersSnapshot = snapshot
+        countersStateManager.saveCountersSnapshot(snapshot)
     }
 
     fun dispose() {
-        updateListener?.let { PresetsDialogUpdateNotifier.removeListener(it) }
+        countersStateManager.dispose()
         keyboardHandler.removeGlobalKeyListener()
         
         // Отключаем кэш и очищаем его
@@ -1524,8 +1458,6 @@ class PresetsDialogController(
         presetRecycleBin.clear()
         // Очищаем исходные порядки из файлов
         presetOrderManager.clearOriginalFileOrders()
-        // Очищаем снимок счётчиков
-        countersSnapshot = null
         println("ADB_DEBUG: SettingsDialogController disposed - recycle bin and original orders cleared")
         dialogNavigationHandler.uninstall()
 
