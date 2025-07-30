@@ -111,6 +111,7 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
     // ==================== PRESET ACTIONS ====================
 
     private fun executeRandomAction(setSize: Boolean, setDpi: Boolean) {
+        println("ADB_DEBUG: executeRandomAction called - setSize: $setSize, setDpi: $setDpi")
         if (!validateDevicesAvailable()) return
 
         val randomPreset = selectRandomPreset(setSize, setDpi) ?: return
@@ -154,7 +155,12 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
     
     private fun getVisiblePresets(): List<DevicePreset> {
         // Получаем пресеты с учетом текущего режима отображения и сортировки
-        return PresetListService.getSortedPresets()
+        val presets = PresetListService.getSortedPresets()
+        println("ADB_DEBUG: AdbControlsPanel.getVisiblePresets() - returned ${presets.size} presets")
+        if (presets.isEmpty()) {
+            println("ADB_DEBUG: AdbControlsPanel.getVisiblePresets() - EMPTY LIST! Show All Mode: ${SettingsService.getShowAllPresetsMode()}")
+        }
+        return presets
     }
 
     private fun navigateToNextPreset() {

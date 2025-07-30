@@ -484,7 +484,23 @@ object PresetListService {
                 
                 savedOrder.forEach { key ->
                     val parts = key.split("::")
-                    if (parts.size >= 4) {
+                    if (parts.size == 2) {
+                        // Новый формат: listName::presetId
+                        val listName = parts[0]
+                        val presetId = parts[1]
+                        
+                        val listMeta = allLists[listName]
+                        if (listMeta != null) {
+                            val list = loadPresetList(listMeta.id)
+                            val preset = list?.presets?.find { p -> p.id == presetId }
+                            if (preset != null) {
+                                presetsWithLists.add(listName to preset)
+                            } else {
+                                println("ADB_DEBUG: Preset with id $presetId NOT FOUND in list $listName")
+                            }
+                        }
+                    } else if (parts.size >= 4) {
+                        // Старый формат для обратной совместимости: listName::label::size::dpi
                         val listName = parts[0]
                         val label = parts[1]
                         val size = parts[2]

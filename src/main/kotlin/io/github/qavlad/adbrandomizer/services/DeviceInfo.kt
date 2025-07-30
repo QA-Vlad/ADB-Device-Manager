@@ -20,7 +20,7 @@ data class DeviceInfo(
         displaySerialNumber = getDisplaySerialNumber(device),
         logicalSerialNumber = device.serialNumber,
         androidVersion = device.getProperty(IDevice.PROP_BUILD_VERSION) ?: "Unknown",
-        apiLevel = device.version.apiLevel.toString(),
+        apiLevel = device.getProperty(IDevice.PROP_BUILD_API_LEVEL) ?: "Unknown",
         ipAddress = ipAddress
     )
 
