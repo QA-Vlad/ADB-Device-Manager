@@ -60,7 +60,7 @@ object ButtonUtils {
         for (component in container.components) {
             when (component) {
                 is JButton -> {
-                    if (component.text == "Save" || component.text == "Cancel") {
+                    if (component.text == "Save" || component.text == "Cancel" || component.text == "Open presets folder") {
                         addHoverEffect(component)
                     }
                 }

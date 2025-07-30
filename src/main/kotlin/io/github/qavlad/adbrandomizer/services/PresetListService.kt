@@ -684,4 +684,11 @@ object PresetListService {
             resetToDefaultLists()
         }
     }
+    
+    /**
+     * Возвращает путь к директории с пресетами
+     */
+    fun getPresetsDirectory(): File {
+        return presetsDir.toFile()
+    }
 }

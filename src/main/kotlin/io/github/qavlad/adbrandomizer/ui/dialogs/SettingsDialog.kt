@@ -13,6 +13,10 @@ import java.awt.BorderLayout
 import java.awt.Component
 import java.awt.Dimension
 import javax.swing.*
+import com.intellij.icons.AllIcons
+import io.github.qavlad.adbrandomizer.services.PresetListService
+import io.github.qavlad.adbrandomizer.utils.ButtonUtils
+import java.awt.Desktop
 
 /**
  * Диалог настроек ADB Randomizer.
@@ -37,6 +41,9 @@ class SettingsDialog(project: Project?) : DialogWrapper(project) {
             SwingUtilities.invokeLater {
                 controller.setFocusToTable()
             }
+            
+            // Добавляем ховер эффект к кнопке Open presets folder
+            addHoverEffectToLeftButton()
         }
     }
 
@@ -158,5 +165,74 @@ class SettingsDialog(project: Project?) : DialogWrapper(project) {
         controller.restoreOriginalState()
         controller.dispose()
         super.doCancelAction()
+    }
+    
+    override fun createLeftSideActions(): Array<Action> {
+        val openFolderAction = object : AbstractAction("Open presets folder") {
+            init {
+                putValue(SMALL_ICON, AllIcons.Nodes.Folder)
+            }
+            
+            override fun actionPerformed(e: java.awt.event.ActionEvent) {
+                openPresetsFolder()
+            }
+        }
+        return arrayOf(openFolderAction)
+    }
+    
+    private fun openPresetsFolder() {
+        try {
+            val presetsDir = PresetListService.getPresetsDirectory()
+            if (!presetsDir.exists()) {
+                presetsDir.mkdirs()
+            }
+            
+            if (Desktop.isDesktopSupported()) {
+                Desktop.getDesktop().open(presetsDir)
+            } else {
+                JOptionPane.showMessageDialog(
+                    contentPane,
+                    "Desktop operations are not supported on this system",
+                    "Error",
+                    JOptionPane.ERROR_MESSAGE
+                )
+            }
+        } catch (e: Exception) {
+            JOptionPane.showMessageDialog(
+                contentPane,
+                "Failed to open presets folder: ${e.message}",
+                "Error",
+                JOptionPane.ERROR_MESSAGE
+            )
+        }
+    }
+    
+    private fun addHoverEffectToLeftButton() {
+        // Найдем нашу кнопку в левой панели и добавим ховер эффект
+        SwingUtilities.invokeLater {
+            val rootPane = this.rootPane
+            if (rootPane != null) {
+                findOpenPresetsFolderButton(rootPane)?.let { button ->
+                    ButtonUtils.addHoverEffect(button)
+                }
+            }
+        }
+    }
+    
+    private fun findOpenPresetsFolderButton(container: java.awt.Container): JButton? {
+        for (component in container.components) {
+            when (component) {
+                is JButton -> {
+                    if (component.text == "Open presets folder") {
+                        return component
+                    }
+                }
+                is java.awt.Container -> {
+                    val found = findOpenPresetsFolderButton(component)
+                    if (found != null) return found
+                }
+            }
+        }
+        return null
     }
 }
