@@ -1,0 +1,97 @@
+{
+  "id": "flagship-phones-2024",
+  "name": "Flagship Phones 2024",
+  "presets": [
+    {
+      "label": "Samsung Galaxy S24 Ultra",
+      "size": "1440x3120",
+      "dpi": "505"
+    },
+    {
+      "label": "Samsung Galaxy S24+",
+      "size": "1440x3120",
+      "dpi": "516"
+    },
+    {
+      "label": "Samsung Galaxy S24",
+      "size": "1080x2340",
+      "dpi": "416"
+    },
+    {
+      "label": "Samsung Galaxy S23 Ultra",
+      "size": "1440x3088",
+      "dpi": "500"
+    },
+    {
+      "label": "Samsung Galaxy S23+",
+      "size": "1080x2340",
+      "dpi": "393"
+    },
+    {
+      "label": "Samsung Galaxy S23",
+      "size": "1080x2340",
+      "dpi": "425"
+    },
+    {
+      "label": "Google Pixel 8 Pro",
+      "size": "1344x2992",
+      "dpi": "489"
+    },
+    {
+      "label": "Google Pixel 8",
+      "size": "1080x2400",
+      "dpi": "428"
+    },
+    {
+      "label": "Google Pixel 7 Pro",
+      "size": "1440x3120",
+      "dpi": "512"
+    },
+    {
+      "label": "Google Pixel 7",
+      "size": "1080x2400",
+      "dpi": "416"
+    },
+    {
+      "label": "iPhone 15 Pro Max",
+      "size": "1290x2796",
+      "dpi": "460"
+    },
+    {
+      "label": "iPhone 15 Pro",
+      "size": "1179x2556",
+      "dpi": "460"
+    },
+    {
+      "label": "iPhone 15 Plus",
+      "size": "1290x2796",
+      "dpi": "460"
+    },
+    {
+      "label": "iPhone 15",
+      "size": "1179x2556",
+      "dpi": "460"
+    },
+    {
+      "label": "OnePlus 12",
+      "size": "1440x3168",
+      "dpi": "510"
+    },
+    {
+      "label": "OnePlus 11",
+      "size": "1440x3216",
+      "dpi": "525"
+    },
+    {
+      "label": "Xiaomi 14 Pro",
+      "size": "1440x3200",
+      "dpi": "522"
+    },
+    {
+      "label": "Xiaomi 13 Pro",
+      "size": "1440x3200",
+      "dpi": "522"
+    }
+  ],
+  "isDefault": true
+}

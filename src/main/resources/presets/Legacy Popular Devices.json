@@ -1,0 +1,77 @@
+{
+  "id": "legacy-popular-devices",
+  "name": "Legacy Popular Devices",
+  "presets": [
+    {
+      "label": "Samsung Galaxy S10",
+      "size": "1440x3040",
+      "dpi": "550"
+    },
+    {
+      "label": "Samsung Galaxy S9",
+      "size": "1440x2960",
+      "dpi": "568"
+    },
+    {
+      "label": "Samsung Galaxy S8",
+      "size": "1440x2960",
+      "dpi": "568"
+    },
+    {
+      "label": "Google Pixel 6 Pro",
+      "size": "1440x3120",
+      "dpi": "512"
+    },
+    {
+      "label": "Google Pixel 5",
+      "size": "1080x2340",
+      "dpi": "432"
+    },
+    {
+      "label": "Google Pixel 4 XL",
+      "size": "1440x3040",
+      "dpi": "537"
+    },
+    {
+      "label": "Google Pixel 3 XL",
+      "size": "1440x2960",
+      "dpi": "522"
+    },
+    {
+      "label": "OnePlus 9 Pro",
+      "size": "1440x3216",
+      "dpi": "525"
+    },
+    {
+      "label": "OnePlus 8 Pro",
+      "size": "1440x3168",
+      "dpi": "513"
+    },
+    {
+      "label": "OnePlus 7 Pro",
+      "size": "1440x3120",
+      "dpi": "516"
+    },
+    {
+      "label": "Xiaomi Mi 11",
+      "size": "1440x3200",
+      "dpi": "515"
+    },
+    {
+      "label": "LG V60",
+      "size": "1080x2460",
+      "dpi": "395"
+    },
+    {
+      "label": "Sony Xperia 1 III",
+      "size": "1644x3840",
+      "dpi": "643"
+    },
+    {
+      "label": "HTC U12+",
+      "size": "1440x2880",
+      "dpi": "537"
+    }
+  ],
+  "isDefault": true
+}

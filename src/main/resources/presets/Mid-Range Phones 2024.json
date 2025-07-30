@@ -1,0 +1,77 @@
+{
+  "id": "midrange-phones-2024",
+  "name": "Mid-Range Phones 2024",
+  "presets": [
+    {
+      "label": "Samsung Galaxy A54",
+      "size": "1080x2340",
+      "dpi": "403"
+    },
+    {
+      "label": "Samsung Galaxy A34",
+      "size": "1080x2340",
+      "dpi": "390"
+    },
+    {
+      "label": "Samsung Galaxy A24",
+      "size": "1080x2340",
+      "dpi": "390"
+    },
+    {
+      "label": "Google Pixel 7a",
+      "size": "1080x2400",
+      "dpi": "429"
+    },
+    {
+      "label": "Google Pixel 6a",
+      "size": "1080x2400",
+      "dpi": "429"
+    },
+    {
+      "label": "OnePlus Nord 3",
+      "size": "1240x2772",
+      "dpi": "450"
+    },
+    {
+      "label": "OnePlus Nord CE3",
+      "size": "1080x2412",
+      "dpi": "394"
+    },
+    {
+      "label": "Xiaomi Redmi Note 13 Pro",
+      "size": "1220x2712",
+      "dpi": "446"
+    },
+    {
+      "label": "Xiaomi Redmi Note 12",
+      "size": "1080x2400",
+      "dpi": "395"
+    },
+    {
+      "label": "Motorola Edge 40",
+      "size": "1080x2400",
+      "dpi": "409"
+    },
+    {
+      "label": "Motorola Moto G84",
+      "size": "1080x2400",
+      "dpi": "385"
+    },
+    {
+      "label": "Nothing Phone (2a)",
+      "size": "1080x2412",
+      "dpi": "394"
+    },
+    {
+      "label": "Realme 11 Pro+",
+      "size": "1080x2412",
+      "dpi": "394"
+    },
+    {
+      "label": "POCO X6 Pro",
+      "size": "1220x2712",
+      "dpi": "446"
+    }
+  ],
+  "isDefault": true
+}

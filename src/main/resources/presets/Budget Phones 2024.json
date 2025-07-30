@@ -1,0 +1,67 @@
+{
+  "id": "budget-phones-2024",
+  "name": "Budget Phones 2024",
+  "presets": [
+    {
+      "label": "Samsung Galaxy A14",
+      "size": "1080x2408",
+      "dpi": "400"
+    },
+    {
+      "label": "Samsung Galaxy A04s",
+      "size": "720x1600",
+      "dpi": "270"
+    },
+    {
+      "label": "Xiaomi Redmi 12",
+      "size": "1080x2460",
+      "dpi": "396"
+    },
+    {
+      "label": "Xiaomi Redmi 12C",
+      "size": "720x1650",
+      "dpi": "268"
+    },
+    {
+      "label": "Xiaomi Redmi A2",
+      "size": "720x1600",
+      "dpi": "269"
+    },
+    {
+      "label": "Motorola Moto G13",
+      "size": "720x1600",
+      "dpi": "270"
+    },
+    {
+      "label": "Motorola Moto E13",
+      "size": "720x1600",
+      "dpi": "266"
+    },
+    {
+      "label": "Realme C55",
+      "size": "1080x2408",
+      "dpi": "391"
+    },
+    {
+      "label": "Realme C53",
+      "size": "720x1600",
+      "dpi": "260"
+    },
+    {
+      "label": "POCO M5",
+      "size": "1080x2400",
+      "dpi": "395"
+    },
+    {
+      "label": "Infinix Smart 8",
+      "size": "720x1612",
+      "dpi": "267"
+    },
+    {
+      "label": "Tecno Spark 10",
+      "size": "720x1612",
+      "dpi": "264"
+    }
+  ],
+  "isDefault": true
+}
