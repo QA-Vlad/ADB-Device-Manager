@@ -4,7 +4,7 @@ import com.intellij.ui.table.JBTable
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.AbstractTableCellEditor
 import io.github.qavlad.adbrandomizer.ui.handlers.PresetTransferHandler
-import io.github.qavlad.adbrandomizer.services.SettingsService
+import io.github.qavlad.adbrandomizer.services.PresetStorageService
 import io.github.qavlad.adbrandomizer.ui.renderers.ValidationRenderer
 import java.awt.Dimension
 import java.awt.Component
@@ -313,7 +313,7 @@ class TableConfigurator(
         configureColumnWidth(4, columnWidthConfig.dpi)    // DPI
         
         // Счетчики использования (если включены)
-        val hasCounters = SettingsService.getShowCounters()
+        val hasCounters = PresetStorageService.getShowCounters()
         if (hasCounters) {
             configureColumnWidth(5, columnWidthConfig.sizeUses)  // Size Uses
             configureColumnWidth(6, columnWidthConfig.dpiUses)   // DPI Uses

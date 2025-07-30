@@ -19,8 +19,8 @@ object PluginConfig {
         const val TOOLTIP_DISMISS_DELAY_MS = 5000
         const val TOOLTIP_RESHOW_DELAY_MS = 50
         const val TABLE_ROW_HEIGHT = 35
-        const val SETTINGS_DIALOG_WIDTH = 650
-        const val SETTINGS_DIALOG_HEIGHT = 400
+        const val PRESETS_DIALOG_WIDTH = 650
+        const val PRESETS_DIALOG_HEIGHT = 400
         const val NOTIFICATION_GROUP_ID = "ADB Randomizer Notifications"
         
         // Ширина колонок таблицы (null = автоматическая ширина)

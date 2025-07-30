@@ -9,7 +9,7 @@ import com.intellij.openapi.ui.Messages
 import io.github.qavlad.adbrandomizer.config.PluginConfig
 import io.github.qavlad.adbrandomizer.services.*
 import io.github.qavlad.adbrandomizer.ui.components.*
-import io.github.qavlad.adbrandomizer.ui.dialogs.SettingsDialog
+import io.github.qavlad.adbrandomizer.ui.dialogs.PresetsDialog
 import io.github.qavlad.adbrandomizer.ui.dialogs.ScrcpyCompatibilityDialog
 import io.github.qavlad.adbrandomizer.utils.NotificationUtils
 import io.github.qavlad.adbrandomizer.utils.ValidationUtils
@@ -41,7 +41,7 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
             onNextPreset = { navigateToNextPreset() },
             onPreviousPreset = { navigateToPreviousPreset() },
             onResetAction = { resetSize, resetDpi -> executeResetAction(resetSize, resetDpi) },
-            onOpenPresetSettings = { openPresetSettings() }
+            onOpenPresetSettings = { openPresetsDialog() }
         )
         
         compactActionPanel = CompactActionPanel(
@@ -102,7 +102,7 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
     private fun validatePresetsAvailable(): Boolean {
         val presets = getVisiblePresets()
         if (presets.isEmpty()) {
-            NotificationUtils.showInfo(project, "No presets found in settings.")
+            NotificationUtils.showInfo(project, "No presets found.")
             return false
         }
         return true
@@ -132,7 +132,7 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
             if (allSuitablePresets.isNotEmpty()) {
                 availablePresets = allSuitablePresets
             } else {
-                NotificationUtils.showInfo(project, "No suitable presets found in settings.")
+                NotificationUtils.showInfo(project, "No suitable presets found.")
                 return null
             }
         }
@@ -158,7 +158,7 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
         val presets = PresetListService.getSortedPresets()
         println("ADB_DEBUG: AdbControlsPanel.getVisiblePresets() - returned ${presets.size} presets")
         if (presets.isEmpty()) {
-            println("ADB_DEBUG: AdbControlsPanel.getVisiblePresets() - EMPTY LIST! Show All Mode: ${SettingsService.getShowAllPresetsMode()}")
+            println("ADB_DEBUG: AdbControlsPanel.getVisiblePresets() - EMPTY LIST! Show All Mode: ${PresetStorageService.getShowAllPresetsMode()}")
         }
         return presets
     }
@@ -219,7 +219,7 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                 DeviceStateService.handleReset(resetSize, resetDpi)
                 
                 // Немедленно уведомляем об обновлении до UI обновлений
-                SettingsDialogUpdateNotifier.notifyUpdate()
+                PresetsDialogUpdateNotifier.notifyUpdate()
                 
                 ApplicationManager.getApplication().invokeLater {
                     showResetResult(devices.size, resetSize, resetDpi)
@@ -508,7 +508,7 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
 
     private fun handleScrcpyNotFound(deviceInfo: DeviceInfo) {
         ApplicationManager.getApplication().invokeLater {
-            NotificationUtils.showInfo(project, "scrcpy executable not found in PATH or settings. Please select the file.")
+            NotificationUtils.showInfo(project, "scrcpy executable not found in PATH. Please select the file.")
             showScrcpyCompatibilityDialog(deviceInfo)
         }
     }
@@ -559,8 +559,8 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
 
     // ==================== SETTINGS ====================
 
-    private fun openPresetSettings() {
-        SettingsDialog(project).show()
+    private fun openPresetsDialog() {
+        PresetsDialog(project).show()
     }
     
     // ==================== LIFECYCLE ====================

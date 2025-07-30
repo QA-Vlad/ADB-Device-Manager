@@ -19,7 +19,7 @@ import io.github.qavlad.adbrandomizer.ui.services.TableLoader
 import io.github.qavlad.adbrandomizer.ui.services.StateManager
 import io.github.qavlad.adbrandomizer.ui.services.PresetDistributor
 import io.github.qavlad.adbrandomizer.ui.services.TableColumnManager
-import io.github.qavlad.adbrandomizer.ui.services.SettingsPersistenceService
+import io.github.qavlad.adbrandomizer.ui.services.PresetsPersistenceService
 import io.github.qavlad.adbrandomizer.ui.services.PresetOrderManager
 import io.github.qavlad.adbrandomizer.ui.services.TableSortingService
 import io.github.qavlad.adbrandomizer.ui.services.TableStateTracker
@@ -40,9 +40,9 @@ import io.github.qavlad.adbrandomizer.services.DevicePreset
  * Контроллер для диалога настроек.
  * Управляет всей логикой, обработкой событий и состоянием.
  */
-class SettingsDialogController(
+class PresetsDialogController(
     private val project: Project?,
-    private val dialog: SettingsDialog
+    private val dialog: PresetsDialog
 ) : CommandContext {
     // UI компоненты
     override lateinit var table: JBTable
@@ -85,7 +85,7 @@ class SettingsDialogController(
     private val snapshotManager = SnapshotManager(duplicateManager)
     private val validationService = ValidationService()
     private val stateManager = StateManager()
-    private val settingsPersistenceService = SettingsPersistenceService()
+    private val settingsPersistenceService = PresetsPersistenceService()
     private val componentsFactory = DialogComponentsFactory()
     private val eventHandlersInitializer = EventHandlersInitializer(this)
     private val dialogState = DialogStateManager()
@@ -174,7 +174,7 @@ class SettingsDialogController(
      * Создает модель таблицы с начальными данными
      */
     fun createTableModel(): DevicePresetTableModel {
-        val showCounters = SettingsService.getShowCounters()
+        val showCounters = PresetStorageService.getShowCounters()
         tableModel = componentsFactory.createTableModel(historyManager, showCounters)
         // НЕ добавляем слушатель здесь, так как table еще не создана
 
@@ -318,7 +318,7 @@ class SettingsDialogController(
             tableConfigurator,
             { dialogState.isShowAllPresetsMode() },
             { dialogState.isHideDuplicatesMode() },
-            { SettingsService.getShowCounters() }
+            { PresetStorageService.getShowCounters() }
         )
 
         println("ADB_DEBUG: After tableConfigurator.configure() - currentPresetList: ${currentPresetList?.name}, presets: ${currentPresetList?.presets?.size}")
@@ -360,7 +360,7 @@ class SettingsDialogController(
         println("ADB_DEBUG: Setting checkbox states - showAll: ${dialogState.isShowAllPresetsMode()}, hideDuplicates: ${dialogState.isHideDuplicatesMode()}")
         listManagerPanel.setShowAllPresets(dialogState.isShowAllPresetsMode())
         listManagerPanel.setHideDuplicates(dialogState.isHideDuplicatesMode())
-        listManagerPanel.setShowCounters(SettingsService.getShowCounters())
+        listManagerPanel.setShowCounters(PresetStorageService.getShowCounters())
 
         // Сбрасываем флаг первой загрузки после небольшой задержки чтобы таблица успела полностью загрузиться
         SwingUtilities.invokeLater {
@@ -398,7 +398,7 @@ class SettingsDialogController(
                 println("ADB_DEBUG: Header clicked - columnIndex: $columnIndex")
                 
                 // Проверяем, является ли колонка сортируемой
-                val hasCounters = SettingsService.getShowCounters()
+                val hasCounters = PresetStorageService.getShowCounters()
                 val listColumnIndex = if (hasCounters) 8 else 6 // List колонка сдвигается при наличии счетчиков
                 
                 val isSortable = when (columnIndex) {
@@ -422,7 +422,7 @@ class SettingsDialogController(
      */
     private fun handleHeaderClick(columnIndex: Int) {
         // Определяем имя колонки
-        val hasCounters = SettingsService.getShowCounters()
+        val hasCounters = PresetStorageService.getShowCounters()
         val listColumnIndex = if (hasCounters) 8 else 6
         
         println("ADB_DEBUG: handleHeaderClick - columnIndex: $columnIndex, hasCounters: $hasCounters")
@@ -728,7 +728,7 @@ class SettingsDialogController(
         initialHiddenDuplicates.clear()
         currentHiddenDuplicates.clear()
         
-        if (SettingsService.getHideDuplicatesMode()) {
+        if (PresetStorageService.getHideDuplicatesMode()) {
             println("ADB_DEBUG: Hide Duplicates mode is already enabled, tracking initial hidden duplicates")
             loadedLists.forEach { (listId, list) ->
                 val hiddenIds = mutableSetOf<String>()
@@ -1643,14 +1643,14 @@ class SettingsDialogController(
                 }
             }
         }
-        updateListener?.let { SettingsDialogUpdateNotifier.addListener(it) }
+        updateListener?.let { PresetsDialogUpdateNotifier.addListener(it) }
     }
 
     /**
      * Обновляет счетчики использования в таблице
      */
     private fun updateTableCounters() {
-        val showCounters = SettingsService.getShowCounters()
+        val showCounters = PresetStorageService.getShowCounters()
         if (!showCounters || tableModel.columnCount < 7) return  // Нет колонок счетчиков
         
         // Обновляем счетчики для всех строк в таблице
@@ -1729,7 +1729,7 @@ class SettingsDialogController(
     }
 
     fun dispose() {
-        updateListener?.let { SettingsDialogUpdateNotifier.removeListener(it) }
+        updateListener?.let { PresetsDialogUpdateNotifier.removeListener(it) }
         keyboardHandler.removeGlobalKeyListener()
         
         // Отключаем кэш и очищаем его

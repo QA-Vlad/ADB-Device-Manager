@@ -2,14 +2,14 @@ package io.github.qavlad.adbrandomizer.ui.components
 
 import io.github.qavlad.adbrandomizer.ui.commands.UndoableCommand
 import io.github.qavlad.adbrandomizer.ui.commands.*
-import io.github.qavlad.adbrandomizer.ui.dialogs.SettingsDialogController
+import io.github.qavlad.adbrandomizer.ui.dialogs.PresetsDialogController
 import io.github.qavlad.adbrandomizer.services.DevicePreset
 
 /**
  * Менеджер истории команд, работающий с паттерном Command
  */
 class CommandHistoryManager(
-    private val controller: SettingsDialogController,
+    private val controller: PresetsDialogController,
     private val maxHistorySize: Int = 50
 ) {
     private val historyStack = mutableListOf<UndoableCommand>()

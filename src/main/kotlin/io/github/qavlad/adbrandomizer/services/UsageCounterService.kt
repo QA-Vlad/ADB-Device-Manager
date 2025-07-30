@@ -26,14 +26,14 @@ object UsageCounterService {
     private fun loadCounters() {
         try {
             // Загружаем счетчики Size
-            val sizeJson = SettingsService.getStringList(SIZE_COUNTERS_KEY).firstOrNull()
+            val sizeJson = PresetStorageService.getStringList(SIZE_COUNTERS_KEY).firstOrNull()
             if (!sizeJson.isNullOrBlank()) {
                 val type = object : TypeToken<Map<String, Int>>() {}.type
                 sizeCounters = gson.fromJson<Map<String, Int>>(sizeJson, type).toMutableMap()
             }
             
             // Загружаем счетчики DPI
-            val dpiJson = SettingsService.getStringList(DPI_COUNTERS_KEY).firstOrNull()
+            val dpiJson = PresetStorageService.getStringList(DPI_COUNTERS_KEY).firstOrNull()
             if (!dpiJson.isNullOrBlank()) {
                 val type = object : TypeToken<Map<String, Int>>() {}.type
                 dpiCounters = gson.fromJson<Map<String, Int>>(dpiJson, type).toMutableMap()
@@ -49,10 +49,10 @@ object UsageCounterService {
     private fun saveCounters() {
         try {
             val sizeJson = gson.toJson(sizeCounters)
-            SettingsService.setStringList(SIZE_COUNTERS_KEY, listOf(sizeJson))
+            PresetStorageService.setStringList(SIZE_COUNTERS_KEY, listOf(sizeJson))
             
             val dpiJson = gson.toJson(dpiCounters)
-            SettingsService.setStringList(DPI_COUNTERS_KEY, listOf(dpiJson))
+            PresetStorageService.setStringList(DPI_COUNTERS_KEY, listOf(dpiJson))
         } catch (e: Exception) {
             println("Error saving usage counters: ${e.message}")
         }

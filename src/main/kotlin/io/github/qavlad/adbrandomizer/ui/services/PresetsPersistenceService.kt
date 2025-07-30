@@ -9,7 +9,7 @@ import io.github.qavlad.adbrandomizer.services.PresetListService
  * Сервис для управления сохранением настроек плагина.
  * Централизует логику сохранения списков пресетов и связанных данных.
  */
-class SettingsPersistenceService {
+class PresetsPersistenceService {
     
     /**
      * Сохраняет все настройки

@@ -76,7 +76,7 @@ object DeviceStateService {
 
     
     fun getCurrentActivePresets(): ActivePresetInfo {
-        val allPresets = SettingsService.getPresets()
+        val allPresets = PresetStorageService.getPresets()
         val connectedDevices = getConnectedDeviceStates()
 
         if (connectedDevices.isEmpty()) {

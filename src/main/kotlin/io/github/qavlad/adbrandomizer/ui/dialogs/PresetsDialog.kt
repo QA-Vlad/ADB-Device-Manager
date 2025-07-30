@@ -19,16 +19,16 @@ import io.github.qavlad.adbrandomizer.utils.ButtonUtils
 import java.awt.Desktop
 
 /**
- * Диалог настроек ADB Randomizer.
- * Использует SettingsDialogController для управления логикой.
+ * Диалог управления пресетами ADB Randomizer.
+ * Использует PresetsDialogController для управления логикой.
  */
-class SettingsDialog(project: Project?) : DialogWrapper(project) {
+class PresetsDialog(project: Project?) : DialogWrapper(project) {
     
-    private val controller = SettingsDialogController(project, this)
+    private val controller = PresetsDialogController(project, this)
 
     init {
-        PluginLogger.debug(LogCategory.UI_EVENTS, "SettingsDialog constructor called")
-        title = "ADB Randomizer Settings"
+        PluginLogger.debug(LogCategory.UI_EVENTS, "PresetsDialog constructor called")
+        title = "ADB Randomizer Presets"
         setOKButtonText("Save")
         init()
         
@@ -62,7 +62,7 @@ class SettingsDialog(project: Project?) : DialogWrapper(project) {
 
         // Создаем UI
         val scrollPane = JBScrollPane(table).apply { 
-            preferredSize = Dimension(PluginConfig.UI.SETTINGS_DIALOG_WIDTH, PluginConfig.UI.SETTINGS_DIALOG_HEIGHT - 90) 
+            preferredSize = Dimension(PluginConfig.UI.PRESETS_DIALOG_WIDTH, PluginConfig.UI.PRESETS_DIALOG_HEIGHT - 90) 
         }
 
         // Используем новую панель с кнопкой добавления

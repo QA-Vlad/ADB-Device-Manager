@@ -21,14 +21,14 @@ object ScrcpyService {
         PluginConfig.Scrcpy.SCRCPY_NAMES["default"]!!
 
     fun findScrcpyExecutable(): String? {
-        val savedPath = SettingsService.getScrcpyPath()
+        val savedPath = PresetStorageService.getScrcpyPath()
         if (savedPath != null && File(savedPath).canExecute()) {
             return savedPath
         }
 
         val pathFromSystem = AdbPathResolver.findExecutableInSystemPath(scrcpyName)
         if (pathFromSystem != null) {
-            SettingsService.saveScrcpyPath(pathFromSystem)
+            PresetStorageService.saveScrcpyPath(pathFromSystem)
             return pathFromSystem
         }
 

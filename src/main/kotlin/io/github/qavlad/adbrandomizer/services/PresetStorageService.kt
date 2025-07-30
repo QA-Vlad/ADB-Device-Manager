@@ -7,7 +7,7 @@ import com.google.gson.reflect.TypeToken
 import com.intellij.ide.util.PropertiesComponent
 import io.github.qavlad.adbrandomizer.config.PluginConfig
 
-object SettingsService {
+object PresetStorageService {
     // Ключ, под которым мы будем хранить весь JSON со списком пресетов
     private const val PRESETS_KEY = PluginConfig.SettingsKeys.PRESETS_KEY
     // Ключ для хранения пути к scrcpy

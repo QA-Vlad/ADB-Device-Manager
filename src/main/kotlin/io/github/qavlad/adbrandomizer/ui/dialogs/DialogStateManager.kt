@@ -1,6 +1,6 @@
 package io.github.qavlad.adbrandomizer.ui.dialogs
 
-import io.github.qavlad.adbrandomizer.services.SettingsService
+import io.github.qavlad.adbrandomizer.services.PresetStorageService
 
 /**
  * Управляет состоянием диалога настроек
@@ -29,8 +29,8 @@ class DialogStateManager {
     
     init {
         // Загружаем сохраненные состояния режимов
-        showAllPresetsMode = SettingsService.getShowAllPresetsMode()
-        hideDuplicatesMode = SettingsService.getHideDuplicatesMode()
+        showAllPresetsMode = PresetStorageService.getShowAllPresetsMode()
+        hideDuplicatesMode = PresetStorageService.getHideDuplicatesMode()
     }
     
     // === Режимы отображения ===
@@ -39,14 +39,14 @@ class DialogStateManager {
     
     fun setShowAllPresetsMode(value: Boolean) {
         showAllPresetsMode = value
-        SettingsService.setShowAllPresetsMode(value)
+        PresetStorageService.setShowAllPresetsMode(value)
     }
     
     fun isHideDuplicatesMode() = hideDuplicatesMode
     
     fun setHideDuplicatesMode(value: Boolean) {
         hideDuplicatesMode = value
-        SettingsService.setHideDuplicatesMode(value)
+        PresetStorageService.setHideDuplicatesMode(value)
     }
     
     // === Флаги процессов ===

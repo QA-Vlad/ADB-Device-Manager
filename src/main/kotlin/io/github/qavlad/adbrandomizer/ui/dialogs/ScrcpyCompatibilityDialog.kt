@@ -11,7 +11,7 @@ import com.intellij.ui.components.JBTextArea
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.UIUtil
 import io.github.qavlad.adbrandomizer.config.PluginConfig
-import io.github.qavlad.adbrandomizer.services.SettingsService
+import io.github.qavlad.adbrandomizer.services.PresetStorageService
 import io.github.qavlad.adbrandomizer.utils.ButtonUtils
 import java.awt.*
 import java.io.File
@@ -326,7 +326,7 @@ class ScrcpyCompatibilityDialog(
             }
 
             if (isValidScrcpyPath(resolvedScrcpyPath)) {
-                SettingsService.saveScrcpyPath(resolvedScrcpyPath)
+                PresetStorageService.saveScrcpyPath(resolvedScrcpyPath)
                 SwingUtilities.invokeLater {
                     close(RETRY_EXIT_CODE)
                 }

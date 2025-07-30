@@ -1,7 +1,7 @@
 package io.github.qavlad.adbrandomizer.ui.services
 
 import io.github.qavlad.adbrandomizer.services.DevicePreset
-import io.github.qavlad.adbrandomizer.services.SettingsService
+import io.github.qavlad.adbrandomizer.services.PresetStorageService
 import io.github.qavlad.adbrandomizer.services.UsageCounterService
 import com.google.gson.Gson
 
@@ -359,7 +359,7 @@ object TableSortingService {
      */
     fun getCurrentSortType(columnIndex: Int, isShowAll: Boolean, isHideDuplicates: Boolean): SortType {
         val state = getSortState(isShowAll, isHideDuplicates)
-        val hasCounters = SettingsService.getShowCounters()
+        val hasCounters = PresetStorageService.getShowCounters()
         
         return when (columnIndex) {
             2 -> state.labelSort
@@ -488,9 +488,9 @@ object TableSortingService {
         println("ADB_DEBUG:   showAllJson: $showAllJson")
         println("ADB_DEBUG:   showAllHideDupJson: $showAllHideDupJson")
         
-        SettingsService.setStringList(NORMAL_MODE_SORT_STATE, listOf(normalJson))
-        SettingsService.setStringList(SHOW_ALL_SORT_STATE, listOf(showAllJson))
-        SettingsService.setStringList(SHOW_ALL_HIDE_DUP_SORT_STATE, listOf(showAllHideDupJson))
+        PresetStorageService.setStringList(NORMAL_MODE_SORT_STATE, listOf(normalJson))
+        PresetStorageService.setStringList(SHOW_ALL_SORT_STATE, listOf(showAllJson))
+        PresetStorageService.setStringList(SHOW_ALL_HIDE_DUP_SORT_STATE, listOf(showAllHideDupJson))
     }
     
     /**
@@ -515,7 +515,7 @@ object TableSortingService {
      * Загружает состояние сортировки из настроек
      */
     private fun loadSortState(key: String, targetState: SortState) {
-        val json = SettingsService.getStringList(key).firstOrNull()
+        val json = PresetStorageService.getStringList(key).firstOrNull()
         println("ADB_DEBUG: Loading sort state for key: $key")
         println("ADB_DEBUG:   json: $json")
         if (json != null) {
@@ -530,8 +530,8 @@ object TableSortingService {
      */
     fun getCurrentSortState(): SortState? {
         // Определяем текущий режим
-        val isShowAll = SettingsService.getShowAllPresetsMode()
-        val isHideDuplicates = SettingsService.getHideDuplicatesMode()
+        val isShowAll = PresetStorageService.getShowAllPresetsMode()
+        val isHideDuplicates = PresetStorageService.getHideDuplicatesMode()
         
         val state = getSortState(isShowAll, isHideDuplicates)
         return if (state.activeColumn != null) state else null

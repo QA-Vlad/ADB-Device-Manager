@@ -48,7 +48,7 @@ object PresetApplicationService {
                 DeviceStateService.setLastAppliedPresets(appliedSizePreset, appliedDpiPreset)
                 
                 // Немедленно уведомляем об обновлении до UI обновлений
-                SettingsDialogUpdateNotifier.notifyUpdate()
+                PresetsDialogUpdateNotifier.notifyUpdate()
                 
                 ApplicationManager.getApplication().invokeLater {
                     // Добавляем дополнительную задержку для обеспечения обновления таблицы
@@ -91,7 +91,7 @@ object PresetApplicationService {
                         showPresetApplicationResult(project, preset, displayNumber, presetData.appliedSettings)
                     }
                     // Уведомляем все открытые диалоги настроек об обновлении
-                    SettingsDialogUpdateNotifier.notifyUpdate()
+                    PresetsDialogUpdateNotifier.notifyUpdate()
                 }
             }
         }.queue()

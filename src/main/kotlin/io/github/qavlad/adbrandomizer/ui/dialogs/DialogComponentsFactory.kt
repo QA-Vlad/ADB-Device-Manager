@@ -45,7 +45,7 @@ class DialogComponentsFactory {
         onValidateFields: () -> Unit,
         onSyncTableChanges: () -> Unit,
         onTableRepaint: () -> Unit,
-        controller: SettingsDialogController? = null
+        controller: PresetsDialogController? = null
     ): TableModelListenerWithTimer {
         return TableModelListenerWithTimer(
             dialogState = dialogState,
@@ -101,7 +101,7 @@ class TableModelListenerWithTimer(
     private val onValidateFields: () -> Unit,
     private val onSyncTableChanges: () -> Unit,
     private val onTableRepaint: () -> Unit,
-    private val controller: SettingsDialogController? = null,
+    private val controller: PresetsDialogController? = null,
     private val batchDelay: Int = 50
 ) {
     private var pendingTableUpdates = 0

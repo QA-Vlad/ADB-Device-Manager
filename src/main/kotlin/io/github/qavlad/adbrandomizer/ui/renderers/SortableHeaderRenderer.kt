@@ -3,7 +3,7 @@ package io.github.qavlad.adbrandomizer.ui.renderers
 import com.intellij.icons.AllIcons
 import io.github.qavlad.adbrandomizer.ui.services.TableSortingService
 import io.github.qavlad.adbrandomizer.ui.services.TableSortingService.SortType
-import io.github.qavlad.adbrandomizer.services.SettingsService
+import io.github.qavlad.adbrandomizer.services.PresetStorageService
 import java.awt.*
 import javax.swing.*
 import javax.swing.table.DefaultTableCellRenderer
@@ -43,9 +43,9 @@ class SortableHeaderRenderer(
         // Проверяем, является ли колонка сортируемой
         val isSortable = when (column) {
             2, 3, 4 -> true // Label, Size, DPI
-            5 -> SettingsService.getShowCounters() // Size Uses только когда счетчики включены
-            6 -> SettingsService.getShowCounters() || (getShowAllMode() && !SettingsService.getShowCounters()) // DPI Uses когда счетчики включены, или List в Show All без счетчиков
-            8 -> getShowAllMode() && SettingsService.getShowCounters() // List в Show All режиме со счетчиками
+            5 -> PresetStorageService.getShowCounters() // Size Uses только когда счетчики включены
+            6 -> PresetStorageService.getShowCounters() || (getShowAllMode() && !PresetStorageService.getShowCounters()) // DPI Uses когда счетчики включены, или List в Show All без счетчиков
+            8 -> getShowAllMode() && PresetStorageService.getShowCounters() // List в Show All режиме со счетчиками
             else -> false
         }
         
@@ -87,13 +87,13 @@ class SortableHeaderRenderer(
                 2 -> "Click to sort by label"
                 3 -> "Click to sort by size (sum of width and height)"
                 4 -> "Click to sort by DPI value"
-                5 -> if (SettingsService.getShowCounters()) "Click to sort by size usage count" else null
+                5 -> if (PresetStorageService.getShowCounters()) "Click to sort by size usage count" else null
                 6 -> when {
-                    SettingsService.getShowCounters() -> "Click to sort by DPI usage count"
+                    PresetStorageService.getShowCounters() -> "Click to sort by DPI usage count"
                     getShowAllMode() -> "Click to sort by list name"
                     else -> null
                 }
-                8 -> if (getShowAllMode() && SettingsService.getShowCounters()) "Click to sort by list name" else null
+                8 -> if (getShowAllMode() && PresetStorageService.getShowCounters()) "Click to sort by list name" else null
                 else -> null
             }
         } else {

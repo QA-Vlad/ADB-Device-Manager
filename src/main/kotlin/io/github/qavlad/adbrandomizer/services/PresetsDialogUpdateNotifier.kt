@@ -1,6 +1,6 @@
 package io.github.qavlad.adbrandomizer.services
 
-object SettingsDialogUpdateNotifier {
+object PresetsDialogUpdateNotifier {
     
     private val listeners = mutableSetOf<() -> Unit>()
     

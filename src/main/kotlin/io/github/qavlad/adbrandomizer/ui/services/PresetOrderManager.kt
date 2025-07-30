@@ -3,7 +3,7 @@ package io.github.qavlad.adbrandomizer.ui.services
 import io.github.qavlad.adbrandomizer.services.DevicePreset
 import io.github.qavlad.adbrandomizer.services.PresetList
 import io.github.qavlad.adbrandomizer.services.PresetListService
-import io.github.qavlad.adbrandomizer.services.SettingsService
+import io.github.qavlad.adbrandomizer.services.PresetStorageService
 
 /**
  * Менеджер для управления порядком пресетов в разных режимах отображения.
@@ -34,7 +34,7 @@ class PresetOrderManager {
         order.forEachIndexed { index, item ->
             println("ADB_DEBUG:   [$index] $item")
         }
-        SettingsService.setStringList(key, order)
+        PresetStorageService.setStringList(key, order)
     }
 
     /**
@@ -42,7 +42,7 @@ class PresetOrderManager {
      */
     fun getNormalModeOrder(listId: String): List<String>? {
         val key = "$NORMAL_MODE_ORDER_PREFIX$listId"
-        val order = SettingsService.getStringList(key)
+        val order = PresetStorageService.getStringList(key)
         return order.ifEmpty { null }
     }
 
@@ -71,14 +71,14 @@ class PresetOrderManager {
      */
     fun saveShowAllHideDuplicatesOrder(visiblePresets: List<Pair<String, DevicePreset>>) {
         val order = visiblePresets.map { "${it.first}::${it.second.id}" }
-        SettingsService.setStringList(SHOW_ALL_HIDE_DUPLICATES_ORDER, order)
+        PresetStorageService.setStringList(SHOW_ALL_HIDE_DUPLICATES_ORDER, order)
     }
     
     /**
      * Получает сохраненный порядок для режима Show All со скрытыми дубликатами
      */
     fun getShowAllHideDuplicatesOrder(): List<String>? {
-        val order = SettingsService.getStringList(SHOW_ALL_HIDE_DUPLICATES_ORDER)
+        val order = PresetStorageService.getStringList(SHOW_ALL_HIDE_DUPLICATES_ORDER)
         return order.ifEmpty { null }
     }
 
@@ -86,7 +86,7 @@ class PresetOrderManager {
      * Проверяет, был ли зафиксирован порядок для режима Show All
      */
     fun hasFixedShowAllOrder(): Boolean {
-        return SettingsService.getStringList(SHOW_ALL_FIXED_ORDER).isNotEmpty()
+        return PresetStorageService.getStringList(SHOW_ALL_FIXED_ORDER).isNotEmpty()
     }
 
     /**
@@ -106,14 +106,14 @@ class PresetOrderManager {
             }
         }
         
-        SettingsService.setStringList(SHOW_ALL_FIXED_ORDER, fixedOrder)
+        PresetStorageService.setStringList(SHOW_ALL_FIXED_ORDER, fixedOrder)
     }
     
     /**
      * Получает зафиксированный порядок для режима Show All
      */
     fun getFixedShowAllOrder(): List<String> {
-        return SettingsService.getStringList(SHOW_ALL_FIXED_ORDER)
+        return PresetStorageService.getStringList(SHOW_ALL_FIXED_ORDER)
     }
     
     /**
@@ -123,7 +123,7 @@ class PresetOrderManager {
         val fixedOrder = getFixedShowAllOrder().toMutableList()
         val keyToRemove = "${listName}::${preset.id}"
         fixedOrder.remove(keyToRemove)
-        SettingsService.setStringList(SHOW_ALL_FIXED_ORDER, fixedOrder)
+        PresetStorageService.setStringList(SHOW_ALL_FIXED_ORDER, fixedOrder)
     }
     
     /**
@@ -159,7 +159,7 @@ class PresetOrderManager {
             fixedOrder.add(newKey)
         }
         
-        SettingsService.setStringList(SHOW_ALL_FIXED_ORDER, fixedOrder)
+        PresetStorageService.setStringList(SHOW_ALL_FIXED_ORDER, fixedOrder)
     }
     
     /**
@@ -171,7 +171,7 @@ class PresetOrderManager {
             "${listName}::${preset.id}"
         }
         
-        SettingsService.setStringList(SHOW_ALL_FIXED_ORDER, fixedOrder)
+        PresetStorageService.setStringList(SHOW_ALL_FIXED_ORDER, fixedOrder)
         println("ADB_DEBUG: PresetOrderManager.updateFixedShowAllOrder - updated fixed order with ${fixedOrder.size} items")
     }
 

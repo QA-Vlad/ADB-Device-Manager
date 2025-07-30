@@ -12,7 +12,7 @@ import io.github.qavlad.adbrandomizer.ui.services.SelectionTracker
  * Централизует всю логику подключения слушателей и обработчиков.
  */
 class EventHandlersInitializer(
-    private val controller: SettingsDialogController
+    private val controller: PresetsDialogController
 ) {
     /**
      * Создает и инициализирует панель управления списками
@@ -280,7 +280,7 @@ class EventHandlersInitializer(
         controller.stopTableEditing()
         
         // Сохраняем настройку
-        SettingsService.setShowCounters(showCounters)
+        PresetStorageService.setShowCounters(showCounters)
         
         // Пересоздаем колонки таблицы
         onSetupTableColumns()

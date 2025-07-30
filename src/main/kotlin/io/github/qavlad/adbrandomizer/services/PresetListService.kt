@@ -466,8 +466,8 @@ object PresetListService {
      * Получает отсортированный список пресетов с учетом текущего режима и сортировки
      */
     fun getSortedPresets(): List<DevicePreset> {
-        val isShowAllMode = SettingsService.getShowAllPresetsMode()
-        val isHideDuplicatesMode = SettingsService.getHideDuplicatesMode()
+        val isShowAllMode = PresetStorageService.getShowAllPresetsMode()
+        val isHideDuplicatesMode = PresetStorageService.getHideDuplicatesMode()
         
         PluginLogger.debug(LogCategory.PRESET_SERVICE, "getSortedPresets - isShowAllMode: %s, isHideDuplicatesMode: %s", isShowAllMode, isHideDuplicatesMode)
         
