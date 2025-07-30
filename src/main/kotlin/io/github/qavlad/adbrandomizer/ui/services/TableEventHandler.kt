@@ -173,6 +173,7 @@ class TableEventHandler(
         
         if (clickCount == 0) {
             // Клик от ПКМ - только выделяем ячейку, без редактирования
+            println("ADB_DEBUG: TableEventHandler - right click at ($row, $column)")
             setHoverState?.invoke(currentHoverState?.withTableSelection(row, column) ?: HoverState().withTableSelection(row, column))
             
             // Перерисовываем таблицу для отображения выделения

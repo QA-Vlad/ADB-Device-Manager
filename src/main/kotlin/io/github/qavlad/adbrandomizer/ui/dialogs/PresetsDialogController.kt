@@ -25,6 +25,7 @@ import io.github.qavlad.adbrandomizer.ui.services.PresetOrderManager
 import io.github.qavlad.adbrandomizer.ui.services.TableSortingService
 import io.github.qavlad.adbrandomizer.ui.services.TableStateTracker
 import io.github.qavlad.adbrandomizer.ui.services.PresetRecycleBin
+import io.github.qavlad.adbrandomizer.ui.services.HoverStateManager
 import io.github.qavlad.adbrandomizer.ui.renderers.ValidationRenderer
 import io.github.qavlad.adbrandomizer.utils.ButtonUtils
 import java.awt.Container
@@ -63,6 +64,7 @@ class PresetsDialogController(
     private var tableWithButtonPanel: TableWithAddButtonPanel? = null
 
     // Состояние
+    private lateinit var hoverStateManager: HoverStateManager
     var hoverState = HoverState.noHover()
         private set
     private var isDuplicatingPreset = false
@@ -78,11 +80,8 @@ class PresetsDialogController(
 
     override fun getPresetRecycleBin(): PresetRecycleBin = presetRecycleBin
     private val presetOperationsService = PresetOperationsService(historyManager, presetOrderManager)
-    private val tableEventHandler = TableEventHandler(
-        project = project,
-        getHoverState = { hoverState },
-        setHoverState = { newState -> hoverState = newState }
-    )
+    // TableEventHandler будет инициализирован после создания таблицы и HoverStateManager
+    private lateinit var tableEventHandler: TableEventHandler
     private val snapshotManager = SnapshotManager(duplicateManager)
     private val validationService = ValidationService()
     private val stateManager = StateManager()
@@ -141,8 +140,7 @@ class PresetsDialogController(
     // Слушатель модели таблицы с таймером
     private var tableModelListenerWithTimer: TableModelListenerWithTimer? = null
     
-    // Последняя взаимодействующая строка (для drag and drop после редактирования)
-    private var lastInteractedRow: Int = -1
+    // Последняя взаимодействующая строка теперь управляется через HoverStateManager
     
     // Хранение начального состояния скрытых дублей для каждого списка
     private val initialHiddenDuplicates = mutableMapOf<String, Set<String>>()
@@ -203,10 +201,24 @@ class PresetsDialogController(
             dialogState, 
             historyManager,
             onLastInteractedRowUpdate = { row ->
-                lastInteractedRow = row
-                println("ADB_DEBUG: SettingsDialogController - updated lastInteractedRow to $row")
+                if (::hoverStateManager.isInitialized) {
+                    hoverStateManager.updateLastInteractedRow(row)
+                }
             }
         )
+        
+        // Инициализируем HoverStateManager после создания таблицы
+        hoverStateManager = HoverStateManager(table) { newState ->
+            hoverState = newState
+        }
+        
+        // Инициализируем TableEventHandler после создания HoverStateManager
+        tableEventHandler = TableEventHandler(
+            project = project,
+            getHoverState = { hoverState },
+            setHoverState = { newState -> hoverStateManager.setState(newState) }
+        )
+        
         return table
     }
 
@@ -257,14 +269,13 @@ class PresetsDialogController(
             table = table,
             tableModel = tableModel,
             hoverState = { hoverState },
-            setHoverState = { newState -> hoverState = newState },
+            setHoverState = { newState -> hoverStateManager.setState(newState) },
             historyManager = historyManager,
             validateFields = ::validateFields,
             setEditingCellData = { oldValue, row, column ->
                 dialogState.setEditingCell(row, column, oldValue)
                 // Сохраняем последнюю взаимодействующую строку
-                lastInteractedRow = row
-                println("ADB_DEBUG: setEditingCellData - updated lastInteractedRow to $row")
+                hoverStateManager.updateLastInteractedRow(row)
             },
             onDuplicate = ::duplicatePreset,
             forceSyncBeforeHistory = ::forceSyncBeforeHistoryOperation
@@ -274,28 +285,20 @@ class PresetsDialogController(
             table = table,
             setTableFocus = { table.requestFocusInWindow() },
             clearTableSelection = { 
-                hoverState = hoverState.clearTableSelection()
-                table.repaint()
-                println("ADB_DEBUG: Cleared table selection on focus change")
+                hoverStateManager.clearTableSelection()
             },
             selectFirstCell = {
-                // Выделяем первую ячейку Label (строка 0, колонка 2) если есть строки
-                if (table.rowCount > 1) { // > 1 потому что последняя строка - это кнопка "+"
-                    hoverState = hoverState.withTableSelection(0, 2)
-                    val rect = table.getCellRect(0, 2, false)
-                    table.repaint(rect)
-                    println("ADB_DEBUG: Selected first Label cell (0, 2)")
-                }
+                hoverStateManager.selectFirstLabelCell()
             }
         )
 
         tableConfigurator = TableConfigurator(
             table = table,
             hoverState = { hoverState },
-            setHoverState = { newState -> hoverState = newState },
+            setHoverState = { newState -> hoverStateManager.setState(newState) },
             onRowMoved = ::onRowMoved,
             onCellClicked = ::handleCellClick,
-            onTableExited = ::handleTableExit,
+            onTableExited = { hoverStateManager.handleTableExit() },
             validationRenderer = validationRenderer,
             showContextMenu = ::showContextMenu,
             isShowAllPresetsMode = { dialogState.isShowAllPresetsMode() },
@@ -317,7 +320,7 @@ class PresetsDialogController(
                 
                 // Не сбрасываем флаг здесь - он будет сброшен после обработки всех обновлений
             },
-            getLastInteractedRow = { lastInteractedRow }
+            getLastInteractedRow = { hoverStateManager.getLastInteractedRow() }
         )
 
         tableConfigurator.configure()
@@ -336,12 +339,7 @@ class PresetsDialogController(
         setupTableColumns()
         
         // Устанавливаем функцию обновления HoverState для SelectionTracker
-        SelectionTracker.setHoverStateUpdater { row, column ->
-            hoverState = hoverState.withTableSelection(row, column)
-            val rect = table.getCellRect(row, column, false)
-            table.repaint(rect)
-            println("ADB_DEBUG: SelectionTracker updated HoverState - row: $row, column: $column")
-        }
+        hoverStateManager.setupSelectionTracker()
         
         // Загружаем данные после полной инициализации
         println("ADB_DEBUG: Before loadPresetsIntoTable in initializeHandlers - currentPresetList: ${currentPresetList?.name}, presets: ${currentPresetList?.presets?.size}")
@@ -855,7 +853,9 @@ class PresetsDialogController(
         
         // Очищаем выделение при смене режимов
         if (dialogState.isSwitchingMode() || dialogState.isSwitchingList()) {
-            SelectionTracker.clearSelection()
+            if (::hoverStateManager.isInitialized) {
+                hoverStateManager.resetForModeSwitch()
+            }
         }
         
         tableLoader.loadPresetsIntoTable(
@@ -899,8 +899,9 @@ class PresetsDialogController(
             },
             table = table,
             onClearTableSelection = {
-                hoverState = hoverState.clearTableSelection()
-                table.repaint()
+                if (::hoverStateManager.isInitialized) {
+                    hoverStateManager.clearTableSelection()
+                }
             }
         )
         
@@ -990,10 +991,7 @@ class PresetsDialogController(
         }
         
         if (row >= 0 && column >= 0) {
-            // Сохраняем последнюю взаимодействующую строку
-            lastInteractedRow = row
-            println("ADB_DEBUG: handleCellClick - updated lastInteractedRow to $row")
-            
+            // Обрабатываем клик через tableEventHandler, который сам управляет состоянием
             tableEventHandler.handleCellClick(
                 table = table,
                 tableModel = tableModel,
@@ -1003,15 +1001,7 @@ class PresetsDialogController(
                 onAddNewPreset = { addNewPreset() }
             )
         } else {
-            val oldSelectedRow = hoverState.selectedTableRow
-            val oldSelectedColumn = hoverState.selectedTableColumn
-
-            hoverState = hoverState.clearTableSelection()
-
-            if (oldSelectedRow >= 0 && oldSelectedColumn >= 0) {
-                val oldRect = table.getCellRect(oldSelectedRow, oldSelectedColumn, false)
-                table.repaint(oldRect)
-            }
+            hoverStateManager.clearTableSelection()
         }
     }
 
@@ -1019,20 +1009,9 @@ class PresetsDialogController(
         globalClickListener = listener
     }
 
-    fun handleTableExit() {
-        println("ADB_DEBUG: handleTableExit called")
-        val oldHoverState = hoverState
-        hoverState = hoverState.clearTableHover()
-        println("ADB_DEBUG: Cleared hover state")
-
-        if (oldHoverState.hoveredTableRow >= 0 && oldHoverState.hoveredTableColumn >= 0) {
-            val oldRect = table.getCellRect(oldHoverState.hoveredTableRow, oldHoverState.hoveredTableColumn, false)
-            table.repaint(oldRect)
-        }
-    }
 
     fun onRowMoved(fromIndex: Int, toIndex: Int) {
-        hoverState = tableDragDropHandler.onRowMoved(
+        tableDragDropHandler.onRowMoved(
             fromIndex = fromIndex,
             toIndex = toIndex,
             tableModel = tableModel,
@@ -1040,10 +1019,12 @@ class PresetsDialogController(
             historyManager = historyManager,
             hoverState = hoverState,
             getListNameAtRow = ::getListNameAtRow,
-            onHoverStateChanged = { newState -> hoverState = newState },
+            onHoverStateChanged = { newState -> hoverStateManager.setState(newState) },
             onNormalModeOrderChanged = { normalModeOrderChanged = true },
             onModifiedListAdded = { listId -> modifiedListIds.add(listId) }
         )
+        
+        hoverStateManager.updateAfterRowMove(fromIndex, toIndex)
         
         // Обновляем заголовок таблицы, чтобы убрать визуальный индикатор сортировки
         table.tableHeader.repaint()
@@ -1122,7 +1103,7 @@ class PresetsDialogController(
                 addButtonRow()
                 
                 SwingUtilities.invokeLater {
-                    hoverState = hoverState.withTableSelection(newRowIndex, 2)
+                    hoverStateManager.setTableSelection(newRowIndex, 2)
                     table.scrollRectToVisible(table.getCellRect(newRowIndex, 2, true))
                     table.editCellAt(newRowIndex, 2)
                     table.editorComponent?.requestFocus()
@@ -1168,7 +1149,7 @@ class PresetsDialogController(
                 SwingUtilities.invokeLater {
                     val insertIndex = row + 1
                     table.scrollRectToVisible(table.getCellRect(insertIndex, 0, true))
-                    hoverState = hoverState.withTableSelection(insertIndex, 2)
+                    hoverStateManager.setTableSelection(insertIndex, 2)
                     table.repaint()
                 }
             }
@@ -1827,8 +1808,9 @@ class PresetsDialogController(
             },
             table = table,
             onClearTableSelection = {
-                hoverState = hoverState.clearTableSelection()
-                table.repaint()
+                if (::hoverStateManager.isInitialized) {
+                    hoverStateManager.clearTableSelection()
+                }
             }
         )
         
@@ -1854,7 +1836,11 @@ class PresetsDialogController(
             onTableUpdating = { dialogState.setTableUpdating(it) },
             onAddButtonRow = ::addButtonRow,
             onSaveCurrentTableOrder = ::saveCurrentTableOrderToMemory,
-            onClearLastInteractedRow = { lastInteractedRow = -1 },
+            onClearLastInteractedRow = { 
+                if (::hoverStateManager.isInitialized) {
+                    hoverStateManager.updateLastInteractedRow(-1)
+                }
+            },
             tableModelListener = tableModelListener,
             inMemoryOrder = inMemoryTableOrder,
             initialHiddenDuplicates = initialHiddenDuplicates
@@ -1915,9 +1901,8 @@ class PresetsDialogController(
     
     fun clearTableSelection() {
         // Очищаем выделение из HoverState
-        hoverState = hoverState.clearTableSelection()
-        if (::table.isInitialized) {
-            table.repaint()
+        if (::hoverStateManager.isInitialized) {
+            hoverStateManager.clearTableSelection()
         }
     }
     
