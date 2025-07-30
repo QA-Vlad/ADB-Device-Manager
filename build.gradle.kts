@@ -1,4 +1,4 @@
-// Файл: build.gradle.kts
+    // Файл: build.gradle.kts
 
 import java.util.Properties
 import java.io.FileInputStream
@@ -29,9 +29,9 @@ repositories {
 }
 
 intellij {
-    version.set("2023.2.5")
+    version.set("2023.2")
     type.set("IC")
-    plugins.set(listOf("org.jetbrains.android"))
+    plugins.set(listOf())
 
     // Позволяет локально переопределить путь к sandbox
     sandboxDir.set(project.findProperty("intellij.sandboxDir") as String? ?: "build/idea-sandbox")
@@ -39,6 +39,10 @@ intellij {
 
 dependencies {
     implementation("com.google.code.gson:gson:2.10.1")
+    
+    // Android ddmlib для работы с ADB
+    implementation("com.android.tools.ddms:ddmlib:31.3.2")
+    implementation("com.android.tools:sdk-common:31.3.2")
     
     // Тестовые зависимости
     testImplementation("junit:junit:4.13.2")
@@ -79,7 +83,7 @@ tasks {
             </ul>
         """.trimIndent())
 
-        sinceBuild.set("232")
-        untilBuild.set("242.*")
+        sinceBuild.set("223")
+        untilBuild.set("")  // Пустая строка означает отсутствие ограничения максимальной версии
     }
 }
