@@ -32,6 +32,9 @@ class PresetsPersistenceService {
         // Очищаем пустые пресеты перед сохранением
         cleanupEmptyPresets(tempLists)
         
+        // Удаляем файлы для списков, которые были удалены
+        cleanupDeletedListFiles(tempLists)
+        
         // В режиме Show All не сохраняем изменения порядка в обычных списках
         // Сохраняем только обновления содержимого пресетов
         if (isShowAllPresetsMode) {
@@ -105,6 +108,30 @@ class PresetsPersistenceService {
                 preset.label.trim().isEmpty() &&
                 preset.size.trim().isEmpty() &&
                 preset.dpi.trim().isEmpty()
+            }
+        }
+    }
+    
+    /**
+     * Удаляет файлы для списков, которые были удалены из UI
+     */
+    private fun cleanupDeletedListFiles(tempLists: Map<String, PresetList>) {
+        println("ADB_DEBUG: cleanupDeletedListFiles called")
+        println("ADB_DEBUG: tempLists.size: ${tempLists.size}")
+        
+        // Получаем все сохранённые метаданные
+        val savedMetadata = PresetListService.getAllListsMetadata()
+        println("ADB_DEBUG: savedMetadata.size: ${savedMetadata.size}")
+        
+        // Находим списки, которые есть в метаданных, но нет в tempLists
+        savedMetadata.forEach { meta ->
+            println("ADB_DEBUG: Checking list '${meta.name}' (id: ${meta.id})")
+            if (!tempLists.containsKey(meta.id)) {
+                // Этот список был удалён в UI, удаляем его файл
+                println("ADB_DEBUG: List '${meta.name}' was deleted in UI, calling deleteList")
+                PresetListService.deleteList(meta.id)
+            } else {
+                println("ADB_DEBUG: List '${meta.name}' still exists in tempLists")
             }
         }
     }

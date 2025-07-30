@@ -81,8 +81,8 @@ object PresetListService {
         // Проверяем, есть ли сохраненные метаданные
         val savedMetadata = properties.getValue(LISTS_METADATA_KEY)
         if (savedMetadata.isNullOrBlank()) {
-            PluginLogger.info(LogCategory.PRESET_SERVICE, "No saved metadata found, initializing default lists")
-            // Только если нет сохраненных метаданных, инициализируем дефолтные списки
+            PluginLogger.info(LogCategory.PRESET_SERVICE, "No saved metadata found, initializing with presets from resources")
+            // При первом запуске загружаем пресеты из ресурсов
             initializeDefaultLists()
         } else {
             PluginLogger.debug(LogCategory.PRESET_SERVICE, "Found saved metadata")
@@ -107,9 +107,9 @@ object PresetListService {
         val json = properties.getValue(LISTS_METADATA_KEY)
         PluginLogger.trace(LogCategory.PRESET_SERVICE, "getAllListsMetadata - json present: %s", !json.isNullOrBlank())
         return if (json.isNullOrBlank()) {
-            // Инициализируем дефолтными списками
-            PluginLogger.info(LogCategory.PRESET_SERVICE, "Initializing default lists")
-            initializeDefaultLists()
+            // Возвращаем пустой список если нет метаданных
+            PluginLogger.info(LogCategory.PRESET_SERVICE, "No metadata found, returning empty list")
+            emptyList()
         } else {
             try {
                 val type = object : TypeToken<List<ListMetadata>>() {}.type
@@ -117,63 +117,61 @@ object PresetListService {
                 PluginLogger.debugWithRateLimit(LogCategory.PRESET_SERVICE, "metadata_load", "Loaded %d lists from metadata", metadata.size)
                 metadata
             } catch (e: Exception) {
-                PluginLogger.error(LogCategory.PRESET_SERVICE, "Error loading metadata, initializing defaults: %s", e, e.message)
-                initializeDefaultLists()
+                PluginLogger.error(LogCategory.PRESET_SERVICE, "Error loading metadata: %s", e, e.message)
+                emptyList()
             }
         }
     }
     
     /**
-     * Инициализирует дефолтные списки пресетов
+     * Инициализирует дефолтные списки пресетов из JSON файлов
      */
     private fun initializeDefaultLists(): List<ListMetadata> {
-        val defaultLists = listOf(
-            PresetList(
-                name = "Popular Phones",
-                presets = mutableListOf(
-                    DevicePreset("Pixel 7 Pro", "1440x3120", "512"),
-                    DevicePreset("Pixel 6", "1080x2400", "411"),
-                    DevicePreset("Pixel 5", "1080x2340", "432"),
-                    DevicePreset("Pixel 4a", "1080x2340", "413"),
-                    DevicePreset("Pixel 3a", "1080x2220", "441")
-                ),
-                isDefault = true
-            ),
-            PresetList(
-                name = "Samsung Devices", 
-                presets = mutableListOf(
-                    DevicePreset("Galaxy S23 Ultra", "1440x3088", "501"),
-                    DevicePreset("Galaxy S22", "1080x2340", "425"),
-                    DevicePreset("Galaxy S21", "1080x2400", "421"),
-                    DevicePreset("Galaxy S20", "1440x3200", "563"),
-                    DevicePreset("Galaxy Note 20", "1080x2400", "393")
+        val defaultLists = mutableListOf<PresetList>()
+        
+        // Сначала пытаемся загрузить из ресурсов
+        val loadedFromResources = loadPresetsFromResources()
+        if (loadedFromResources.isNotEmpty()) {
+            defaultLists.addAll(loadedFromResources)
+            PluginLogger.info(LogCategory.PRESET_SERVICE, "Loaded %d preset lists from resources", loadedFromResources.size)
+        }
+        
+        // В режиме разработки также проверяем папку проекта
+        if (isDevelopmentMode()) {
+            val projectPresetsDir = Paths.get(System.getProperty("user.dir"), "presets").toFile()
+            if (projectPresetsDir.exists() && projectPresetsDir.isDirectory) {
+                val loadedFromProject = loadPresetsFromDirectory(projectPresetsDir)
+                if (loadedFromProject.isNotEmpty()) {
+                    // Добавляем только те, которых еще нет
+                    loadedFromProject.forEach { projectList ->
+                        if (defaultLists.none { it.name == projectList.name }) {
+                            defaultLists.add(projectList)
+                        }
+                    }
+                    PluginLogger.info(LogCategory.PRESET_SERVICE, "Loaded %d additional preset lists from project directory", loadedFromProject.size)
+                }
+            }
+        }
+        
+        // Если ничего не загрузилось, создаем минимальный набор
+        if (defaultLists.isEmpty()) {
+            PluginLogger.warn(LogCategory.PRESET_SERVICE, "No preset files found, creating minimal default list")
+            defaultLists.add(
+                PresetList(
+                    name = "Default Presets",
+                    presets = mutableListOf(
+                        DevicePreset("Pixel 5", "1080x2340", "432"),
+                        DevicePreset("Generic Tablet", "1200x1920", "240")
+                    ),
+                    isDefault = true
                 )
-            ),
-            PresetList(
-                name = "Tablets",
-                presets = mutableListOf(
-                    DevicePreset("iPad Pro 12.9", "2048x2732", "264"),
-                    DevicePreset("iPad Air", "1640x2360", "264"),
-                    DevicePreset("Galaxy Tab S8", "1752x2800", "266"),
-                    DevicePreset("Generic 10\" Tablet", "1200x1920", "224"),
-                    DevicePreset("Generic 7\" Tablet", "1024x600", "170")
-                )
-            ),
-            PresetList(
-                name = "OnePlus",
-                presets = mutableListOf(
-                    DevicePreset("OnePlus 11", "1440x3216", "525"),
-                    DevicePreset("OnePlus 10 Pro", "1440x3216", "525"),
-                    DevicePreset("OnePlus 9", "1080x2400", "402"),
-                    DevicePreset("OnePlus 8T", "1080x2400", "402"),
-                    DevicePreset("OnePlus 7 Pro", "1440x3120", "516")
-                )
-            ),
-            PresetList(
-                name = "Custom Presets",
-                presets = mutableListOf()
             )
-        )
+        }
+        
+        // Убеждаемся, что есть хотя бы один список с isDefault = true
+        if (defaultLists.none { it.isDefault }) {
+            defaultLists.firstOrNull()?.isDefault = true
+        }
         
         // Сохраняем метаданные
         val metadata = defaultLists.map { ListMetadata(it.id, it.name, it.isDefault) }
@@ -337,26 +335,60 @@ object PresetListService {
      * Удаляет список пресетов
      */
     fun deleteList(listId: String): Boolean {
-        val metadata = getAllListsMetadata().toMutableList()
-        val listToRemove = metadata.find { it.id == listId } ?: return false
+        PluginLogger.info(LogCategory.PRESET_SERVICE, "deleteList called for listId: %s", listId)
         
-        // Не удаляем дефолтные списки
-        if (listToRemove.isDefault) return false
+        val metadata = getAllListsMetadata().toMutableList()
+        val listToDelete = metadata.find { it.id == listId }
+        if (listToDelete == null) {
+            PluginLogger.warn(LogCategory.PRESET_SERVICE, "List with id %s not found in metadata", listId)
+            return false
+        }
+        
+        PluginLogger.info(LogCategory.PRESET_SERVICE, "Deleting list '%s' (id: %s)", listToDelete.name, listId)
         
         // Удаляем из метаданных
         metadata.removeIf { it.id == listId }
         saveListsMetadata(metadata)
+        PluginLogger.info(LogCategory.PRESET_SERVICE, "Removed list from metadata")
         
         // Удаляем файл (проверяем оба варианта именования)
         val file = getFileForListId(listId)
         if (file != null && file.exists()) {
-            file.delete()
+            PluginLogger.info(LogCategory.PRESET_SERVICE, "Found file to delete: %s", file.absolutePath)
+            try {
+                val deleted = file.delete()
+                PluginLogger.info(LogCategory.PRESET_SERVICE, "File deletion result: %s", deleted)
+                if (!deleted) {
+                    PluginLogger.error(LogCategory.PRESET_SERVICE, "Failed to delete file: %s", null, file.absolutePath)
+                }
+            } catch (e: Exception) {
+                PluginLogger.error(LogCategory.PRESET_SERVICE, "Exception while deleting file: %s", e, e.message)
+            }
+        } else {
+            PluginLogger.warn(LogCategory.PRESET_SERVICE, "File for list %s not found by getFileForListId", listId)
+            // Логируем все файлы в директории для отладки
+            val allFiles = presetsDir.toFile().listFiles()
+            if (allFiles != null) {
+                PluginLogger.debug(LogCategory.PRESET_SERVICE, "Files in presets directory:")
+                allFiles.forEach { f ->
+                    PluginLogger.debug(LogCategory.PRESET_SERVICE, "  - %s", f.name)
+                }
+            }
         }
         
         // Также удаляем старый файл с UUID если он есть
         val oldFile = presetsDir.resolve("$listId.json").toFile()
         if (oldFile.exists()) {
-            oldFile.delete()
+            PluginLogger.info(LogCategory.PRESET_SERVICE, "Deleting old UUID file: %s", oldFile.absolutePath)
+            val deleted = oldFile.delete()
+            PluginLogger.info(LogCategory.PRESET_SERVICE, "Old file deletion result: %s", deleted)
+        }
+        
+        // Очищаем кэши
+        loadedListsCache.remove(listId)
+        if (activeListCacheId == listId) {
+            activeListCache = null
+            activeListCacheId = null
         }
         
         // Если удалили активный список, переключаемся на первый доступный
@@ -675,58 +707,30 @@ object PresetListService {
     }
 
     /**
-     * Полный сброс всех списков и пересоздание дефолтных
-     */
-    fun resetToDefaultLists() {
-        PluginLogger.info(LogCategory.PRESET_SERVICE, "Resetting to default lists")
-        // Очищаем метаданные
-        properties.unsetValue(LISTS_METADATA_KEY)
-        properties.unsetValue(ACTIVE_LIST_KEY)
-        properties.unsetValue(SHOW_ALL_PRESETS_ORDER_KEY)
-        // Удаляем все файлы в папке presets
-        if (presetsDir.toFile().exists()) {
-            presetsDir.toFile().listFiles()?.forEach { 
-                PluginLogger.debug(LogCategory.PRESET_SERVICE, "Deleting file: %s", it.name)
-                it.delete() 
-            }
-        }
-        // Пересоздаём дефолтные списки
-        initializeDefaultLists()
-    }
-    
-    /**
-     * Проверяет и восстанавливает дефолтные списки если они не существуют
+     * Проверяет что есть хотя бы один список, если нет - создает пустой
      */
     fun ensureDefaultListsExist() {
         val metadata = getAllListsMetadata()
         if (metadata.isEmpty()) {
-            PluginLogger.warn(LogCategory.PRESET_SERVICE, "No lists found, resetting to defaults")
-            resetToDefaultLists()
-            return
+            PluginLogger.warn(LogCategory.PRESET_SERVICE, "No lists found, creating minimal empty list")
+            // Создаем только один пустой список
+            val emptyList = PresetList(
+                name = "My Presets",
+                presets = mutableListOf(),
+                isDefault = false
+            )
+            
+            // Сохраняем метаданные
+            val newMetadata = listOf(ListMetadata(emptyList.id, emptyList.name, emptyList.isDefault))
+            saveListsMetadata(newMetadata)
+            
+            // Сохраняем сам список
+            savePresetList(emptyList)
+            
+            // Устанавливаем как активный
+            setActiveListId(emptyList.id)
         }
-        
-        // Проверяем, что все списки имеют файлы
-        var hasValidFiles = false
-        metadata.forEach { meta ->
-            val file = getFileForListId(meta.id)
-            if (file != null && file.exists()) {
-                hasValidFiles = true
-            } else {
-                // Пробуем найти файл по имени
-                val expectedFileName = sanitizeFileName(meta.name) + ".json"
-                val expectedFile = presetsDir.resolve(expectedFileName).toFile()
-                if (expectedFile.exists()) {
-                    hasValidFiles = true
-                } else {
-                    PluginLogger.warn(LogCategory.PRESET_SERVICE, "Missing file for list '%s' (%s)", meta.name, meta.id)
-                }
-            }
-        }
-        
-        if (!hasValidFiles) {
-            PluginLogger.warn(LogCategory.PRESET_SERVICE, "No valid preset files found, resetting to defaults")
-            resetToDefaultLists()
-        }
+        // Больше не проверяем наличие файлов и не восстанавливаем удаленные
     }
     
     /**
@@ -777,6 +781,27 @@ object PresetListService {
             }
         }
         
+        // Дополнительно проверяем все файлы в директории
+        // на случай если файл был переименован после сохранения
+        val allFiles = presetsDir.toFile().listFiles { file -> 
+            file.name.endsWith(".json") && file.isFile 
+        }
+        
+        allFiles?.forEach { file ->
+            try {
+                // Читаем файл и проверяем ID
+                val json = file.readText()
+                val presetList = gson.fromJson(json, PresetList::class.java)
+                if (presetList.id == listId) {
+                    PluginLogger.debug(LogCategory.PRESET_SERVICE, "Found file for list %s by content: %s", listId, file.name)
+                    return file
+                }
+            } catch (e: Exception) {
+                // Игнорируем ошибки чтения отдельных файлов
+                PluginLogger.trace(LogCategory.PRESET_SERVICE, "Error reading file %s: %s", file.name, e.message)
+            }
+        }
+        
         return null
     }
     
@@ -820,6 +845,102 @@ object PresetListService {
                     migrateFileIfNeeded(meta.id, list)
                 }
             }
+        }
+    }
+    
+    /**
+     * Проверяет, запущен ли плагин в режиме разработки
+     */
+    private fun isDevelopmentMode(): Boolean {
+        // Проверяем, запущен ли из IDE (обычно есть системное свойство idea.is.internal)
+        return System.getProperty("idea.is.internal") == "true" ||
+               System.getProperty("idea.plugins.path")?.contains("sandbox") == true ||
+               // Дополнительная проверка - если текущая директория содержит build.gradle.kts
+               Paths.get(System.getProperty("user.dir"), "build.gradle.kts").toFile().exists()
+    }
+    
+    /**
+     * Загружает пресеты из ресурсов плагина
+     */
+    private fun loadPresetsFromResources(): List<PresetList> {
+        val presetLists = mutableListOf<PresetList>()
+        
+        PluginLogger.info(LogCategory.PRESET_SERVICE, "Starting to load presets from resources...")
+        
+        try {
+            // Загружаем все JSON файлы из папки presets динамически
+            val resourceUrl = javaClass.classLoader.getResource("presets")
+            if (resourceUrl != null) {
+                PluginLogger.info(LogCategory.PRESET_SERVICE, "Found presets resource URL: %s", resourceUrl.toString())
+                val uri = resourceUrl.toURI()
+                
+                if (uri.scheme == "jar") {
+                    // Загрузка из JAR файла
+                    val jarPath = uri.schemeSpecificPart.substringBefore("!")
+                    val jarFile = java.util.jar.JarFile(jarPath.substringAfter("file:"))
+                    
+                    jarFile.entries().asSequence()
+                        .filter { it.name.startsWith("presets/") && it.name.endsWith(".json") }
+                        .forEach { entry ->
+                            jarFile.getInputStream(entry).use { inputStream ->
+                                val json = inputStream.bufferedReader().readText()
+                                val presetList = parsePresetListFromJson(json)
+                                if (presetList != null) {
+                                    presetLists.add(presetList)
+                                    PluginLogger.info(LogCategory.PRESET_SERVICE, "Loaded preset from JAR: %s", entry.name)
+                                }
+                            }
+                        }
+                    jarFile.close()
+                } else {
+                    // Загрузка из файловой системы (режим разработки)
+                    val presetsDir = Paths.get(uri).toFile()
+                    if (presetsDir.exists() && presetsDir.isDirectory) {
+                        presetLists.addAll(loadPresetsFromDirectory(presetsDir))
+                    }
+                }
+            } else {
+                PluginLogger.warn(LogCategory.PRESET_SERVICE, "Presets resource directory not found in classpath")
+            }
+        } catch (e: Exception) {
+            PluginLogger.error(LogCategory.PRESET_SERVICE, "Error loading presets from resources: %s", e, e.message)
+        }
+        
+        PluginLogger.info(LogCategory.PRESET_SERVICE, "Total presets loaded from resources: %d", presetLists.size)
+        return presetLists
+    }
+    
+    /**
+     * Загружает пресеты из директории
+     */
+    private fun loadPresetsFromDirectory(directory: File): List<PresetList> {
+        val presetLists = mutableListOf<PresetList>()
+        
+        directory.listFiles { file -> file.name.endsWith(".json") }?.forEach { file ->
+            try {
+                val json = file.readText()
+                val presetList = parsePresetListFromJson(json)
+                if (presetList != null) {
+                    presetLists.add(presetList)
+                    PluginLogger.debug(LogCategory.PRESET_SERVICE, "Loaded preset list '%s' from %s", presetList.name, file.name)
+                }
+            } catch (e: Exception) {
+                PluginLogger.error(LogCategory.PRESET_SERVICE, "Error loading preset file %s: %s", e, file.name, e.message)
+            }
+        }
+        
+        return presetLists
+    }
+    
+    /**
+     * Парсит PresetList из JSON строки
+     */
+    private fun parsePresetListFromJson(json: String): PresetList? {
+        return try {
+            gson.fromJson(json, PresetList::class.java)
+        } catch (e: Exception) {
+            PluginLogger.error(LogCategory.PRESET_SERVICE, "Error parsing preset JSON: %s", e, e.message)
+            null
         }
     }
 }

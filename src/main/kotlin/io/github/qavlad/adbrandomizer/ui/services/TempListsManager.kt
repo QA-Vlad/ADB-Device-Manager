@@ -58,4 +58,12 @@ class TempListsManager {
      * Проверить, не пусты ли временные списки
      */
     fun isNotEmpty(): Boolean = tempPresetLists.isNotEmpty()
+    
+    /**
+     * Удалить список по ID
+     */
+    fun removeList(listId: String): Boolean {
+        println("ADB_DEBUG: TempListsManager.removeList() called for id: $listId")
+        return tempPresetLists.remove(listId) != null
+    }
 }

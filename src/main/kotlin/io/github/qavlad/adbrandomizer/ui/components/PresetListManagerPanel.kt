@@ -26,7 +26,8 @@ class PresetListManagerPanel(
     private val onHideDuplicatesChanged: (Boolean) -> Unit,
     private val onResetSorting: () -> Unit = {},
     private val onShowCountersChanged: (Boolean) -> Unit = {},
-    private val onResetCounters: () -> Unit = {}
+    private val onResetCounters: () -> Unit = {},
+    private val onListDeleted: ((String) -> Unit)? = null
 ) : JPanel(BorderLayout()) {
     
     private val listComboBox = ComboBox<PresetListItem>()
@@ -158,7 +159,7 @@ class PresetListManagerPanel(
         border = JBUI.Borders.emptyBottom(10)
     }
     
-    private fun loadLists() {
+    fun loadLists() {
         isUpdatingComboBox = true
         try {
             listComboBox.removeAllItems()
@@ -261,6 +262,9 @@ class PresetListManagerPanel(
         )
         
         if (result == Messages.YES) {
+            // Удаляем список ID для обработки в EventHandlersInitializer
+            val deletedListId = selectedItem.id
+            
             // Проверяем, что это не последний список
             if (listComboBox.itemCount <= 1) {
                 // Создаем новый пустой список
@@ -268,19 +272,16 @@ class PresetListManagerPanel(
                 PresetListService.setActiveListId(newList.id)
             }
             
-            if (PresetListService.deleteList(selectedItem.id)) {
-                loadLists()
-                
-                // Загружаем новый активный список
-                PresetListService.getActivePresetList()?.let { list ->
-                    onListChanged(list)
-                }
-            } else {
-                Messages.showErrorDialog(
-                    this,
-                    "Cannot delete default preset list",
-                    "Delete Error"
-                )
+            // Удаляем список из сервиса
+            PresetListService.deleteList(deletedListId)
+            loadLists()
+            
+            // Уведомляем контроллер об удалении для обновления tempLists
+            onListDeleted?.invoke(deletedListId)
+            
+            // Загружаем новый активный список
+            PresetListService.getActivePresetList()?.let { list ->
+                onListChanged(list)
             }
         }
     }

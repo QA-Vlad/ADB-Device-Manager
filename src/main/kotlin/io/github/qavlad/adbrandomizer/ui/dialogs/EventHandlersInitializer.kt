@@ -113,6 +113,11 @@ class EventHandlersInitializer(
             },
             onResetCounters = {
                 handleResetCounters(onLoadPresetsIntoTable)
+            },
+            onListDeleted = { deletedListId ->
+                // Удаляем список из tempLists
+                tempListsManager.removeList(deletedListId)
+                println("ADB_DEBUG: Removed list with id $deletedListId from tempLists")
             }
         )
     }

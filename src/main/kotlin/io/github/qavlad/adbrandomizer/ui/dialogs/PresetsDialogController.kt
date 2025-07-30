@@ -815,6 +815,15 @@ class PresetsDialogController(
             println("ADB_DEBUG:   [$index] ${preset.label} | ${preset.size} | ${preset.dpi}")
         }
         
+        // Обновляем комбобокс если панель уже создана
+        if (this::listManagerPanel.isInitialized) {
+            println("ADB_DEBUG: Reloading lists in combobox after file system check")
+            listManagerPanel.loadLists()
+            currentPresetList?.let {
+                listManagerPanel.selectListByName(it.name)
+            }
+        }
+        
         println("ADB_DEBUG: initializeTempPresetLists - done. Current list: ${currentPresetList?.name}, temp lists count: ${tempListsManager.size()}")
     }
 

@@ -9,7 +9,7 @@ data class PresetList(
     val id: String = UUID.randomUUID().toString(),
     var name: String,
     var presets: MutableList<DevicePreset> = mutableListOf(),
-    val isDefault: Boolean = false
+    var isDefault: Boolean = false
 ) {
     /**
      * Создает копию списка с новым ID
