@@ -4,6 +4,7 @@ import io.github.qavlad.adbrandomizer.services.DevicePreset
 import io.github.qavlad.adbrandomizer.services.PresetList
 import io.github.qavlad.adbrandomizer.services.PresetListService
 import io.github.qavlad.adbrandomizer.ui.components.DevicePresetTableModel
+import io.github.qavlad.adbrandomizer.ui.dialogs.DialogStateManager
 import javax.swing.JTable
 import javax.swing.SwingUtilities
 
@@ -14,7 +15,8 @@ import javax.swing.SwingUtilities
 class TableLoader(
     private val viewModeManager: ViewModeManager,
     private val presetOrderManager: PresetOrderManager = PresetOrderManager(),
-    private val tableSortingService: TableSortingService? = null
+    private val tableSortingService: TableSortingService? = null,
+    private val dialogStateManager: DialogStateManager? = null
 ) {
     
     /**
@@ -517,6 +519,131 @@ class TableLoader(
             buttonRowData.add("+")
             repeat(tableModel.columnCount - 1) { buttonRowData.add("") }
             tableModel.addRow(buttonRowData)
+        }
+    }
+    
+    /**
+     * Обновляет таблицу с проверкой полей и перерисовкой
+     */
+    fun refreshTable(
+        table: JTable,
+        onValidateFields: () -> Unit
+    ) {
+        SwingUtilities.invokeLater {
+            onValidateFields()
+            table.repaint()
+        }
+    }
+    
+    /**
+     * Перезагружает таблицу без активации слушателей
+     * Сохраняет и восстанавливает выделение
+     */
+    fun reloadTableWithoutListeners(
+        table: JTable,
+        tableModel: DevicePresetTableModel,
+        currentPresetList: PresetList?,
+        tempPresetLists: Map<String, PresetList>,
+        isShowAllMode: Boolean,
+        isHideDuplicatesMode: Boolean,
+        onTableUpdating: (Boolean) -> Unit,
+        onAddButtonRow: () -> Unit,
+        onSaveCurrentTableOrder: () -> Unit,
+        onClearLastInteractedRow: () -> Unit,
+        tableModelListener: javax.swing.event.TableModelListener?,
+        inMemoryOrder: List<String>? = null,
+        initialHiddenDuplicates: Map<String, Set<String>>? = null
+    ) {
+        SwingUtilities.invokeLater {
+            // Сохраняем текущую выделенную строку
+            val selectedRow = table.selectedRow
+            val selectedColumn = table.selectedColumn
+            println("ADB_DEBUG: reloadTableWithoutListeners - selectedRow: $selectedRow, selectedColumn: $selectedColumn")
+            
+            // Сохраняем данные о выделенном пресете для восстановления после обновления
+            var selectedPresetKey: String? = null
+            if (selectedRow >= 0 && selectedRow < tableModel.rowCount) {
+                val preset = tableModel.getPresetAt(selectedRow)
+                if (preset != null) {
+                    selectedPresetKey = "${preset.label}|${preset.size}|${preset.dpi}"
+                    println("ADB_DEBUG: reloadTableWithoutListeners - saved preset key: $selectedPresetKey")
+                }
+            }
+            
+            // Если мы в режиме Show All, обновляем inMemoryTableOrder перед перезагрузкой
+            if (isShowAllMode) {
+                onSaveCurrentTableOrder()
+                println("ADB_DEBUG: reloadTableWithoutListeners - updated inMemoryTableOrder before reload")
+            }
+            
+            // Сбрасываем lastInteractedRow так как таблица перезагружается
+            onClearLastInteractedRow()
+            println("ADB_DEBUG: reloadTableWithoutListeners - reset lastInteractedRow to -1")
+            
+            // Временно отключаем слушатель модели, чтобы избежать рекурсии
+            tableModelListener?.let { tableModel.removeTableModelListener(it) }
+
+            dialogStateManager?.withTableUpdate {
+                loadPresetsIntoTable(
+                    tableModel,
+                    currentPresetList,
+                    tempPresetLists,
+                    isShowAllMode,
+                    isHideDuplicatesMode,
+                    isFirstLoad = false,
+                    isSwitchingList = false,
+                    isSwitchingMode = false,
+                    isSwitchingDuplicatesFilter = false,
+                    onTableUpdating,
+                    onAddButtonRow,
+                    inMemoryOrder,
+                    initialHiddenDuplicates,
+                    table,
+                    null
+                )
+            } ?: loadPresetsIntoTable(
+                tableModel,
+                currentPresetList,
+                tempPresetLists,
+                isShowAllMode,
+                isHideDuplicatesMode,
+                isFirstLoad = false,
+                isSwitchingList = false,
+                isSwitchingMode = false,
+                isSwitchingDuplicatesFilter = false,
+                onTableUpdating,
+                onAddButtonRow,
+                inMemoryOrder,
+                initialHiddenDuplicates,
+                table,
+                null
+            )
+            
+            // Возвращаем слушатель на место
+            tableModelListener?.let { tableModel.addTableModelListener(it) }
+            
+            // Восстанавливаем выделение строки
+            if (selectedPresetKey != null) {
+                println("ADB_DEBUG: reloadTableWithoutListeners - searching for preset key: $selectedPresetKey")
+                for (row in 0 until tableModel.rowCount) {
+                    val preset = tableModel.getPresetAt(row)
+                    if (preset != null) {
+                        val key = "${preset.label}|${preset.size}|${preset.dpi}"
+                        if (key == selectedPresetKey) {
+                            println("ADB_DEBUG: reloadTableWithoutListeners - found at row $row, restoring selection")
+                            table.setRowSelectionInterval(row, row)
+                            if (selectedColumn >= 0 && selectedColumn < table.columnCount) {
+                                table.setColumnSelectionInterval(selectedColumn, selectedColumn)
+                            }
+                            // Обновляем lastInteractedRow после восстановления выделения
+                            println("ADB_DEBUG: reloadTableWithoutListeners - after restore, selectedRow: ${table.selectedRow}")
+                            break
+                        }
+                    }
+                }
+            } else {
+                println("ADB_DEBUG: reloadTableWithoutListeners - no preset key to restore")
+            }
         }
     }
 }
