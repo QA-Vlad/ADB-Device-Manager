@@ -27,6 +27,7 @@ import io.github.qavlad.adbrandomizer.ui.services.TableStateTracker
 import io.github.qavlad.adbrandomizer.ui.services.PresetRecycleBin
 import io.github.qavlad.adbrandomizer.ui.services.HoverStateManager
 import io.github.qavlad.adbrandomizer.ui.services.CountersStateManager
+import io.github.qavlad.adbrandomizer.ui.services.HiddenDuplicatesManager
 import io.github.qavlad.adbrandomizer.ui.renderers.ValidationRenderer
 import io.github.qavlad.adbrandomizer.utils.ButtonUtils
 import java.awt.Container
@@ -100,6 +101,9 @@ class PresetsDialogController(
     // Менеджер состояния счётчиков
     private val countersStateManager = CountersStateManager(tableSortingService, dialogState)
     
+    // Менеджер скрытых дубликатов
+    private val hiddenDuplicatesManager = HiddenDuplicatesManager()
+    
     // Храним текущий порядок таблицы в памяти для сохранения при переключении режимов
     private var inMemoryTableOrder = listOf<String>()
     
@@ -141,12 +145,6 @@ class PresetsDialogController(
     private var tableModelListenerWithTimer: TableModelListenerWithTimer? = null
     
     // Последняя взаимодействующая строка теперь управляется через HoverStateManager
-    
-    // Хранение начального состояния скрытых дублей для каждого списка
-    private val initialHiddenDuplicates = mutableMapOf<String, Set<String>>()
-    
-    // Хранение текущего состояния скрытых дублей для каждого списка
-    private val currentHiddenDuplicates = mutableMapOf<String, MutableSet<String>>()
 
     /**
      * Инициализация контроллера
@@ -734,35 +732,8 @@ class PresetsDialogController(
             presetOrderManager.saveOriginalFileOrder(list.id, list.presets)
         }
         
-        // Сохраняем информацию о начальных скрытых дублях
-        // ТОЛЬКО если режим Hide Duplicates уже включен при открытии диалога
-        initialHiddenDuplicates.clear()
-        currentHiddenDuplicates.clear()
-        
-        if (PresetStorageService.getHideDuplicatesMode()) {
-            println("ADB_DEBUG: Hide Duplicates mode is already enabled, tracking initial hidden duplicates")
-            loadedLists.forEach { (listId, list) ->
-                val hiddenIds = mutableSetOf<String>()
-                val seenKeys = mutableSetOf<String>()
-                
-                list.presets.forEach { preset ->
-                    val key = preset.getDuplicateKey()
-                    if (seenKeys.contains(key)) {
-                        hiddenIds.add(preset.id)
-                    } else {
-                        seenKeys.add(key)
-                    }
-                }
-                
-                if (hiddenIds.isNotEmpty()) {
-                    initialHiddenDuplicates[listId] = hiddenIds
-                    currentHiddenDuplicates[listId] = hiddenIds.toMutableSet()
-                    println("ADB_DEBUG: List '${list.name}' has ${hiddenIds.size} initial hidden duplicates")
-                }
-            }
-        } else {
-            println("ADB_DEBUG: Hide Duplicates mode is disabled, not tracking initial hidden duplicates")
-        }
+        // Инициализируем информацию о скрытых дублях
+        hiddenDuplicatesManager.initializeHiddenDuplicates(loadedLists)
         
         // Сохраняем начальный порядок для каждого списка в обычном режиме
         // Это нужно для восстановления порядка после режима Show All
@@ -894,13 +865,7 @@ class PresetsDialogController(
             } else {
                 null
             },
-            initialHiddenDuplicates = if (currentHiddenDuplicates.isNotEmpty()) {
-                // Если у нас есть текущее состояние скрытых дублей, используем его
-                currentHiddenDuplicates.toMap()
-            } else {
-                // Иначе используем начальное состояние
-                initialHiddenDuplicates
-            },
+            initialHiddenDuplicates = hiddenDuplicatesManager.getHiddenDuplicatesForTableLoader(),
             table = table,
             onClearTableSelection = {
                 if (::hoverStateManager.isInitialized) {
@@ -917,28 +882,10 @@ class PresetsDialogController(
      * Обновляет текущее состояние скрытых дублей на основе текущих данных
      */
     private fun updateCurrentHiddenDuplicates() {
-        if (!dialogState.isHideDuplicatesMode()) {
-            return
-        }
-        
-        currentHiddenDuplicates.clear()
-        tempListsManager.getTempLists().forEach { (listId, list) ->
-            val hiddenIds = mutableSetOf<String>()
-            val seenKeys = mutableSetOf<String>()
-            
-            list.presets.forEach { preset ->
-                val key = preset.getDuplicateKey()
-                if (seenKeys.contains(key)) {
-                    hiddenIds.add(preset.id)
-                } else {
-                    seenKeys.add(key)
-                }
-            }
-            
-            if (hiddenIds.isNotEmpty()) {
-                currentHiddenDuplicates[listId] = hiddenIds
-            }
-        }
+        hiddenDuplicatesManager.updateCurrentHiddenDuplicates(
+            dialogState.isHideDuplicatesMode(),
+            tempListsManager.getTempLists()
+        )
     }
     
     /**
@@ -1731,13 +1678,7 @@ class PresetsDialogController(
             } else {
                 null
             },
-            initialHiddenDuplicates = if (currentHiddenDuplicates.isNotEmpty()) {
-                // Если у нас есть текущее состояние скрытых дублей, используем его
-                currentHiddenDuplicates.toMap()
-            } else {
-                // Иначе используем начальное состояние
-                initialHiddenDuplicates
-            },
+            initialHiddenDuplicates = hiddenDuplicatesManager.getHiddenDuplicatesForTableLoader(),
             table = table,
             onClearTableSelection = {
                 if (::hoverStateManager.isInitialized) {
@@ -1775,7 +1716,7 @@ class PresetsDialogController(
             },
             tableModelListener = tableModelListener,
             inMemoryOrder = inMemoryTableOrder,
-            initialHiddenDuplicates = initialHiddenDuplicates
+            initialHiddenDuplicates = hiddenDuplicatesManager.getInitialHiddenDuplicates()
         )
     }
     
