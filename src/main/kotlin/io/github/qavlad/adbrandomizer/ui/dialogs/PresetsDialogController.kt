@@ -28,6 +28,7 @@ import io.github.qavlad.adbrandomizer.ui.services.PresetRecycleBin
 import io.github.qavlad.adbrandomizer.ui.services.HoverStateManager
 import io.github.qavlad.adbrandomizer.ui.services.CountersStateManager
 import io.github.qavlad.adbrandomizer.ui.services.HiddenDuplicatesManager
+import io.github.qavlad.adbrandomizer.ui.services.PresetSaveManager
 import io.github.qavlad.adbrandomizer.ui.renderers.ValidationRenderer
 import io.github.qavlad.adbrandomizer.utils.ButtonUtils
 import java.awt.Container
@@ -103,6 +104,9 @@ class PresetsDialogController(
     
     // Менеджер скрытых дубликатов
     private val hiddenDuplicatesManager = HiddenDuplicatesManager()
+    
+    // Менеджер сохранения пресетов
+    private val presetSaveManager = PresetSaveManager(presetOrderManager, settingsPersistenceService)
     
     // Храним текущий порядок таблицы в памяти для сохранения при переключении режимов
     private var inMemoryTableOrder = listOf<String>()
@@ -1128,185 +1132,15 @@ class PresetsDialogController(
     // === Сохранение и загрузка ===
 
     fun saveSettings() {
-        // Если включен режим Show All, нужно сохранить текущий порядок из таблицы
-        if (dialogState.isShowAllPresetsMode()) {
-            // Собираем порядок из таблицы
-            val allPresetsWithLists = mutableListOf<Pair<String, DevicePreset>>()
-            val listColumn = if (tableModel.columnCount > 6) tableModel.columnCount - 1 else -1
-            
-            for (i in 0 until tableModel.rowCount) {
-                // Пропускаем строку с кнопкой "+"
-                if (tableModel.getValueAt(i, 0) == "+") {
-                    continue
-                }
-                
-                val listName = if (listColumn >= 0) {
-                    tableModel.getValueAt(i, listColumn)?.toString() ?: ""
-                } else {
-                    ""
-                }
-                
-                if (listName.isNotEmpty()) {
-                    val preset = tableModel.getPresetAt(i)
-                    if (preset != null) {
-                        allPresetsWithLists.add(listName to preset)
-                    }
-                }
-            }
-            
-            // Сначала сохраняем порядок для обычного режима, если он был изменён
-            if (normalModeOrderChanged) {
-                // Сохраняем порядок для всех изменённых списков
-                modifiedListIds.forEach { listId ->
-                    val tempList = tempListsManager.getTempList(listId)
-                    if (tempList != null && tempList.presets.isNotEmpty()) {
-                        presetOrderManager.saveNormalModeOrder(listId, tempList.presets)
-                        println("ADB_DEBUG: Saved normal mode order for modified list '${tempList.name}' in Show All mode")
-                    }
-                }
-                println("ADB_DEBUG: Saved normal mode order for ${modifiedListIds.size} modified lists in Show All mode")
-            }
-            
-            // Теперь сохраняем порядок при Save
-            if (dialogState.isHideDuplicatesMode()) {
-                // В режиме Hide Duplicates нужно восстановить полный порядок с дубликатами
-                val fullOrderWithDuplicates = mutableListOf<Pair<String, DevicePreset>>()
-                val processedPresetIds = mutableSetOf<String>()
-                
-                // Проходим по видимым пресетам из таблицы
-                allPresetsWithLists.forEach { (listName, preset) ->
-                    fullOrderWithDuplicates.add(listName to preset)
-                    processedPresetIds.add(preset.id)
-                    
-                    // Находим все дубликаты этого пресета
-                    val duplicateKey = preset.getDuplicateKey()
-                    tempListsManager.getTempLists().forEach { (_, list) ->
-                        list.presets.forEach { duplicatePreset ->
-                            if (duplicatePreset.id != preset.id && 
-                                duplicatePreset.getDuplicateKey() == duplicateKey &&
-                                duplicatePreset.id !in processedPresetIds) {
-                                fullOrderWithDuplicates.add(list.name to duplicatePreset)
-                                processedPresetIds.add(duplicatePreset.id)
-                            }
-                        }
-                    }
-                }
-                
-                // Добавляем оставшиеся пресеты
-                tempListsManager.getTempLists().forEach { (_, list) ->
-                    list.presets.forEach { preset ->
-                        if (preset.id !in processedPresetIds) {
-                            fullOrderWithDuplicates.add(list.name to preset)
-                            processedPresetIds.add(preset.id)
-                        }
-                    }
-                }
-                
-                presetOrderManager.saveShowAllModeOrder(fullOrderWithDuplicates)
-                presetOrderManager.saveShowAllHideDuplicatesOrder(allPresetsWithLists)
-            } else {
-                // В обычном режиме Show All сохраняем как есть
-                presetOrderManager.saveShowAllModeOrder(allPresetsWithLists)
-                presetOrderManager.updateFixedShowAllOrder(allPresetsWithLists)
-            }
-        } else {
-            // В обычном режиме сохраняем порядок для всех изменённых списков
-            if (normalModeOrderChanged) {
-                // Сохраняем порядок для текущего списка
-                if (currentPresetList != null) {
-                    // В режиме скрытия дубликатов используем полный порядок из памяти
-                    if (dialogState.isHideDuplicatesMode()) {
-                        val memoryOrder = presetOrderManager.getNormalModeOrderInMemory(currentPresetList!!.id)
-                        if (memoryOrder != null) {
-                            val tempList = tempListsManager.getTempList(currentPresetList!!.id)
-                            if (tempList != null) {
-                                val orderedPresets = mutableListOf<DevicePreset>()
-                                
-                                // Восстанавливаем порядок из памяти
-                                memoryOrder.forEach { key ->
-                                    val preset = tempList.presets.find { p ->
-                                        "${p.label}|${p.size}|${p.dpi}" == key
-                                    }
-                                    if (preset != null) {
-                                        orderedPresets.add(preset)
-                                    }
-                                }
-                                
-                                // Добавляем новые пресеты, которых не было в сохранённом порядке
-                                val savedKeys = memoryOrder.toSet()
-                                tempList.presets.forEach { preset ->
-                                    val key = "${preset.label}|${preset.size}|${preset.dpi}"
-                                    if (key !in savedKeys) {
-                                        orderedPresets.add(preset)
-                                    }
-                                }
-                                
-                                if (orderedPresets.isNotEmpty()) {
-                                    presetOrderManager.saveNormalModeOrder(currentPresetList!!.id, orderedPresets)
-                                    println("ADB_DEBUG: Saved normal mode order for current list '${currentPresetList!!.name}' with ${orderedPresets.size} presets (from memory)")
-                                }
-                            }
-                        }
-                    } else {
-                        // Без скрытия дубликатов используем порядок из таблицы
-                        val tablePresets = tableModel.getPresets()
-                        if (tablePresets.isNotEmpty()) {
-                            presetOrderManager.saveNormalModeOrder(currentPresetList!!.id, tablePresets)
-                            println("ADB_DEBUG: Saved normal mode order for current list '${currentPresetList!!.name}' with ${tablePresets.size} presets")
-                        }
-                    }
-                }
-                
-                // Сохраняем порядок для всех изменённых списков
-                modifiedListIds.forEach { listId ->
-                    if (listId != currentPresetList?.id) { // Текущий список уже сохранён выше
-                        val memoryOrder = presetOrderManager.getNormalModeOrderInMemory(listId)
-                        if (memoryOrder != null) {
-                            val tempList = tempListsManager.getTempList(listId)
-                            if (tempList != null) {
-                                val orderedPresets = mutableListOf<DevicePreset>()
-                                
-                                // Восстанавливаем порядок из памяти (по ID)
-                                memoryOrder.forEach { presetId ->
-                                    val preset = tempList.presets.find { p -> p.id == presetId }
-                                    if (preset != null) {
-                                        orderedPresets.add(preset)
-                                    }
-                                }
-                                
-                                // Добавляем новые пресеты, которых не было в сохранённом порядке
-                                val savedIds = memoryOrder.toSet()
-                                tempList.presets.forEach { preset ->
-                                    if (preset.id !in savedIds) {
-                                        orderedPresets.add(preset)
-                                    }
-                                }
-                                
-                                if (orderedPresets.isNotEmpty()) {
-                                    presetOrderManager.saveNormalModeOrder(listId, orderedPresets)
-                                    println("ADB_DEBUG: Saved normal mode order for modified list '${tempList.name}' with ${orderedPresets.size} presets")
-                                }
-                            }
-                        }
-                    }
-                }
-                
-                println("ADB_DEBUG: Saved normal mode order for ${modifiedListIds.size} modified lists")
-            } else {
-                println("ADB_DEBUG: In normal mode - order not changed via drag & drop, using initial order")
-            }
-        }
-        
-        settingsPersistenceService.saveSettings(
+        presetSaveManager.saveSettings(
             table = table,
-            tempLists = tempListsManager.getTempLists(),
-            isShowAllPresetsMode = dialogState.isShowAllPresetsMode(),
-            isHideDuplicatesMode = dialogState.isHideDuplicatesMode(),
-            presetOrderManager = presetOrderManager,
-            onSaveCurrentTableState = { saveCurrentTableState() },
-            onSaveShowAllPresetsOrder = { 
-                // Порядок уже сохранен выше
-            }
+            tableModel = tableModel,
+            tempListsManager = tempListsManager,
+            currentPresetList = currentPresetList,
+            dialogState = dialogState,
+            normalModeOrderChanged = normalModeOrderChanged,
+            modifiedListIds = modifiedListIds,
+            onSaveCurrentTableState = { saveCurrentTableState() }
         )
         
         // Сбрасываем флаг и набор после сохранения
@@ -1417,71 +1251,11 @@ class PresetsDialogController(
     fun saveCurrentShowAllOrderFromTable() {
         if (!::tableModel.isInitialized || !dialogState.isShowAllPresetsMode()) return
         
-        println("ADB_DEBUG: saveCurrentShowAllOrderFromTable - saving Show All order to file")
-        
-        // Собираем порядок из таблицы
-        val allPresetsWithLists = mutableListOf<Pair<String, DevicePreset>>()
-        val listColumn = if (tableModel.columnCount > 6) tableModel.columnCount - 1 else -1
-        
-        for (i in 0 until tableModel.rowCount) {
-            // Пропускаем строку с кнопкой "+"
-            if (tableModel.getValueAt(i, 0) == "+") {
-                continue
-            }
-            
-            val listName = if (listColumn >= 0) {
-                tableModel.getValueAt(i, listColumn)?.toString() ?: ""
-            } else {
-                ""
-            }
-            
-            if (listName.isNotEmpty()) {
-                val preset = tableModel.getPresetAt(i)
-                if (preset != null) {
-                    allPresetsWithLists.add(listName to preset)
-                }
-            }
-        }
-        
-        if (dialogState.isHideDuplicatesMode()) {
-            // В режиме Hide Duplicates сохраняем текущий видимый порядок,
-            // но полный порядок со всеми дубликатами уже должен быть сохранён
-            // Мы НЕ должны перестраивать полный порядок здесь
-            
-            // Просто обновляем inMemoryTableOrder из существующего полного порядка
-            val existingFullOrder = PresetListService.getShowAllPresetsOrder()
-            if (existingFullOrder.isNotEmpty()) {
-                println("ADB_DEBUG: Using existing full order for Hide Duplicates mode: ${existingFullOrder.size} items")
-                inMemoryTableOrder = existingFullOrder
-            } else {
-                // Если по какой-то причине нет полного порядка, создаём его
-                println("ADB_DEBUG: WARNING: No existing full order in Hide Duplicates mode, creating from temp lists")
-                val fullOrderWithDuplicates = mutableListOf<Pair<String, DevicePreset>>()
-                
-                // Собираем все пресеты из всех списков в их текущем порядке
-                tempListsManager.getTempLists().forEach { (_, list) ->
-                    list.presets.forEach { preset ->
-                        fullOrderWithDuplicates.add(list.name to preset)
-                    }
-                }
-                
-                presetOrderManager.saveShowAllModeOrder(fullOrderWithDuplicates)
-                println("ADB_DEBUG: Created and saved full order: ${fullOrderWithDuplicates.size} items")
-                
-                inMemoryTableOrder = fullOrderWithDuplicates.map { (listName, preset) ->
-                    "${listName}::${preset.id}"
-                }
-            }
-        } else {
-            // В обычном режиме Show All сохраняем как есть
-            presetOrderManager.saveShowAllModeOrder(allPresetsWithLists)
-            println("ADB_DEBUG: Saved Show All order: ${allPresetsWithLists.size} items")
-            
-            // Также обновляем inMemoryTableOrder для использования при возврате
-            inMemoryTableOrder = allPresetsWithLists.map { (listName, preset) ->
-                "${listName}::${preset.id}"
-            }
-        }
+        inMemoryTableOrder = presetSaveManager.saveCurrentShowAllOrderFromTable(
+            tableModel,
+            tempListsManager,
+            dialogState
+        )
         
         println("ADB_DEBUG: Updated inMemoryTableOrder with ${inMemoryTableOrder.size} items")
     }
@@ -1493,70 +1267,11 @@ class PresetsDialogController(
         if (!::tableModel.isInitialized) return
         
         if (dialogState.isShowAllPresetsMode()) {
-            // В режиме Show All сохраняем полный порядок всех пресетов
-            val allPresetsWithLists = mutableListOf<Pair<String, DevicePreset>>()
-            val listColumn = if (tableModel.columnCount > 6) tableModel.columnCount - 1 else -1
-            
-            for (i in 0 until tableModel.rowCount) {
-                // Пропускаем строку с кнопкой "+"
-                if (tableModel.getValueAt(i, 0) == "+") {
-                    continue
-                }
-                
-                val listName = if (listColumn >= 0) {
-                    tableModel.getValueAt(i, listColumn)?.toString() ?: ""
-                } else {
-                    ""
-                }
-                
-                if (listName.isNotEmpty()) {
-                    val preset = tableModel.getPresetAt(i)
-                    if (preset != null) {
-                        allPresetsWithLists.add(listName to preset)
-                    }
-                }
-            }
-            
-            // Если включен Hide Duplicates, нужно восстановить полный порядок с дубликатами
-            if (dialogState.isHideDuplicatesMode()) {
-                // Получаем текущий сохранённый порядок Show All (который включает все пресеты)
-                val existingFullOrder = PresetListService.getShowAllPresetsOrder()
-                
-                if (existingFullOrder.isNotEmpty()) {
-                    // Используем существующий полный порядок, который уже содержит все пресеты
-                    // включая скрытые дубликаты в их оригинальных позициях
-                    println("ADB_DEBUG: Using existing full order with ${existingFullOrder.size} items")
-                    inMemoryTableOrder = existingFullOrder
-                    
-                    // Не нужно пересохранять - порядок уже правильный
-                } else {
-                    // Если нет сохранённого порядка, создаём новый на основе всех пресетов
-                    println("ADB_DEBUG: No existing full order, creating new one")
-                    val fullOrderWithDuplicates = mutableListOf<Pair<String, DevicePreset>>()
-                    
-                    // Собираем все пресеты из всех списков в их текущем порядке
-                    tempListsManager.getTempLists().forEach { (_, list) ->
-                        list.presets.forEach { preset ->
-                            fullOrderWithDuplicates.add(list.name to preset)
-                        }
-                    }
-                    
-                    inMemoryTableOrder = fullOrderWithDuplicates.map { (listName, preset) ->
-                        "${listName}::${preset.id}"
-                    }
-                    
-                    // Сохраняем полный порядок
-                    presetOrderManager.saveShowAllModeOrder(fullOrderWithDuplicates)
-                }
-            } else {
-                // В обычном режиме Show All сохраняем как есть
-                inMemoryTableOrder = allPresetsWithLists.map { (listName, preset) ->
-                    "${listName}::${preset.id}"
-                }
-                
-                // Также сохраняем в файл для переключения режимов
-                presetOrderManager.saveShowAllModeOrder(allPresetsWithLists)
-            }
+            inMemoryTableOrder = presetSaveManager.saveCurrentTableOrderToMemory(
+                tableModel,
+                tempListsManager,
+                dialogState
+            )
             
             println("ADB_DEBUG: Saved table order to memory: ${inMemoryTableOrder.size} items")
         }
