@@ -10,6 +10,7 @@ import com.google.gson.JsonSerializer
 import com.google.gson.reflect.TypeToken
 import com.intellij.ide.util.PropertiesComponent
 import com.intellij.openapi.application.PathManager
+import com.intellij.openapi.util.io.FileUtil
 import io.github.qavlad.adbrandomizer.ui.services.TableSortingService
 import io.github.qavlad.adbrandomizer.utils.PluginLogger
 import io.github.qavlad.adbrandomizer.utils.logging.LogCategory
@@ -85,6 +86,8 @@ object PresetListService {
             initializeDefaultLists()
         } else {
             PluginLogger.debug(LogCategory.PRESET_SERVICE, "Found saved metadata")
+            // Мигрируем существующие файлы на новое именование
+            migrateAllFilesToNewNaming()
         }
     }
     
@@ -237,12 +240,12 @@ object PresetListService {
         }
         
         return try {
-            val file = presetsDir.resolve("$listId.json").toFile()
+            val file = getFileForListId(listId)
             // Логируем только при отсутствии в кэше
-            if (!cacheEnabled) {
+            if (!cacheEnabled && file != null) {
                 PluginLogger.debug(LogCategory.PRESET_SERVICE, "Loading preset list from: %s", file.absolutePath)
             }
-            if (file.exists()) {
+            if (file != null && file.exists()) {
                 val json = file.readText()
                 val presetList = gson.fromJson(json, PresetList::class.java)
                 
@@ -261,7 +264,7 @@ object PresetListService {
                 }
                 presetList
             } else {
-                PluginLogger.warn(LogCategory.PRESET_SERVICE, "File does not exist: %s", file.absolutePath)
+                PluginLogger.warn(LogCategory.PRESET_SERVICE, "File does not exist for list ID: %s", listId)
                 null
             }
         } catch (e: Exception) {
@@ -274,7 +277,19 @@ object PresetListService {
      * Сохраняет список пресетов
      */
     fun savePresetList(presetList: PresetList) {
-        val file = presetsDir.resolve("${presetList.id}.json").toFile()
+        // Сначала проверяем, нужна ли миграция
+        migrateFileIfNeeded(presetList.id, presetList)
+        
+        // Получаем файл с новым именованием
+        val newFileName = getFileNameForList(presetList)
+        val file = presetsDir.resolve(newFileName).toFile()
+        
+        // Удаляем старый файл если он все еще существует с UUID именем
+        val oldFile = presetsDir.resolve("${presetList.id}.json").toFile()
+        if (oldFile.exists() && !FileUtil.filesEqual(oldFile, file)) {
+            oldFile.delete()
+        }
+        
         PluginLogger.debug(LogCategory.PRESET_SERVICE, "Saving preset list '%s' to: %s", presetList.name, file.absolutePath)
         
         // Отладочная информация о сохраняемых ID - закомментировано из-за спама в Show All режиме
@@ -332,10 +347,16 @@ object PresetListService {
         metadata.removeIf { it.id == listId }
         saveListsMetadata(metadata)
         
-        // Удаляем файл
-        val file = presetsDir.resolve("$listId.json").toFile()
-        if (file.exists()) {
+        // Удаляем файл (проверяем оба варианта именования)
+        val file = getFileForListId(listId)
+        if (file != null && file.exists()) {
             file.delete()
+        }
+        
+        // Также удаляем старый файл с UUID если он есть
+        val oldFile = presetsDir.resolve("$listId.json").toFile()
+        if (oldFile.exists()) {
+            oldFile.delete()
         }
         
         // Если удалили активный список, переключаемся на первый доступный
@@ -351,8 +372,24 @@ object PresetListService {
      */
     fun renameList(listId: String, newName: String): Boolean {
         val list = loadPresetList(listId) ?: return false
+        
+        // Получаем старый файл для удаления
+        val oldFile = getFileForListId(listId)
+        
+        // Обновляем имя списка
         list.name = newName
+        
+        // Сохраняем с новым именем файла
         savePresetList(list)
+        
+        // Удаляем старый файл если он отличается от нового
+        if (oldFile != null && oldFile.exists()) {
+            val newFileName = getFileNameForList(list)
+            val newFile = presetsDir.resolve(newFileName).toFile()
+            if (!FileUtil.filesEqual(oldFile, newFile)) {
+                oldFile.delete()
+            }
+        }
         
         // Обновляем метаданные
         val metadata = getAllListsMetadata().toMutableList()
@@ -671,11 +708,18 @@ object PresetListService {
         // Проверяем, что все списки имеют файлы
         var hasValidFiles = false
         metadata.forEach { meta ->
-            val file = presetsDir.resolve("${meta.id}.json").toFile()
-            if (file.exists()) {
+            val file = getFileForListId(meta.id)
+            if (file != null && file.exists()) {
                 hasValidFiles = true
             } else {
-                PluginLogger.warn(LogCategory.PRESET_SERVICE, "Missing file for list '%s' (%s)", meta.name, meta.id)
+                // Пробуем найти файл по имени
+                val expectedFileName = sanitizeFileName(meta.name) + ".json"
+                val expectedFile = presetsDir.resolve(expectedFileName).toFile()
+                if (expectedFile.exists()) {
+                    hasValidFiles = true
+                } else {
+                    PluginLogger.warn(LogCategory.PRESET_SERVICE, "Missing file for list '%s' (%s)", meta.name, meta.id)
+                }
             }
         }
         
@@ -690,5 +734,92 @@ object PresetListService {
      */
     fun getPresetsDirectory(): File {
         return presetsDir.toFile()
+    }
+    
+    /**
+     * Преобразует имя списка в безопасное имя файла
+     */
+    private fun sanitizeFileName(name: String): String {
+        return name
+            .replace(Regex("[<>:\"/\\\\|?*]"), "_") // Заменяем недопустимые символы
+            .replace(Regex("\\s+"), "_") // Заменяем пробелы на подчеркивания
+            .replace(Regex("_{2,}"), "_") // Убираем повторяющиеся подчеркивания
+            .trim('_') // Убираем подчеркивания в начале и конце
+            .take(200) // Ограничиваем длину имени файла
+    }
+    
+    /**
+     * Получает имя файла для списка
+     */
+    private fun getFileNameForList(presetList: PresetList): String {
+        val sanitizedName = sanitizeFileName(presetList.name)
+        return "$sanitizedName.json"
+    }
+    
+    /**
+     * Получает файл для списка по ID (проверяет как старое, так и новое именование)
+     */
+    private fun getFileForListId(listId: String): File? {
+        // Сначала проверяем старое именование (UUID.json)
+        val oldFile = presetsDir.resolve("$listId.json").toFile()
+        if (oldFile.exists()) {
+            return oldFile
+        }
+        
+        // Если старого файла нет, ищем по метаданным
+        val metadata = getAllListsMetadata()
+        val listMeta = metadata.find { it.id == listId }
+        if (listMeta != null) {
+            val newFileName = sanitizeFileName(listMeta.name) + ".json"
+            val newFile = presetsDir.resolve(newFileName).toFile()
+            if (newFile.exists()) {
+                return newFile
+            }
+        }
+        
+        return null
+    }
+    
+    /**
+     * Мигрирует файл со старым именованием на новое
+     */
+    private fun migrateFileIfNeeded(listId: String, presetList: PresetList) {
+        val oldFile = presetsDir.resolve("$listId.json").toFile()
+        if (oldFile.exists()) {
+            val newFileName = getFileNameForList(presetList)
+            val newFile = presetsDir.resolve(newFileName).toFile()
+            
+            // Если файл с новым именем уже существует, добавляем суффикс
+            var finalFile = newFile
+            var counter = 1
+            while (finalFile.exists() && !FileUtil.filesEqual(oldFile, finalFile)) {
+                val nameWithoutExt = newFileName.substringBeforeLast(".")
+                finalFile = presetsDir.resolve("${nameWithoutExt}_$counter.json").toFile()
+                counter++
+            }
+            
+            if (!FileUtil.filesEqual(oldFile, finalFile)) {
+                PluginLogger.info(LogCategory.PRESET_SERVICE, "Migrating preset file from %s to %s", oldFile.name, finalFile.name)
+                oldFile.renameTo(finalFile)
+            }
+        }
+    }
+    
+    /**
+     * Мигрирует все существующие файлы на новое именование при запуске
+     */
+    private fun migrateAllFilesToNewNaming() {
+        val metadata = getAllListsMetadata()
+        metadata.forEach { meta ->
+            // Пытаемся загрузить список
+            val list = loadPresetList(meta.id)
+            if (list != null) {
+                // Проверяем, нужна ли миграция
+                val oldFile = presetsDir.resolve("${meta.id}.json").toFile()
+                if (oldFile.exists()) {
+                    migrateFileIfNeeded(meta.id, list)
+                }
+            }
+        }
     }
 }
