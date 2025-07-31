@@ -32,7 +32,7 @@ class PresetDeletionService(
         return if (isShowAllPresetsMode) {
             deleteInShowAllMode(row, preset, isHideDuplicatesMode, getListNameAtRow, tableModel)
         } else {
-            deleteInNormalMode(row, isHideDuplicatesMode, currentPresetList)
+            deleteInNormalMode(row, isHideDuplicatesMode, currentPresetList, tableModel)
         }
     }
     
@@ -114,17 +114,18 @@ class PresetDeletionService(
     /**
      * Удаляет пресет в обычном режиме
      */
-    private fun deleteInNormalMode(
+    fun deleteInNormalMode(
         row: Int,
         isHideDuplicatesMode: Boolean,
-        currentPresetList: PresetList?
+        currentPresetList: PresetList?,
+        tableModel: DevicePresetTableModel? = null
     ): Pair<Boolean, Int?> {
         if (currentPresetList == null) return Pair(false, null)
         
         return if (isHideDuplicatesMode) {
-            deleteInNormalWithHideDuplicates(row, currentPresetList)
+            deleteInNormalWithHideDuplicates(row, currentPresetList, tableModel)
         } else {
-            deleteInNormalStandard(row, currentPresetList)
+            deleteInNormalStandard(row, currentPresetList, tableModel)
         }
     }
     
@@ -133,8 +134,26 @@ class PresetDeletionService(
      */
     private fun deleteInNormalWithHideDuplicates(
         row: Int,
-        currentPresetList: PresetList
+        currentPresetList: PresetList,
+        tableModel: DevicePresetTableModel? = null
     ): Pair<Boolean, Int?> {
+        // Если есть модель таблицы, используем ID пресета для точного поиска
+        if (tableModel != null) {
+            val presetId = tableModel.getPresetIdAt(row)
+            if (presetId != null) {
+                val actualIndex = currentPresetList.presets.indexOfFirst { it.id == presetId }
+                if (actualIndex >= 0) {
+                    val removedPreset = currentPresetList.presets.removeAt(actualIndex)
+                    println("ADB_DEBUG: deletePresetFromTempList - removed preset '${removedPreset.label}' from current list at index $actualIndex (hide duplicates mode, by ID)")
+                    
+                    presetRecycleBin.moveToRecycleBin(removedPreset, currentPresetList.name, actualIndex)
+                    presetOrderManager.removeFromFixedOrder(currentPresetList.name, removedPreset)
+                    return Pair(true, actualIndex)
+                }
+            }
+        }
+        
+        // Fallback к старому методу, если модель не предоставлена
         val duplicateIndices = duplicateManager.findDuplicateIndices(currentPresetList.presets)
         val visibleIndices = currentPresetList.presets.indices.filter { !duplicateIndices.contains(it) }
         
@@ -154,8 +173,26 @@ class PresetDeletionService(
      */
     private fun deleteInNormalStandard(
         row: Int,
-        currentPresetList: PresetList
+        currentPresetList: PresetList,
+        tableModel: DevicePresetTableModel? = null
     ): Pair<Boolean, Int?> {
+        // Если есть модель таблицы, используем ID пресета для точного поиска
+        if (tableModel != null) {
+            val presetId = tableModel.getPresetIdAt(row)
+            if (presetId != null) {
+                val actualIndex = currentPresetList.presets.indexOfFirst { it.id == presetId }
+                if (actualIndex >= 0) {
+                    val removedPreset = currentPresetList.presets.removeAt(actualIndex)
+                    println("ADB_DEBUG: deletePresetFromTempList - removed preset '${removedPreset.label}' from current list at index $actualIndex (by ID)")
+                    
+                    presetRecycleBin.moveToRecycleBin(removedPreset, currentPresetList.name, actualIndex)
+                    presetOrderManager.removeFromFixedOrder(currentPresetList.name, removedPreset)
+                    return Pair(true, actualIndex)
+                }
+            }
+        }
+        
+        // Fallback к старому методу, если модель не предоставлена
         if (row >= 0 && row < currentPresetList.presets.size) {
             val removedPreset = currentPresetList.presets.removeAt(row)
             println("ADB_DEBUG: deletePresetFromTempList - removed preset '${removedPreset.label}' from current list at index $row")
