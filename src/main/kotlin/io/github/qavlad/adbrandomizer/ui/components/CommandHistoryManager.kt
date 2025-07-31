@@ -214,6 +214,23 @@ class CommandHistoryManager(
         
         if (historyStack.isNotEmpty()) {
             val command = historyStack.removeAt(historyStack.size - 1)
+            
+            // Проверяем, нужно ли переключить режим
+            if (command is AbstractPresetCommand) {
+                val wasInShowAll = command.wasShowAllMode
+                val currentlyInShowAll = controller.isShowAllMode()
+                
+                if (wasInShowAll != currentlyInShowAll) {
+                    if (wasInShowAll) {
+                        println("ADB_DEBUG: Command was executed in Show All mode, but we're in normal mode - enabling Show All")
+                        controller.setShowAllMode(true)
+                    } else {
+                        println("ADB_DEBUG: Command was executed in normal mode, but we're in Show All - disabling Show All")
+                        controller.disableShowAllMode()
+                    }
+                }
+            }
+            
             redoStack.add(command)
             
             println("ADB_DEBUG: Undoing command: ${command.description}")
@@ -234,6 +251,23 @@ class CommandHistoryManager(
         
         if (redoStack.isNotEmpty()) {
             val command = redoStack.removeAt(redoStack.size - 1)
+            
+            // Проверяем, нужно ли переключить режим
+            if (command is AbstractPresetCommand) {
+                val wasInShowAll = command.wasShowAllMode
+                val currentlyInShowAll = controller.isShowAllMode()
+                
+                if (wasInShowAll != currentlyInShowAll) {
+                    if (wasInShowAll) {
+                        println("ADB_DEBUG: Command was executed in Show All mode, but we're in normal mode - enabling Show All")
+                        controller.setShowAllMode(true)
+                    } else {
+                        println("ADB_DEBUG: Command was executed in normal mode, but we're in Show All - disabling Show All")
+                        controller.disableShowAllMode()
+                    }
+                }
+            }
+            
             addCommand(command, clearRedo = false)
             
             println("ADB_DEBUG: Redoing command: ${command.description}")

@@ -15,7 +15,7 @@ abstract class AbstractPresetCommand(
 ) : UndoableCommand {
     
     // Сохраняем режим, в котором была выполнена операция
-    protected val wasShowAllMode = controller.isShowAllPresetsMode()
+    val wasShowAllMode = controller.isShowAllPresetsMode()
     protected val wasHideDuplicatesMode = controller.isHideDuplicatesMode()
     protected val originalListId = controller.getCurrentPresetList()?.id
     

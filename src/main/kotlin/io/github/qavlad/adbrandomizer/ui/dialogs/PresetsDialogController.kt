@@ -985,4 +985,21 @@ class PresetsDialogController(
     override fun getTableSortingService(): TableSortingService? {
         return TableSortingService
     }
+    
+    /**
+     * Проверяет, включен ли режим Show All
+     */
+    fun isShowAllMode(): Boolean {
+        return dialogState.isShowAllPresetsMode()
+    }
+    
+    /**
+     * Отключает режим Show All
+     */
+    fun disableShowAllMode() {
+        if (dialogState.isShowAllPresetsMode()) {
+            // Используем метод из listManagerPanel для отключения Show All
+            listManagerPanel.setShowAllPresets(false)
+        }
+    }
 }
