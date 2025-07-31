@@ -31,9 +31,15 @@ class PresetListManagerPanel(
 ) : JPanel(BorderLayout()) {
     
     private val listComboBox = ComboBox<PresetListItem>()
-    private val showAllPresetsCheckbox = JBCheckBox("Show all presets", false)
-    private val hideDuplicatesCheckbox = JBCheckBox("Hide duplicates", false)
-    private val showCountersCheckbox = JBCheckBox("Show usage counters", false)
+    private val showAllPresetsCheckbox = JBCheckBox("Show all presets", false).apply {
+        cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
+    }
+    private val hideDuplicatesCheckbox = JBCheckBox("Hide duplicates", false).apply {
+        cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
+    }
+    private val showCountersCheckbox = JBCheckBox("Show usage counters", false).apply {
+        cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
+    }
     
     private var isUpdatingComboBox = false
     
@@ -114,19 +120,28 @@ class PresetListManagerPanel(
             renameButton.isEnabled = !isSelected
             deleteButton.isEnabled = !isSelected
         }
-        ButtonUtils.addHoverEffect(showAllPresetsCheckbox)
+        
+        // Добавляем hover эффект как у кнопок
+        setupCheckboxHoverEffect(showAllPresetsCheckbox)
+        
         bottomPanel.add(showAllPresetsCheckbox)
         
         hideDuplicatesCheckbox.addItemListener { event ->
             onHideDuplicatesChanged(event.stateChange == ItemEvent.SELECTED)
         }
-        ButtonUtils.addHoverEffect(hideDuplicatesCheckbox)
+        
+        // Добавляем hover эффект как у кнопок
+        setupCheckboxHoverEffect(hideDuplicatesCheckbox)
+        
         bottomPanel.add(hideDuplicatesCheckbox)
         
         showCountersCheckbox.addItemListener { event ->
             onShowCountersChanged(event.stateChange == ItemEvent.SELECTED)
         }
-        ButtonUtils.addHoverEffect(showCountersCheckbox)
+        
+        // Добавляем hover эффект как у кнопок
+        setupCheckboxHoverEffect(showCountersCheckbox)
+        
         bottomPanel.add(showCountersCheckbox)
         
         // Добавляем кнопку сброса сортировки
@@ -451,6 +466,35 @@ class PresetListManagerPanel(
         } finally {
             isUpdatingComboBox = false
         }
+    }
+    
+    /**
+     * Настраивает визуальный hover эффект для чекбокса
+     */
+    private fun setupCheckboxHoverEffect(checkBox: JBCheckBox) {
+        val originalBackground = checkBox.background
+        val hoverBackground = originalBackground?.brighter()
+        
+        checkBox.addMouseListener(object : java.awt.event.MouseAdapter() {
+            override fun mouseEntered(e: java.awt.event.MouseEvent?) {
+                if (checkBox.isEnabled) {
+                    // Применяем эффект похожий на кнопки
+                    checkBox.isOpaque = true
+                    if (hoverBackground != null) {
+                        checkBox.background = hoverBackground
+                    }
+                    // Включаем rollover для визуального эффекта на самом чекбоксе
+                    checkBox.model.isRollover = true
+                }
+            }
+            
+            override fun mouseExited(e: java.awt.event.MouseEvent?) {
+                // Восстанавливаем исходное состояние
+                checkBox.background = originalBackground
+                checkBox.isOpaque = false
+                checkBox.model.isRollover = false
+            }
+        })
     }
 
 }

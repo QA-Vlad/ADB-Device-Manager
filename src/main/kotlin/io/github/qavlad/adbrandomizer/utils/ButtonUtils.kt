@@ -1,9 +1,9 @@
 // Файл: src/main/kotlin/io/github/qavlad/adbrandomizer/utils/ButtonUtils.kt
 package io.github.qavlad.adbrandomizer.utils
 
+import com.intellij.ui.components.JBCheckBox
 import java.awt.Container
 import javax.swing.JButton
-import javax.swing.JCheckBox
 
 object ButtonUtils {
     fun addHoverEffect(button: JButton) {
@@ -30,10 +30,9 @@ object ButtonUtils {
         })
     }
     
-    fun addHoverEffect(checkBox: JCheckBox) {
+    fun addHoverEffect(checkBox: JBCheckBox) {
         checkBox.addMouseListener(object : java.awt.event.MouseAdapter() {
             override fun mouseEntered(e: java.awt.event.MouseEvent?) {
-                // Проверяем, что чекбокс активен перед применением hover эффекта
                 if (checkBox.isEnabled) {
                     checkBox.cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
                 }
