@@ -6,6 +6,7 @@ import com.intellij.ui.components.JBScrollPane
 import com.intellij.util.ui.JBUI
 import io.github.qavlad.adbrandomizer.config.PluginConfig
 import io.github.qavlad.adbrandomizer.ui.components.TableWithAddButtonPanel
+import io.github.qavlad.adbrandomizer.ui.components.OrientationPanel
 import io.github.qavlad.adbrandomizer.utils.PluginLogger
 import io.github.qavlad.adbrandomizer.utils.logging.LogCategory
 import java.awt.BorderLayout
@@ -45,6 +46,18 @@ class PresetsDialog(project: Project?) : DialogWrapper(project) {
         }
     }
 
+    private fun createOrientationIconsPanel(table: JTable, tablePanel: TableWithAddButtonPanel): JPanel {
+        val mainPanel = JPanel(BorderLayout())
+        
+        // Используем новый компонент OrientationPanel
+        val orientationPanel = OrientationPanel(table)
+        
+        mainPanel.add(orientationPanel, BorderLayout.NORTH)
+        mainPanel.add(tablePanel, BorderLayout.CENTER)
+        
+        return mainPanel
+    }
+    
     override fun createCenterPanel(): JComponent {
         PluginLogger.debug(LogCategory.UI_EVENTS, "createCenterPanel called")
         
@@ -72,10 +85,13 @@ class PresetsDialog(project: Project?) : DialogWrapper(project) {
         
         // Обновляем видимость кнопки в зависимости от режима
         controller.setTablePanelReference(tableWithButtonPanel)
+        
+        // Создаем панель с иконками ориентации
+        val orientationIconsPanel = createOrientationIconsPanel(table, tableWithButtonPanel)
 
         val mainPanel = JPanel(BorderLayout(0, JBUI.scale(10))).apply {
             add(listManagerPanel, BorderLayout.NORTH)
-            add(tableWithButtonPanel, BorderLayout.CENTER)
+            add(orientationIconsPanel, BorderLayout.CENTER)
         }
         
         // Добавляем обработчик клика для выхода из режима редактирования ко всем компонентам
