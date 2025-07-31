@@ -30,12 +30,11 @@ import io.github.qavlad.adbrandomizer.ui.services.HiddenDuplicatesManager
 import io.github.qavlad.adbrandomizer.ui.services.PresetSaveManager
 import io.github.qavlad.adbrandomizer.ui.services.ExtendedTableLoader
 import io.github.qavlad.adbrandomizer.ui.services.ComponentInitializationService
+import io.github.qavlad.adbrandomizer.ui.services.GlobalListenersManager
 import io.github.qavlad.adbrandomizer.ui.renderers.ValidationRenderer
 import io.github.qavlad.adbrandomizer.utils.ButtonUtils
 import java.awt.Container
 import java.awt.event.MouseEvent
-import java.awt.event.MouseAdapter
-import javax.swing.*
 import javax.swing.SwingUtilities
 import io.github.qavlad.adbrandomizer.ui.components.TableWithAddButtonPanel
 import io.github.qavlad.adbrandomizer.ui.commands.CommandContext
@@ -93,6 +92,7 @@ class PresetsDialogController(
     private val eventHandlersInitializer = EventHandlersInitializer(this)
     private val dialogState = DialogStateManager()
     private val componentInitService = ComponentInitializationService(project, dialogState, componentsFactory)
+    private val globalListenersManager = GlobalListenersManager()
     
     // Сервис сортировки таблицы
     private val tableSortingService = TableSortingService
@@ -131,7 +131,6 @@ class PresetsDialogController(
         tableSortingService,
         tempListsManager
     )
-    private var globalClickListener: java.awt.event.AWTEventListener? = null
     internal var currentPresetList: PresetList? = null
     
     // Менеджер колонок (инициализируется после создания tableConfigurator)
@@ -827,8 +826,12 @@ class PresetsDialogController(
         }
     }
 
-    fun setGlobalClickListener(listener: java.awt.event.AWTEventListener) {
-        globalClickListener = listener
+    fun setupGlobalClickListener() {
+        globalListenersManager.setupGlobalClickListener(table) {
+            if (table.isEditing) {
+                table.cellEditor?.stopCellEditing()
+            }
+        }
     }
 
 
@@ -1100,10 +1103,8 @@ class PresetsDialogController(
         println("ADB_DEBUG: SettingsDialogController disposed - recycle bin and original orders cleared")
         dialogNavigationHandler.uninstall()
 
-        // Удаляем глобальный обработчик кликов
-        globalClickListener?.let {
-            java.awt.Toolkit.getDefaultToolkit().removeAWTEventListener(it)
-        }
+        // Удаляем глобальные слушатели
+        globalListenersManager.dispose()
     }
 
     fun saveCurrentShowAllOrderFromTable() {
@@ -1148,46 +1149,7 @@ class PresetsDialogController(
      * Рекурсивно добавляет обработчик клика ко всем компонентам для выхода из режима редактирования
      */
     fun addClickListenerRecursively(container: Container, table: JBTable) {
-        var listenerCount = 0
-
-        val mouseListener = object : MouseAdapter() {
-            override fun mouseClicked(e: MouseEvent) {
-                // Проверяем, что клик не по самой таблице и не по кнопкам
-                if (e.source !is JBTable && e.source !is JButton && table.isEditing) {
-                    println("ADB_DEBUG: Cell editing stopped by recursive click listener")
-                    table.cellEditor?.stopCellEditing()
-                }
-            }
-        }
-
-        fun addListenersRecursive(comp: Container) {
-            // Добавляем обработчик к контейнеру
-            comp.addMouseListener(mouseListener)
-            listenerCount++
-
-            // Рекурсивно обрабатываем все дочерние компоненты
-            for (component in comp.components) {
-                when (component) {
-                    is JBTable -> {
-                        // Пропускаем таблицу
-                    }
-                    is JButton -> {
-                        // Пропускаем кнопки
-                    }
-                    is Container -> {
-                        addListenersRecursive(component)
-                    }
-                    else -> {
-                        // Добавляем обработчик к обычным компонентам
-                        component.addMouseListener(mouseListener)
-                        listenerCount++
-                    }
-                }
-            }
-        }
-
-        addListenersRecursive(container)
-        println("ADB_DEBUG: Added click listeners to $listenerCount components")
+        globalListenersManager.addClickListenerRecursively(container, table)
     }
     
     /**
