@@ -3,6 +3,9 @@ package io.github.qavlad.adbrandomizer.ui.services
 import io.github.qavlad.adbrandomizer.services.DevicePreset
 import io.github.qavlad.adbrandomizer.services.PresetList
 import io.github.qavlad.adbrandomizer.ui.components.DevicePresetTableModel
+import io.github.qavlad.adbrandomizer.ui.components.CommandHistoryManager
+import io.github.qavlad.adbrandomizer.ui.dialogs.DialogStateManager
+import javax.swing.JTable
 
 /**
  * Сервис для управления удалением пресетов из временных списков
@@ -169,5 +172,60 @@ class PresetDeletionService(
      */
     private fun findTargetList(listName: String): PresetList? {
         return tempListsManager.getTempLists().values.find { it.name == listName }
+    }
+    
+    /**
+     * Удаляет пресет из редактора таблицы
+     * Обрабатывает удаление с учетом истории и состояния диалога
+     */
+    fun deletePresetFromEditor(
+        row: Int,
+        table: JTable,
+        dialogState: DialogStateManager,
+        currentPresetList: PresetList?,
+        getPresetAtRow: (Int) -> DevicePreset,
+        getListNameAtRow: (Int) -> String?,
+        historyManager: CommandHistoryManager,
+        onReloadTable: () -> Unit
+    ) {
+        println("ADB_DEBUG: deletePresetFromEditor called for row: $row")
+        val model = table.model as? javax.swing.table.DefaultTableModel ?: return
+
+        if (row != -1) {
+            // Проверяем, что это не строка с кнопкой
+            if (model.getValueAt(row, 0) == "+") {
+                return // Не удаляем строку с кнопкой
+            }
+
+            // Устанавливаем флаг для предотвращения обработки клика
+            dialogState.withDeleteProcessing {
+                // Получаем данные пресета перед удалением для истории
+                val preset = getPresetAtRow(row)
+                val listNameForHistory = if (dialogState.isShowAllPresetsMode()) {
+                    getListNameAtRow(row)
+                } else {
+                    currentPresetList?.name
+                }
+
+                // Удаляем пресет из временного списка (source of truth)
+                val (removed, actualIndex) = deletePresetFromTempList(
+                    row = row,
+                    preset = preset,
+                    isShowAllPresetsMode = dialogState.isShowAllPresetsMode(),
+                    isHideDuplicatesMode = dialogState.isHideDuplicatesMode(),
+                    currentPresetList = currentPresetList,
+                    getListNameAtRow = getListNameAtRow,
+                    tableModel = model as DevicePresetTableModel
+                )
+
+                if (removed) {
+                    // Добавляем операцию в историю с реальным индексом если он отличается
+                    historyManager.addPresetDelete(row, preset, listNameForHistory, actualIndex)
+
+                    // Перезагружаем таблицу из источника правды
+                    onReloadTable()
+                }
+            }
+        }
     }
 }

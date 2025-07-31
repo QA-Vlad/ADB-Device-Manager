@@ -404,25 +404,6 @@ class PresetsDialogController(
     }
 
 
-
-    /**
-     * Удаляет пресет из временного списка
-     * @return Pair<Boolean, Int?> - успешность удаления и реальный индекс в списке (если отличается от row)
-     */
-    fun deletePresetFromTempList(row: Int): Pair<Boolean, Int?> {
-        val preset = getPresetAtRow(row)
-        
-        return serviceLocator.presetDeletionService.deletePresetFromTempList(
-            row = row,
-            preset = preset,
-            isShowAllPresetsMode = dialogState.isShowAllPresetsMode(),
-            isHideDuplicatesMode = dialogState.isHideDuplicatesMode(),
-            currentPresetList = stateManager.currentPresetList,
-            getListNameAtRow = ::getListNameAtRow,
-            tableModel = tableModel
-        )
-    }
-
     /**
      * Инициализирует временные копии всех списков для работы в памяти
      */
@@ -600,37 +581,16 @@ class PresetsDialogController(
     // === Действия с пресетами ===
 
     private fun deletePresetFromEditor(row: Int) {
-        println("ADB_DEBUG: deletePresetFromEditor called for row: $row")
-        val model = table.model as? javax.swing.table.DefaultTableModel ?: return
-
-        if (row != -1) {
-            // Проверяем, что это не строка с кнопкой
-            if (model.getValueAt(row, 0) == "+") {
-                return // Не удаляем строку с кнопкой
-            }
-
-            // Устанавливаем флаг для предотвращения обработки клика
-            dialogState.withDeleteProcessing {
-                // Получаем данные пресета перед удалением для истории
-                val preset = getPresetAtRow(row)
-                val listNameForHistory = if (dialogState.isShowAllPresetsMode()) {
-                    getListNameAtRow(row)
-                } else {
-                    stateManager.currentPresetList?.name
-                }
-
-                // Удаляем пресет из временного списка (source of truth)
-                val (removed, actualIndex) = deletePresetFromTempList(row)
-
-                if (removed) {
-                    // Добавляем операцию в историю с реальным индексом если он отличается
-                    historyManager.addPresetDelete(row, preset, listNameForHistory, actualIndex)
-
-                    // Перезагружаем таблицу из источника правды
-                    loadPresetsIntoTable()
-                }
-            }
-        }
+        serviceLocator.presetDeletionService.deletePresetFromEditor(
+            row = row,
+            table = table,
+            dialogState = dialogState,
+            currentPresetList = stateManager.currentPresetList,
+            getPresetAtRow = ::getPresetAtRow,
+            getListNameAtRow = ::getListNameAtRow,
+            historyManager = historyManager,
+            onReloadTable = ::loadPresetsIntoTable
+        )
     }
 
     fun addNewPreset() {
