@@ -31,6 +31,7 @@ import io.github.qavlad.adbrandomizer.ui.services.PresetSaveManager
 import io.github.qavlad.adbrandomizer.ui.services.ExtendedTableLoader
 import io.github.qavlad.adbrandomizer.ui.services.ComponentInitializationService
 import io.github.qavlad.adbrandomizer.ui.services.GlobalListenersManager
+import io.github.qavlad.adbrandomizer.ui.services.PresetDeletionService
 import io.github.qavlad.adbrandomizer.ui.renderers.ValidationRenderer
 import io.github.qavlad.adbrandomizer.utils.ButtonUtils
 import java.awt.Container
@@ -138,6 +139,14 @@ class PresetsDialogController(
     
     // Корзина для удалённых пресетов
     private val presetRecycleBin = PresetRecycleBin()
+    
+    // Сервис для удаления пресетов
+    private val presetDeletionService = PresetDeletionService(
+        tempListsManager,
+        presetRecycleBin,
+        presetOrderManager,
+        duplicateManager
+    )
 
     // Исходное состояние списков для отката при Cancel
     private val originalPresetLists = mutableMapOf<String, PresetList>()
@@ -519,99 +528,16 @@ class PresetsDialogController(
      */
     fun deletePresetFromTempList(row: Int): Pair<Boolean, Int?> {
         val preset = getPresetAtRow(row)
-
-        if (dialogState.isShowAllPresetsMode()) {
-            val listName = getListNameAtRow(row) ?: return Pair(false, null)
-            // Находим временный список по имени
-            val targetList = tempListsManager.getTempLists().values.find { it.name == listName } ?: return Pair(false, null)
-
-            // В режиме Hide Duplicates нужно найти пресет по ID
-            if (dialogState.isHideDuplicatesMode()) {
-                // Получаем ID пресета из таблицы
-                val presetId = tableModel.getPresetIdAt(row)
-                if (presetId != null) {
-                    // Находим индекс пресета с этим ID в целевом списке
-                    val indexToRemove = targetList.presets.indexOfFirst { it.id == presetId }
-                    
-                    if (indexToRemove >= 0) {
-                        val removedPreset = targetList.presets.removeAt(indexToRemove)
-                        println("ADB_DEBUG: deletePresetFromTempList - removed preset '${removedPreset.label}' (id: $presetId) from list $listName at index $indexToRemove (hide duplicates mode)")
-                        
-                        // Помещаем пресет в корзину
-                        presetRecycleBin.moveToRecycleBin(removedPreset, listName, indexToRemove)
-                        
-                        // Удаляем из фиксированного порядка
-                        presetOrderManager.removeFromFixedOrder(listName, removedPreset)
-                        return Pair(true, indexToRemove)
-                    }
-                    println("ADB_DEBUG: deletePresetFromTempList - preset with id $presetId not found in list $listName")
-                } else {
-                    println("ADB_DEBUG: deletePresetFromTempList - could not get preset ID for row $row")
-                }
-                return Pair(false, null)
-            }
-
-            // В обычном режиме удаляем по точному совпадению
-            // Сначала находим индекс пресета для удаления
-            val indexToRemove = targetList.presets.indexOfFirst {
-                it.label == preset.label &&
-                        it.size == preset.size &&
-                        it.dpi == preset.dpi
-            }
-            
-            if (indexToRemove >= 0) {
-                val removedPreset = targetList.presets.removeAt(indexToRemove)
-                println("ADB_DEBUG: deletePresetFromTempList - removed preset '${removedPreset.label}' from list $listName at index $indexToRemove")
-                
-                // Помещаем пресет в корзину
-                presetRecycleBin.moveToRecycleBin(removedPreset, listName, indexToRemove)
-                
-                // Удаляем из фиксированного порядка
-                presetOrderManager.removeFromFixedOrder(listName, removedPreset)
-                return Pair(true, indexToRemove)
-            }
-            
-            println("ADB_DEBUG: deletePresetFromTempList - preset not found in list $listName")
-            return Pair(false, null)
-        } else {
-            // В обычном режиме удаляем из текущего списка
-            if (currentPresetList != null) {
-                // В режиме Hide Duplicates нужно учитывать, что в таблице показаны не все пресеты
-                if (dialogState.isHideDuplicatesMode()) {
-                    // Находим индексы видимых пресетов
-                    val duplicateIndices = duplicateManager.findDuplicateIndices(currentPresetList!!.presets)
-                    val visibleIndices = currentPresetList!!.presets.indices.filter { !duplicateIndices.contains(it) }
-                    
-                    // Проверяем, что row в пределах видимых пресетов
-                    if (row < visibleIndices.size) {
-                        val actualIndex = visibleIndices[row]
-                        val removedPreset = currentPresetList!!.presets.removeAt(actualIndex)
-                        println("ADB_DEBUG: deletePresetFromTempList - removed preset '${removedPreset.label}' from current list at index $actualIndex (hide duplicates mode)")
-                        
-                        // Помещаем пресет в корзину
-                        presetRecycleBin.moveToRecycleBin(removedPreset, currentPresetList!!.name, actualIndex)
-                        
-                        return Pair(true, actualIndex)
-                    }
-                    return Pair(false, null)
-                }
-                
-                // В обычном режиме удаляем по индексу, чтобы не удалить несколько одинаковых
-                if (row >= 0 && row < currentPresetList!!.presets.size) {
-                    val removedPreset = currentPresetList!!.presets.removeAt(row)
-                    println("ADB_DEBUG: deletePresetFromTempList - removed preset '${removedPreset.label}' from current list at index $row")
-                    
-                    // Помещаем пресет в корзину
-                    presetRecycleBin.moveToRecycleBin(removedPreset, currentPresetList!!.name, row)
-                    
-                    // Удаляем из фиксированного порядка
-                    presetOrderManager.removeFromFixedOrder(currentPresetList!!.name, removedPreset)
-                    return Pair(true, null)
-                }
-                return Pair(false, null)
-            }
-            return Pair(false, null)
-        }
+        
+        return presetDeletionService.deletePresetFromTempList(
+            row = row,
+            preset = preset,
+            isShowAllPresetsMode = dialogState.isShowAllPresetsMode(),
+            isHideDuplicatesMode = dialogState.isHideDuplicatesMode(),
+            currentPresetList = currentPresetList,
+            getListNameAtRow = ::getListNameAtRow,
+            tableModel = tableModel
+        )
     }
 
     /**
