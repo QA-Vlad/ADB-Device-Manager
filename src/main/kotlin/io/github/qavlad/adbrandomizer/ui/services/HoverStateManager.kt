@@ -122,9 +122,19 @@ class HoverStateManager(
      */
     fun setState(newState: HoverState) {
         val oldState = currentState
+        
+        // Проверяем, действительно ли состояние изменилось
+        if (oldState == newState) {
+            return // Ничего не делаем, если состояние не изменилось
+        }
+        
         currentState = newState
         
-        println("ADB_DEBUG: HoverStateManager.setState - old selected: (${oldState.selectedTableRow}, ${oldState.selectedTableColumn}), new selected: (${newState.selectedTableRow}, ${newState.selectedTableColumn})")
+        // Логируем только значимые изменения (когда меняется выделение)
+        if (oldState.selectedTableRow != newState.selectedTableRow || 
+            oldState.selectedTableColumn != newState.selectedTableColumn) {
+            println("ADB_DEBUG: HoverStateManager.setState - old selected: (${oldState.selectedTableRow}, ${oldState.selectedTableColumn}), new selected: (${newState.selectedTableRow}, ${newState.selectedTableColumn})")
+        }
         
         // Перерисовываем все измененные ячейки
         repaintCellIfNeeded(oldState.hoveredTableRow, oldState.hoveredTableColumn)
