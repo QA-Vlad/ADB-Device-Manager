@@ -33,6 +33,7 @@ import io.github.qavlad.adbrandomizer.ui.services.ComponentInitializationService
 import io.github.qavlad.adbrandomizer.ui.services.GlobalListenersManager
 import io.github.qavlad.adbrandomizer.ui.services.PresetDeletionService
 import io.github.qavlad.adbrandomizer.ui.services.PresetListInitializationService
+import io.github.qavlad.adbrandomizer.ui.services.TableSortingController
 import io.github.qavlad.adbrandomizer.ui.renderers.ValidationRenderer
 import io.github.qavlad.adbrandomizer.utils.ButtonUtils
 import java.awt.Container
@@ -137,6 +138,9 @@ class PresetsDialogController(
     
     // Менеджер колонок (инициализируется после создания tableConfigurator)
     private lateinit var tableColumnManager: TableColumnManager
+    
+    // Контроллер сортировки (инициализируется после создания tableColumnManager)
+    private lateinit var tableSortingController: TableSortingController
     
     // Корзина для удалённых пресетов
     private val presetRecycleBin = PresetRecycleBin()
@@ -295,6 +299,9 @@ class PresetsDialogController(
         tableColumnManager = handlersResult.tableColumnManager
         tableModelListenerWithTimer = handlersResult.tableModelListenerWithTimer
         
+        // Инициализируем контроллер сортировки
+        tableSortingController = TableSortingController(dialogState, tableColumnManager)
+        
         // Сохраняем ссылку на слушатель
         tableModelListener = tableModelListenerWithTimer?.listener
         
@@ -363,84 +370,40 @@ class PresetsDialogController(
      * Настройка колонок таблицы в зависимости от режима
      */
     private fun setupTableColumns() {
-        tableColumnManager.setupTableColumns(table, tableModel, dialogState.isShowAllPresetsMode())
+        if (::tableSortingController.isInitialized) {
+            tableSortingController.setupTableColumns(table, tableModel)
+        } else {
+            // Fallback для случая, когда контроллер еще не инициализирован
+            tableColumnManager.setupTableColumns(table, tableModel, dialogState.isShowAllPresetsMode())
+        }
     }
-    
     
     /**
      * Обрабатывает клик по заголовку колонки
      */
     private fun handleHeaderClick(columnIndex: Int) {
-        // Определяем имя колонки
-        val hasCounters = PresetStorageService.getShowCounters()
-        val listColumnIndex = if (hasCounters) 8 else 6
-        
-        println("ADB_DEBUG: handleHeaderClick - columnIndex: $columnIndex, hasCounters: $hasCounters")
-        
-        val columnName = when (columnIndex) {
-            2 -> "Label"
-            3 -> "Size"
-            4 -> "DPI"
-            5 -> if (hasCounters) "Size Uses" else null
-            6 -> if (hasCounters) "DPI Uses" else if (dialogState.isShowAllPresetsMode()) "List" else null
-            listColumnIndex -> if (dialogState.isShowAllPresetsMode()) "List" else null
-            else -> null
-        }
-        
-        println("ADB_DEBUG: handleHeaderClick - columnName: $columnName")
-        
-        if (columnName != null) {
-            // Обрабатываем клик через сервис сортировки
-            tableSortingService.handleColumnClick(
-                columnName,
-                dialogState.isShowAllPresetsMode(),
-                dialogState.isHideDuplicatesMode()
-            )
-            
-            // Применяем сортировку
-            applySorting()
-            
-            // Обновляем заголовки таблицы для отображения индикаторов сортировки
-            table.tableHeader.repaint()
-        }
-    }
-    
-    /**
-     * Применяет текущую сортировку к таблице
-     */
-    private fun applySorting() {
-        // Сохраняем текущее состояние
-        forceSyncBeforeHistoryOperation()
-        
-        // Перезагружаем таблицу с учетом сортировки
-        loadPresetsIntoTable()
+        tableSortingController.handleHeaderClick(
+            columnIndex = columnIndex,
+            table = table,
+            onApplySorting = { loadPresetsIntoTable() }
+        )
     }
     
     /**
      * Обрабатывает сброс сортировки
      */
     private fun handleResetSorting() {
-        // Сбрасываем сортировку для текущего режима
-        tableSortingService.resetSort(
-            dialogState.isShowAllPresetsMode(),
-            dialogState.isHideDuplicatesMode()
+        tableSortingController.handleResetSorting(
+            table = table,
+            onLoadPresetsIntoTable = { loadPresetsIntoTable() }
         )
-        
-        // Перезагружаем таблицу без сортировки
-        loadPresetsIntoTable()
-        
-        // Обновляем заголовки таблицы
-        table.tableHeader.repaint()
     }
     
     /**
      * Синхронизирует состояние сортировки при переключении режима Hide Duplicates
      */
     fun syncSortStateForHideDuplicatesToggle(hideDuplicates: Boolean) {
-        tableSortingService.syncSortStateForHideDuplicatesToggle(
-            dialogState.isShowAllPresetsMode(),
-            hideDuplicates
-        )
+        tableSortingController.syncSortStateForHideDuplicatesToggle(hideDuplicates)
     }
 
     /**
@@ -908,7 +871,11 @@ class PresetsDialogController(
      */
     fun restoreOriginalState() {
         // Восстанавливаем состояние сортировки
-        TableSortingService.restoreSortStateFromSnapshot()
+        if (::tableSortingController.isInitialized) {
+            tableSortingController.restoreSortStateFromSnapshot()
+        } else {
+            TableSortingService.restoreSortStateFromSnapshot()
+        }
         
         // Восстанавливаем счётчики использования
         countersStateManager.restoreCountersFromSnapshot()
