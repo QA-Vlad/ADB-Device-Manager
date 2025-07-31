@@ -35,23 +35,30 @@ class PresetDeleteCommand(
         if (targetListName != null) {
             val targetList = tempPresetLists.values.find { it.name == targetListName }
             if (targetList != null) {
-                // Используем actualListIndex если он есть (для режима скрытия дубликатов), иначе rowIndex
-                val indexToRestore = actualListIndex ?: rowIndex
-                
                 // Сначала пытаемся восстановить из корзины
                 val restoredPreset = controller.getPresetRecycleBin().restoreFromRecycleBin(
                     targetListName, 
-                    indexToRestore,
+                    actualListIndex ?: rowIndex,
                     presetData.id
                 )
                 
                 val presetToRestore = restoredPreset ?: presetData.copy(id = presetData.id)
                 
-                if (indexToRestore <= targetList.presets.size) {
-                    targetList.presets.add(indexToRestore, presetToRestore)
-                    println("ADB_DEBUG: Restored preset to temp list '$targetListName' at index $indexToRestore (actualListIndex=$actualListIndex, rowIndex=$rowIndex)")
-                    println("ADB_DEBUG:   Preset restored from recycle bin: ${restoredPreset != null}")
+                // При восстановлении важно вставить пресет в правильное место с учётом текущей сортировки
+                // Если сортировка не активна, используем исходный индекс
+                val currentSortState = controller.getTableSortingService()?.getCurrentSortState()
+                val indexToRestore = if (currentSortState?.activeColumn != null) {
+                    // При активной сортировке просто добавляем в конец, сортировка произойдёт при перезагрузке таблицы
+                    targetList.presets.size
+                } else {
+                    // Без сортировки восстанавливаем на исходную позицию
+                    (actualListIndex ?: rowIndex).coerceAtMost(targetList.presets.size)
                 }
+                
+                targetList.presets.add(indexToRestore, presetToRestore)
+                println("ADB_DEBUG: Restored preset to temp list '$targetListName' at index $indexToRestore")
+                println("ADB_DEBUG:   Active sort: ${currentSortState?.activeColumn ?: "none"}")
+                println("ADB_DEBUG:   Preset restored from recycle bin: ${restoredPreset != null}")
 
                 if (!isShowAllPresetsMode && targetListName != currentPresetList?.name) {
                     val listToSwitch = tempPresetLists.values.find { it.name == targetListName }
@@ -92,9 +99,10 @@ class PresetDeleteCommand(
         if (targetListName != null) {
             val targetList = tempPresetLists.values.find { it.name == targetListName }
             if (targetList != null) {
-                // Используем actualListIndex если он есть (для режима скрытия дубликатов), иначе rowIndex
-                val indexToRemove = actualListIndex ?: rowIndex
-                if (indexToRemove < targetList.presets.size) {
+                // Ищем пресет по ID, так как индексы могут измениться из-за сортировки
+                val indexToRemove = targetList.presets.indexOfFirst { it.id == presetData.id }
+                
+                if (indexToRemove >= 0) {
                     val presetToRemove = targetList.presets[indexToRemove]
                     targetList.presets.removeAt(indexToRemove)
                     
@@ -105,8 +113,10 @@ class PresetDeleteCommand(
                         indexToRemove
                     )
                     
-                    println("ADB_DEBUG: Removed preset from temp list '$targetListName' at index $indexToRemove (actualListIndex=$actualListIndex, rowIndex=$rowIndex)")
+                    println("ADB_DEBUG: Removed preset from temp list '$targetListName' at index $indexToRemove (found by ID: ${presetData.id})")
                     println("ADB_DEBUG:   Preset moved to recycle bin")
+                } else {
+                    println("ADB_DEBUG: Warning: Could not find preset with ID ${presetData.id} in list '$targetListName'")
                 }
             }
         }
