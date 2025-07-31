@@ -29,13 +29,13 @@ import io.github.qavlad.adbrandomizer.ui.services.CountersStateManager
 import io.github.qavlad.adbrandomizer.ui.services.HiddenDuplicatesManager
 import io.github.qavlad.adbrandomizer.ui.services.PresetSaveManager
 import io.github.qavlad.adbrandomizer.ui.services.ExtendedTableLoader
+import io.github.qavlad.adbrandomizer.ui.services.ComponentInitializationService
 import io.github.qavlad.adbrandomizer.ui.renderers.ValidationRenderer
 import io.github.qavlad.adbrandomizer.utils.ButtonUtils
 import java.awt.Container
 import java.awt.event.MouseEvent
 import java.awt.event.MouseAdapter
 import javax.swing.*
-import com.intellij.openapi.application.ApplicationManager
 import javax.swing.SwingUtilities
 import io.github.qavlad.adbrandomizer.ui.components.TableWithAddButtonPanel
 import io.github.qavlad.adbrandomizer.ui.commands.CommandContext
@@ -46,7 +46,7 @@ import io.github.qavlad.adbrandomizer.services.DevicePreset
  * Управляет всей логикой, обработкой событий и состоянием.
  */
 class PresetsDialogController(
-    private val project: Project?,
+    project: Project?,
     private val dialog: PresetsDialog
 ) : CommandContext {
     // UI компоненты
@@ -92,6 +92,7 @@ class PresetsDialogController(
     private val componentsFactory = DialogComponentsFactory()
     private val eventHandlersInitializer = EventHandlersInitializer(this)
     private val dialogState = DialogStateManager()
+    private val componentInitService = ComponentInitializationService(project, dialogState, componentsFactory)
     
     // Сервис сортировки таблицы
     private val tableSortingService = TableSortingService
@@ -154,9 +155,7 @@ class PresetsDialogController(
      * Инициализация контроллера
      */
     fun initialize() {
-        // Очищаем кэши при открытии диалога
-        PresetListService.clearAllCaches()
-        refreshDeviceStatesIfNeeded()
+        componentInitService.performInitialSetup()
     }
 
     /**
@@ -182,8 +181,7 @@ class PresetsDialogController(
      * Создает модель таблицы с начальными данными
      */
     fun createTableModel(): DevicePresetTableModel {
-        val showCounters = PresetStorageService.getShowCounters()
-        tableModel = componentsFactory.createTableModel(historyManager, showCounters)
+        tableModel = componentInitService.createTableModel(historyManager)
         // НЕ добавляем слушатель здесь, так как table еще не создана
 
         // НЕ загружаем список здесь, так как временные списки еще не созданы
@@ -196,29 +194,16 @@ class PresetsDialogController(
      * Создает кастомную таблицу с переопределенными методами рендеринга
      */
     fun createTable(model: DevicePresetTableModel): JBTable {
-        table = componentsFactory.createTable(
-            model, 
-            { hoverState }, 
-            dialogState, 
-            historyManager,
-            onLastInteractedRowUpdate = { row ->
-                if (::hoverStateManager.isInitialized) {
-                    hoverStateManager.updateLastInteractedRow(row)
-                }
-            }
-        )
-        
-        // Инициализируем HoverStateManager после создания таблицы
-        hoverStateManager = HoverStateManager(table) { newState ->
-            hoverState = newState
-        }
-        
-        // Инициализируем TableEventHandler после создания HoverStateManager
-        tableEventHandler = TableEventHandler(
-            project = project,
+        val tableInitResult = componentInitService.createAndInitializeTable(
+            model = model,
+            historyManager = historyManager,
             getHoverState = { hoverState },
-            setHoverState = { newState -> hoverStateManager.setState(newState) }
+            onHoverStateChanged = { newState -> hoverState = newState }
         )
+        
+        table = tableInitResult.table
+        hoverStateManager = tableInitResult.hoverStateManager
+        tableEventHandler = tableInitResult.tableEventHandler
         
         // Инициализируем ExtendedTableLoader
         extendedTableLoader = ExtendedTableLoader(
@@ -248,71 +233,21 @@ class PresetsDialogController(
             currentPresetList = tempListsManager.getTempLists().values.first()
         }
 
-        // Создаем слушатель модели с таймером
-        tableModelListenerWithTimer = componentsFactory.createTableModelListener(
-            dialogState = dialogState,
-            historyManager = historyManager,
-            onValidateFields = { validateFields() },
-            onSyncTableChanges = { syncTableChangesToTempListsInternal() },
-            onTableRepaint = { 
-                SwingUtilities.invokeLater {
-                    table.repaint()
-                }
-            },
-            controller = this
-        )
-        
-        // Сохраняем ссылку на слушатель
-        tableModelListener = tableModelListenerWithTimer?.listener
-        
-        // Добавляем слушатель к модели таблицы
-        tableModel.addTableModelListener(tableModelListener)
-
-        validationRenderer = ValidationRenderer(
-            hoverState = { hoverState },
-            getPresetAtRow = ::getPresetAtRow,
-            findDuplicates = { tableModel.findDuplicates() },
-            validationService = validationService
-        )
-
-        keyboardHandler = KeyboardHandler(
+        // Инициализируем обработчики через сервис
+        val handlersResult = componentInitService.initializeHandlers(
             table = table,
             tableModel = tableModel,
-            hoverState = { hoverState },
-            setHoverState = { newState -> hoverStateManager.setState(newState) },
+            hoverStateManager = hoverStateManager,
             historyManager = historyManager,
-            validateFields = ::validateFields,
-            setEditingCellData = { oldValue, row, column ->
-                dialogState.setEditingCell(row, column, oldValue)
-                // Сохраняем последнюю взаимодействующую строку
-                hoverStateManager.updateLastInteractedRow(row)
-            },
-            onDuplicate = ::duplicatePreset,
-            forceSyncBeforeHistory = ::forceSyncBeforeHistoryOperation
-        )
-        
-        dialogNavigationHandler = DialogNavigationHandler(
-            table = table,
-            setTableFocus = { table.requestFocusInWindow() },
-            clearTableSelection = { 
-                hoverStateManager.clearTableSelection()
-            },
-            selectFirstCell = {
-                hoverStateManager.selectFirstLabelCell()
-            }
-        )
-
-        tableConfigurator = TableConfigurator(
-            table = table,
-            hoverState = { hoverState },
-            setHoverState = { newState -> hoverStateManager.setState(newState) },
-            onRowMoved = ::onRowMoved,
+            getHoverState = { hoverState },
+            getPresetAtRow = ::getPresetAtRow,
+            onValidateFields = { validateFields() },
             onCellClicked = ::handleCellClick,
-            onTableExited = { hoverStateManager.handleTableExit() },
-            validationRenderer = validationRenderer,
-            showContextMenu = ::showContextMenu,
-            isShowAllPresetsMode = { dialogState.isShowAllPresetsMode() },
-            onPresetDeletedFromEditor = ::deletePresetFromEditor,
+            onRowMoved = ::onRowMoved,
+            onShowContextMenu = ::showContextMenu,
+            onDuplicate = ::duplicatePreset,
+            onDeleteFromEditor = ::deletePresetFromEditor,
+            onSyncTableChanges = { syncTableChangesToTempListsInternal() },
             onDragStarted = { 
                 dialogState.startDragAndDrop()
             },
@@ -330,18 +265,22 @@ class PresetsDialogController(
                 
                 // Не сбрасываем флаг здесь - он будет сброшен после обработки всех обновлений
             },
-            getLastInteractedRow = { hoverStateManager.getLastInteractedRow() }
+            onForceSyncBeforeHistory = ::forceSyncBeforeHistoryOperation
         )
-
-        tableConfigurator.configure()
         
-        // Инициализируем менеджер колонок
-        tableColumnManager = TableColumnManager(
-            tableConfigurator,
-            { dialogState.isShowAllPresetsMode() },
-            { dialogState.isHideDuplicatesMode() },
-            { PresetStorageService.getShowCounters() }
-        )
+        // Сохраняем созданные компоненты
+        keyboardHandler = handlersResult.keyboardHandler
+        dialogNavigationHandler = handlersResult.dialogNavigationHandler
+        tableConfigurator = handlersResult.tableConfigurator
+        validationRenderer = handlersResult.validationRenderer
+        tableColumnManager = handlersResult.tableColumnManager
+        tableModelListenerWithTimer = handlersResult.tableModelListenerWithTimer
+        
+        // Сохраняем ссылку на слушатель
+        tableModelListener = tableModelListenerWithTimer?.listener
+        
+        // Добавляем слушатель к модели таблицы
+        tableModel.addTableModelListener(tableModelListener)
 
         println("ADB_DEBUG: After tableConfigurator.configure() - currentPresetList: ${currentPresetList?.name}, presets: ${currentPresetList?.presets?.size}")
 
@@ -391,7 +330,7 @@ class PresetsDialogController(
         dialogNavigationHandler.install()
         
         // Добавляем обработчик кликов по заголовкам таблицы
-        setupTableHeaderClickListener()
+        componentInitService.setupTableHeaderClickListener(table, ::handleHeaderClick)
         
         // Настраиваем слушатель обновлений счётчиков
         countersStateManager.setupUpdateListener(table, tableModel) {
@@ -408,36 +347,6 @@ class PresetsDialogController(
         tableColumnManager.setupTableColumns(table, tableModel, dialogState.isShowAllPresetsMode())
     }
     
-    /**
-     * Настраивает обработчик кликов по заголовкам таблицы для сортировки
-     */
-    private fun setupTableHeaderClickListener() {
-        table.tableHeader.addMouseListener(object : MouseAdapter() {
-            override fun mouseClicked(e: MouseEvent) {
-                val columnIndex = table.columnModel.getColumnIndexAtX(e.x)
-                if (columnIndex < 0) return
-                
-                println("ADB_DEBUG: Header clicked - columnIndex: $columnIndex")
-                
-                // Проверяем, является ли колонка сортируемой
-                val hasCounters = PresetStorageService.getShowCounters()
-                val listColumnIndex = if (hasCounters) 8 else 6 // List колонка сдвигается при наличии счетчиков
-                
-                val isSortable = when (columnIndex) {
-                    2, 3, 4 -> true // Label, Size, DPI
-                    5, 6 -> hasCounters // Size Uses, DPI Uses только когда счетчики включены
-                    listColumnIndex -> dialogState.isShowAllPresetsMode() // List только в режиме Show All
-                    else -> false
-                }
-                
-                println("ADB_DEBUG: Header clicked - isSortable: $isSortable, hasCounters: $hasCounters")
-                
-                if (isSortable) {
-                    handleHeaderClick(columnIndex)
-                }
-            }
-        })
-    }
     
     /**
      * Обрабатывает клик по заголовку колонки
@@ -1145,19 +1054,6 @@ class PresetsDialogController(
      */
 
 
-    private fun refreshDeviceStatesIfNeeded() {
-        if (project != null) {
-            ApplicationManager.getApplication().executeOnPooledThread {
-                kotlinx.coroutines.runBlocking {
-                    DeviceStateService.refreshDeviceStatesAsync()
-                }
-                SwingUtilities.invokeLater {
-                    validateFields()
-                    table.repaint()
-                }
-            }
-        }
-    }
 
     /**
      * Восстанавливает исходное состояние временных списков при отмене
