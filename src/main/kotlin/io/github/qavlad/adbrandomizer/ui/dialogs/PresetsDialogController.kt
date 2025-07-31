@@ -23,12 +23,12 @@ import io.github.qavlad.adbrandomizer.ui.services.TableColumnManager
 import io.github.qavlad.adbrandomizer.ui.services.PresetsPersistenceService
 import io.github.qavlad.adbrandomizer.ui.services.PresetOrderManager
 import io.github.qavlad.adbrandomizer.ui.services.TableSortingService
-import io.github.qavlad.adbrandomizer.ui.services.TableStateTracker
 import io.github.qavlad.adbrandomizer.ui.services.PresetRecycleBin
 import io.github.qavlad.adbrandomizer.ui.services.HoverStateManager
 import io.github.qavlad.adbrandomizer.ui.services.CountersStateManager
 import io.github.qavlad.adbrandomizer.ui.services.HiddenDuplicatesManager
 import io.github.qavlad.adbrandomizer.ui.services.PresetSaveManager
+import io.github.qavlad.adbrandomizer.ui.services.ExtendedTableLoader
 import io.github.qavlad.adbrandomizer.ui.renderers.ValidationRenderer
 import io.github.qavlad.adbrandomizer.utils.ButtonUtils
 import java.awt.Container
@@ -96,9 +96,6 @@ class PresetsDialogController(
     // Сервис сортировки таблицы
     private val tableSortingService = TableSortingService
     
-    // Трекер состояния таблицы
-    private val tableStateTracker = TableStateTracker
-    
     // Менеджер состояния счётчиков
     private val countersStateManager = CountersStateManager(tableSortingService, dialogState)
     
@@ -122,6 +119,9 @@ class PresetsDialogController(
     
     // TableLoader зависит от presetOrderManager и tableSortingService
     private val tableLoader = TableLoader(viewModeManager, presetOrderManager, tableSortingService, dialogState)
+    
+    // ExtendedTableLoader - инициализируется позже, после создания hoverStateManager
+    private lateinit var extendedTableLoader: ExtendedTableLoader
     
     // Обработчик drag & drop операций
     private val tableDragDropHandler = TableDragDropHandler(
@@ -218,6 +218,15 @@ class PresetsDialogController(
             project = project,
             getHoverState = { hoverState },
             setHoverState = { newState -> hoverStateManager.setState(newState) }
+        )
+        
+        // Инициализируем ExtendedTableLoader
+        extendedTableLoader = ExtendedTableLoader(
+            tableLoader = tableLoader,
+            dialogState = dialogState,
+            hoverStateManager = hoverStateManager,
+            hiddenDuplicatesManager = hiddenDuplicatesManager,
+            tempListsManager = tempListsManager
         )
         
         return table
@@ -817,103 +826,52 @@ class PresetsDialogController(
      * Загружает пресеты в таблицу в зависимости от текущего режима
      */
     private fun loadPresetsIntoTable() {
-        val tempLists = tempListsManager.getTempLists()
-        println("ADB_DEBUG: SettingsDialogController.loadPresetsIntoTable()")
-        println("ADB_DEBUG:   tempListsManager.getTempLists().size: ${tempLists.size}")
-        println("ADB_DEBUG:   tempListsManager.isEmpty(): ${tempListsManager.isEmpty()}")
-        
-        if (tempLists.isEmpty()) {
-            println("ADB_DEBUG:   WARNING: tempListsManager is EMPTY before passing to TableLoader!")
-            println("ADB_DEBUG:   Stack trace:")
-            Thread.currentThread().stackTrace.take(10).forEach { element ->
-                println("ADB_DEBUG:     at $element")
-            }
+        if (!::extendedTableLoader.isInitialized) {
+            println("ADB_DEBUG: ExtendedTableLoader not initialized yet, skipping load")
+            return
         }
         
-        // Очищаем выделение при смене режимов
-        if (dialogState.isSwitchingMode() || dialogState.isSwitchingList()) {
-            if (::hoverStateManager.isInitialized) {
-                hoverStateManager.resetForModeSwitch()
-            }
-        }
-        
-        tableLoader.loadPresetsIntoTable(
+        extendedTableLoader.loadPresetsIntoTable(
             tableModel = tableModel,
             currentPresetList = currentPresetList,
-            tempPresetLists = tempLists,
-            isShowAllMode = dialogState.isShowAllPresetsMode(),
-            isHideDuplicatesMode = dialogState.isHideDuplicatesMode(),
-            isFirstLoad = dialogState.isFirstLoad(),
-            isSwitchingList = dialogState.isSwitchingList(),
-            isSwitchingMode = dialogState.isSwitchingMode(),
-            isSwitchingDuplicatesFilter = dialogState.isSwitchingDuplicatesFilter(),
-            onTableUpdating = { updating -> dialogState.setTableUpdating(updating) },
-            onAddButtonRow = { addButtonRow() },
-            inMemoryOrder = if (dialogState.isShowAllPresetsMode()) {
-                if (inMemoryTableOrder.isNotEmpty()) {
-                    println("ADB_DEBUG: Using existing inMemoryTableOrder with ${inMemoryTableOrder.size} items")
-                    inMemoryTableOrder
-                } else {
-                    // Попробуем загрузить последний сохранённый порядок
-                    val savedOrder = PresetListService.getShowAllPresetsOrder()
-                    if (savedOrder.isNotEmpty()) {
-                        println("ADB_DEBUG: Loading saved Show All order as inMemoryOrder with ${savedOrder.size} items")
-                        // Используем формат с ID напрямую
-                        savedOrder.ifEmpty {
-                            null
-                        }
-                    } else {
-                        null
-                    }
-                }
-            } else {
-                null
-            },
-            initialHiddenDuplicates = hiddenDuplicatesManager.getHiddenDuplicatesForTableLoader(),
             table = table,
-            onClearTableSelection = {
-                if (::hoverStateManager.isInitialized) {
-                    hoverStateManager.clearTableSelection()
-                }
-            }
+            onAddButtonRow = { addButtonRow() },
+            inMemoryTableOrder = inMemoryTableOrder
         )
-        
-        // Обновляем текущее состояние скрытых дублей после загрузки таблицы
-        updateCurrentHiddenDuplicates()
     }
     
-    /**
-     * Обновляет текущее состояние скрытых дублей на основе текущих данных
-     */
-    private fun updateCurrentHiddenDuplicates() {
-        hiddenDuplicatesManager.updateCurrentHiddenDuplicates(
-            dialogState.isHideDuplicatesMode(),
-            tempListsManager.getTempLists()
-        )
-    }
     
     /**
      * Загружает пресеты в таблицу без вызова слушателей
      * Используется для пересортировки после редактирования ячеек
      */
     fun loadPresetsIntoTableWithoutNotification() {
-        // Временно отключаем слушатель модели
-        tableModelListener?.let { tableModel.removeTableModelListener(it) }
-        
-        dialogState.withTableUpdate {
-            loadPresetsIntoTable()
+        if (!::extendedTableLoader.isInitialized) {
+            println("ADB_DEBUG: ExtendedTableLoader not initialized yet, skipping load")
+            return
         }
         
-        // Возвращаем слушатель на место
-        tableModelListener?.let { tableModel.addTableModelListener(it) }
+        extendedTableLoader.loadPresetsIntoTableWithoutNotification(
+            tableModel = tableModel,
+            currentPresetList = currentPresetList,
+            table = table,
+            onAddButtonRow = { addButtonRow() },
+            inMemoryTableOrder = inMemoryTableOrder,
+            tableModelListener = tableModelListener
+        )
     }
 
     /**
      * Добавляет специальную строку с кнопкой добавления
      */
     private fun addButtonRow() {
-        tableLoader.addButtonRow(tableModel, dialogState.isShowAllPresetsMode())
-        tableModel.updateRowNumbers()
+        if (::extendedTableLoader.isInitialized) {
+            extendedTableLoader.addButtonRow(tableModel)
+        } else {
+            // Fallback если ExtendedTableLoader еще не инициализирован
+            tableLoader.addButtonRow(tableModel, dialogState.isShowAllPresetsMode())
+            tableModel.updateRowNumbers()
+        }
     }
 
 
@@ -1175,7 +1133,11 @@ class PresetsDialogController(
 
 
     private fun refreshTableInternal() {
-        tableLoader.refreshTable(table, ::validateFields)
+        if (::extendedTableLoader.isInitialized) {
+            extendedTableLoader.refreshTable(table, ::validateFields)
+        } else {
+            tableLoader.refreshTable(table, ::validateFields)
+        }
     }
 
     /**
@@ -1349,64 +1311,19 @@ class PresetsDialogController(
      * Синхронно загружает пресеты в таблицу (без invokeLater)
      */
     private fun loadPresetsIntoTableSync(presetsOverride: List<DevicePreset>? = null) {
-        println("ADB_DEBUG: loadPresetsIntoTableSync() - Start, presetsOverride: ${presetsOverride?.size}")
-        println("ADB_DEBUG: dialogState.isShowAllPresetsMode(): ${dialogState.isShowAllPresetsMode()}")
-        println("ADB_DEBUG: dialogState.isHideDuplicatesMode(): ${dialogState.isHideDuplicatesMode()}")
+        if (!::extendedTableLoader.isInitialized) {
+            println("ADB_DEBUG: ExtendedTableLoader not initialized yet, skipping sync load")
+            return
+        }
         
-        // Используем TableLoader для загрузки пресетов с применением сортировки
-        tableLoader.loadPresetsIntoTable(
+        extendedTableLoader.loadPresetsIntoTableSync(
             tableModel = tableModel,
             currentPresetList = currentPresetList,
-            tempPresetLists = tempListsManager.getTempLists(),
-            isShowAllMode = dialogState.isShowAllPresetsMode(),
-            isHideDuplicatesMode = dialogState.isHideDuplicatesMode(),
-            isFirstLoad = false,
-            isSwitchingList = false,
-            isSwitchingMode = false,
-            isSwitchingDuplicatesFilter = false,
-            onTableUpdating = { updating -> dialogState.setTableUpdating(updating) },
-            onAddButtonRow = { addButtonRow() },
-            inMemoryOrder = if (dialogState.isShowAllPresetsMode()) {
-                inMemoryTableOrder.ifEmpty {
-                    // Используем ту же логику, что и в основном методе
-                    val savedOrder = PresetListService.getShowAllPresetsOrder()
-                    if (savedOrder.isNotEmpty()) {
-                        val convertedOrder = savedOrder.mapNotNull { key ->
-                            val parts = key.split("::")
-                            if (parts.size == 2) {
-                                val listName = parts[0]
-                                val presetId = parts[1]
-                                tempListsManager.getTempLists().values.find { it.name == listName }?.presets?.find { it.id == presetId }
-                                    ?.let { preset ->
-                                        "${listName}::${preset.label}::${preset.size}::${preset.dpi}"
-                                    }
-                            } else null
-                        }
-
-                        convertedOrder.ifEmpty {
-                            null
-                        }
-                    } else {
-                        null
-                    }
-                }
-            } else {
-                null
-            },
-            initialHiddenDuplicates = hiddenDuplicatesManager.getHiddenDuplicatesForTableLoader(),
             table = table,
-            onClearTableSelection = {
-                if (::hoverStateManager.isInitialized) {
-                    hoverStateManager.clearTableSelection()
-                }
-            }
+            onAddButtonRow = { addButtonRow() },
+            inMemoryTableOrder = inMemoryTableOrder,
+            presetsOverride = presetsOverride
         )
-        
-        // Обновляем текущее состояние скрытых дублей после загрузки таблицы
-        updateCurrentHiddenDuplicates()
-        
-        // Обновляем состояние трекера
-        tableStateTracker.updateTableState(tableModel)
     }
     
     
@@ -1414,24 +1331,19 @@ class PresetsDialogController(
      * Перезагружает таблицу с временным отключением слушателей для избежания рекурсии
      */
     private fun reloadTableWithoutListeners() {
-        tableLoader.reloadTableWithoutListeners(
+        if (!::extendedTableLoader.isInitialized) {
+            println("ADB_DEBUG: ExtendedTableLoader not initialized yet, skipping reload")
+            return
+        }
+        
+        extendedTableLoader.reloadTableWithoutListeners(
             table = table,
             tableModel = tableModel,
             currentPresetList = currentPresetList,
-            tempPresetLists = tempListsManager.getTempLists(),
-            isShowAllMode = dialogState.isShowAllPresetsMode(),
-            isHideDuplicatesMode = dialogState.isHideDuplicatesMode(),
-            onTableUpdating = { dialogState.setTableUpdating(it) },
             onAddButtonRow = ::addButtonRow,
             onSaveCurrentTableOrder = ::saveCurrentTableOrderToMemory,
-            onClearLastInteractedRow = { 
-                if (::hoverStateManager.isInitialized) {
-                    hoverStateManager.updateLastInteractedRow(-1)
-                }
-            },
             tableModelListener = tableModelListener,
-            inMemoryOrder = inMemoryTableOrder,
-            initialHiddenDuplicates = hiddenDuplicatesManager.getInitialHiddenDuplicates()
+            inMemoryTableOrder = inMemoryTableOrder
         )
     }
     
