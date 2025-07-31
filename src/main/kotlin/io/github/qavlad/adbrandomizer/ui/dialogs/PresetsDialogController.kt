@@ -32,6 +32,7 @@ import io.github.qavlad.adbrandomizer.ui.services.ExtendedTableLoader
 import io.github.qavlad.adbrandomizer.ui.services.ComponentInitializationService
 import io.github.qavlad.adbrandomizer.ui.services.GlobalListenersManager
 import io.github.qavlad.adbrandomizer.ui.services.PresetDeletionService
+import io.github.qavlad.adbrandomizer.ui.services.PresetListInitializationService
 import io.github.qavlad.adbrandomizer.ui.renderers.ValidationRenderer
 import io.github.qavlad.adbrandomizer.utils.ButtonUtils
 import java.awt.Container
@@ -145,6 +146,16 @@ class PresetsDialogController(
         tempListsManager,
         presetRecycleBin,
         presetOrderManager,
+        duplicateManager
+    )
+    
+    // Сервис для инициализации списков пресетов
+    private val presetListInitializationService = PresetListInitializationService(
+        tempListsManager,
+        snapshotManager,
+        presetOrderManager,
+        hiddenDuplicatesManager,
+        stateManager,
         duplicateManager
     )
 
@@ -544,105 +555,15 @@ class PresetsDialogController(
      * Инициализирует временные копии всех списков для работы в памяти
      */
     private fun initializeTempPresetLists() {
-        println("ADB_DEBUG: initializeTempPresetLists - start")
-        println("ADB_DEBUG:   tempListsManager.size() before clear: ${tempListsManager.size()}")
-
-        // Включаем кэш для оптимизации производительности
-        PresetListService.enableCache()
+        val initResult = presetListInitializationService.initializeTempPresetLists()
         
-        // Создаем снимок состояния сортировки для возможности отката
-        TableSortingService.createSortStateSnapshot()
-
-        // Сбрасываем флаг изменения порядка при инициализации
-        normalModeOrderChanged = false
-        modifiedListIds.clear()
-        println("ADB_DEBUG: Reset normalModeOrderChanged = false and cleared modifiedListIds")
-
-        // Проверяем, что дефолтные списки существуют
-        PresetListService.ensureDefaultListsExist()
-
-        tempListsManager.clear()
+        // Применяем результаты инициализации
         originalPresetLists.clear()
-        duplicateManager.clearSnapshots()
-        
-        // Загружаем все списки через StateManager
-        val loadedLists = stateManager.initializeTempPresetLists()
-        println("ADB_DEBUG:   loadedLists.size: ${loadedLists.size}")
-        tempListsManager.setTempLists(loadedLists)
-        println("ADB_DEBUG:   tempListsManager.size() after setTempLists: ${tempListsManager.size()}")
-        
-        // Создаем копии для отката
-        originalPresetLists.putAll(snapshotManager.saveOriginalState(tempListsManager.getTempLists()))
-        
-        // Сохраняем исходный порядок из файлов для каждого списка
-        loadedLists.values.forEach { list ->
-            presetOrderManager.saveOriginalFileOrder(list.id, list.presets)
-        }
-        
-        // Инициализируем информацию о скрытых дублях
-        hiddenDuplicatesManager.initializeHiddenDuplicates(loadedLists)
-        
-        // Сохраняем начальный порядок для каждого списка в обычном режиме
-        // Это нужно для восстановления порядка после режима Show All
-        // НО только если порядок ещё не был сохранён ранее
-        loadedLists.values.forEach { list ->
-            val existingOrder = presetOrderManager.getNormalModeOrder(list.id)
-            if (existingOrder == null) {
-                // Порядок ещё не сохранён - сохраняем текущий как начальный
-                presetOrderManager.saveNormalModeOrder(list.id, list.presets)
-                println("ADB_DEBUG: Saved initial normal mode order for list '${list.name}' with ${list.presets.size} presets")
-            } else {
-                println("ADB_DEBUG: Normal mode order already exists for list '${list.name}' with ${existingOrder.size} items - not overwriting")
-                // Загружаем существующий порядок в память для использования при отображении
-                val orderedPresets = mutableListOf<DevicePreset>()
-                
-                // Пробуем сначала как ID (новый формат)
-                val presetsById = list.presets.associateBy { it.id }
-                var foundByIds = false
-                
-                existingOrder.forEach { key ->
-                    presetsById[key]?.let { 
-                        orderedPresets.add(it)
-                        foundByIds = true
-                    }
-                }
-                
-                // Если не нашли по ID, пробуем старый формат с составным ключом
-                if (!foundByIds) {
-                    val presetsMap = list.presets.associateBy { "${it.label}|${it.size}|${it.dpi}" }
-                    existingOrder.forEach { key ->
-                        presetsMap[key]?.let { orderedPresets.add(it) }
-                    }
-                    // Добавляем пресеты, которых нет в сохранённом порядке
-                    list.presets.forEach { preset ->
-                        val key = "${preset.label}|${preset.size}|${preset.dpi}"
-                        if (key !in existingOrder) {
-                            orderedPresets.add(preset)
-                        }
-                    }
-                } else {
-                    // Добавляем пресеты, которых нет в сохранённом порядке (новые пресеты по ID)
-                    list.presets.forEach { preset ->
-                        if (preset.id !in existingOrder) {
-                            orderedPresets.add(preset)
-                        }
-                    }
-                }
-                
-                if (orderedPresets.isNotEmpty()) {
-                    presetOrderManager.updateNormalModeOrderInMemory(list.id, orderedPresets)
-                }
-            }
-        }
-        
-        // Определяем начальный текущий список
-        currentPresetList = stateManager.determineInitialCurrentList(tempListsManager.getTempLists())
-        
-        println("ADB_DEBUG: After determineInitialCurrentList - currentPresetList: ${currentPresetList?.name}")
-        println("ADB_DEBUG: currentPresetList contents after assignment:")
-        currentPresetList?.presets?.forEachIndexed { index, preset ->
-            println("ADB_DEBUG:   [$index] ${preset.label} | ${preset.size} | ${preset.dpi}")
-        }
+        originalPresetLists.putAll(initResult.originalPresetLists)
+        currentPresetList = initResult.currentPresetList
+        normalModeOrderChanged = initResult.normalModeOrderChanged
+        modifiedListIds.clear()
+        modifiedListIds.addAll(initResult.modifiedListIds)
         
         // Обновляем комбобокс если панель уже создана
         if (this::listManagerPanel.isInitialized) {
@@ -652,8 +573,6 @@ class PresetsDialogController(
                 listManagerPanel.selectListByName(it.name)
             }
         }
-        
-        println("ADB_DEBUG: initializeTempPresetLists - done. Current list: ${currentPresetList?.name}, temp lists count: ${tempListsManager.size()}")
     }
 
     /**
@@ -1019,13 +938,11 @@ class PresetsDialogController(
         countersStateManager.dispose()
         keyboardHandler.removeGlobalKeyListener()
         
-        // Отключаем кэш и очищаем его
-        PresetListService.disableCache()
+        // Очищаем сервис инициализации
+        presetListInitializationService.dispose()
         
         // Очищаем корзину при закрытии диалога
         presetRecycleBin.clear()
-        // Очищаем исходные порядки из файлов
-        presetOrderManager.clearOriginalFileOrders()
         println("ADB_DEBUG: SettingsDialogController disposed - recycle bin and original orders cleared")
         dialogNavigationHandler.uninstall()
 
