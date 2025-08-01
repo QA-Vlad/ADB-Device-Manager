@@ -225,17 +225,51 @@ object AdbService {
             device.executeShellCommand("wm size", receiver, PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             
             val output = receiver.output.trim()
-            // Формат вывода: "Physical size: 1080x1920" или "Override size: 1080x1920"
-            val sizePattern = Pattern.compile(PluginConfig.Patterns.SIZE_OUTPUT_PATTERN)
-            val matcher = sizePattern.matcher(output)
+            PluginLogger.debug("wm size output for device %s: %s", device.name, output)
+            
+            // Сначала проверяем, есть ли Override size (кастомный размер)
+            val overridePattern = Pattern.compile("Override size: (\\d+)x(\\d+)")
+            val overrideMatcher = overridePattern.matcher(output)
+            
+            if (overrideMatcher.find()) {
+                val width = overrideMatcher.group(1).toInt()
+                val height = overrideMatcher.group(2).toInt()
+                PluginLogger.debug("Found override size for device %s: %dx%d", device.name, width, height)
+                return@runDeviceOperation Pair(width, height)
+            }
+            
+            // Если нет Override size, берём Physical size
+            val physicalPattern = Pattern.compile("Physical size: (\\d+)x(\\d+)")
+            val physicalMatcher = physicalPattern.matcher(output)
+            
+            if (physicalMatcher.find()) {
+                val width = physicalMatcher.group(1).toInt()
+                val height = physicalMatcher.group(2).toInt()
+                PluginLogger.debug("Using physical size for device %s: %dx%d", device.name, width, height)
+                return@runDeviceOperation Pair(width, height)
+            }
+            
+            throw Exception("Could not parse size from output: $output")
+        }
+    }
+    
+    fun getDefaultSize(device: IDevice): Result<Pair<Int, Int>> {
+        return runDeviceOperation(device.name, "get default size") {
+            val receiver = CollectingOutputReceiver()
+            device.executeShellCommand("wm size", receiver, PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            
+            val output = receiver.output.trim()
+            // Ищем строку с Physical size, которая показывает дефолтный размер
+            val physicalSizePattern = Pattern.compile("Physical size: (\\d+)x(\\d+)")
+            val matcher = physicalSizePattern.matcher(output)
             
             if (matcher.find()) {
                 val width = matcher.group(1).toInt()
                 val height = matcher.group(2).toInt()
-                PluginLogger.debug("Current size for device %s: %dx%d", device.name, width, height)
+                PluginLogger.debug("Default (physical) size for device %s: %dx%d", device.name, width, height)
                 Pair(width, height)
             } else {
-                throw Exception("Could not parse size from output: $output")
+                throw Exception("Could not parse physical size from output: $output")
             }
         }
     }

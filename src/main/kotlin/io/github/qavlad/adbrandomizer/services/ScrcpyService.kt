@@ -19,6 +19,9 @@ object ScrcpyService {
         PluginConfig.Scrcpy.SCRCPY_NAMES["windows"]!! 
     else 
         PluginConfig.Scrcpy.SCRCPY_NAMES["default"]!!
+    
+    // Хранилище активных scrcpy процессов по серийному номеру устройства
+    private val activeScrcpyProcesses = mutableMapOf<String, Process>()
 
     fun findScrcpyExecutable(): String? {
         val savedPath = PresetStorageService.getScrcpyPath()
@@ -33,6 +36,61 @@ object ScrcpyService {
         }
 
         return null
+    }
+    
+    fun isScrcpyActiveForDevice(serialNumber: String): Boolean {
+        val process = activeScrcpyProcesses[serialNumber]
+        val isActive = process != null && process.isAlive
+        
+        // Логируем все активные процессы для отладки
+        PluginLogger.debug(LogCategory.SCRCPY, "Active scrcpy processes: %s", 
+            activeScrcpyProcesses.keys.joinToString(", "))
+        
+        PluginLogger.debug(LogCategory.SCRCPY, "Checking scrcpy status for device %s: process=%s, isAlive=%s, result=%s", 
+            serialNumber, 
+            process != null, 
+            process?.isAlive ?: false,
+            isActive
+        )
+        return isActive
+    }
+    
+    fun stopScrcpyForDevice(serialNumber: String): Boolean {
+        val process = activeScrcpyProcesses.remove(serialNumber)
+        if (process != null && process.isAlive) {
+            try {
+                process.destroy()
+                // Даём процессу время на завершение
+                if (!process.waitFor(5, TimeUnit.SECONDS)) {
+                    process.destroyForcibly()
+                }
+                PluginLogger.info(LogCategory.SCRCPY, "Stopped scrcpy for device: %s", serialNumber)
+                return true
+            } catch (e: Exception) {
+                PluginLogger.info(LogCategory.SCRCPY, "Error stopping scrcpy for device %s: %s", serialNumber, e.message)
+            }
+        }
+        return false
+    }
+    
+    fun restartScrcpyForDevice(serialNumber: String, project: Project): Boolean {
+        PluginLogger.info(LogCategory.SCRCPY, "Restarting scrcpy for device: %s", serialNumber)
+        
+        // Останавливаем текущий процесс
+        stopScrcpyForDevice(serialNumber)
+        
+        // Небольшая задержка перед перезапуском
+        Thread.sleep(1000)
+        
+        // Находим путь к scrcpy
+        val scrcpyPath = findScrcpyExecutable()
+        if (scrcpyPath == null) {
+            PluginLogger.info(LogCategory.SCRCPY, "Cannot restart scrcpy - executable not found")
+            return false
+        }
+        
+        // Запускаем новый процесс
+        return launchScrcpy(scrcpyPath, serialNumber, project)
     }
 
     fun launchScrcpy(scrcpyPath: String, serialNumber: String, @Suppress("UNUSED_PARAMETER") project: Project): Boolean {
@@ -194,6 +252,11 @@ object ScrcpyService {
             }
 
             PluginLogger.info(LogCategory.SCRCPY, "Scrcpy started successfully for device: %s", serialNumber)
+            
+            // Сохраняем процесс для возможности управления им
+            activeScrcpyProcesses[serialNumber] = process
+            PluginLogger.info(LogCategory.SCRCPY, "Saved scrcpy process for device %s, total active processes: %d", 
+                serialNumber, activeScrcpyProcesses.size)
 
             Thread {
                 try {
@@ -201,6 +264,8 @@ object ScrcpyService {
                     PluginLogger.info(LogCategory.SCRCPY, "Scrcpy for device %s closed with exit code: %s", serialNumber, exitCode)
                     outputReader.join(1000)
                     errorReader.join(1000)
+                    // Удаляем процесс из активных после завершения
+                    activeScrcpyProcesses.remove(serialNumber)
                 } catch (_: InterruptedException) {
                     PluginLogger.info(LogCategory.SCRCPY, "Scrcpy monitoring interrupted for device: %s", serialNumber)
                     Thread.currentThread().interrupt()

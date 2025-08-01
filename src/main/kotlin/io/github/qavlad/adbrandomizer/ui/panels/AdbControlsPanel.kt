@@ -14,6 +14,7 @@ import io.github.qavlad.adbrandomizer.ui.dialogs.ScrcpyCompatibilityDialog
 import io.github.qavlad.adbrandomizer.utils.NotificationUtils
 import io.github.qavlad.adbrandomizer.utils.ValidationUtils
 import io.github.qavlad.adbrandomizer.utils.PluginLogger
+import io.github.qavlad.adbrandomizer.utils.logging.LogCategory
 import java.awt.*
 import java.util.Locale
 import javax.swing.*
@@ -201,7 +202,9 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
     // ==================== RESET ACTIONS ====================
 
     private fun executeResetAction(resetSize: Boolean, resetDpi: Boolean) {
-        if (!validateDevicesAvailable()) return
+        if (!validateDevicesAvailable()) {
+            return
+        }
 
         val actionDescription = getResetActionDescription(resetSize, resetDpi)
 
@@ -240,8 +243,87 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
     private fun resetAllDevices(devices: List<IDevice>, resetSize: Boolean, resetDpi: Boolean, indicator: ProgressIndicator) {
         devices.forEach { device ->
             indicator.text = "Resetting ${device.name}..."
-            if (resetSize) AdbService.resetSize(device)
-            if (resetDpi) AdbService.resetDpi(device)
+            
+            // Получаем текущий размер перед сбросом (только если нужно сбрасывать размер)
+            val currentSizeBefore = if (resetSize) {
+                val size = AdbService.getCurrentSize(device).getOrNull()
+                PluginLogger.debug(LogCategory.UI_EVENTS, "Current size before reset for device %s: %s", 
+                    device.name, size?.let { "${it.first}x${it.second}" } ?: "null")
+                size
+            } else null
+            
+            // Выполняем сброс
+            if (resetSize) {
+                PluginLogger.debug(LogCategory.UI_EVENTS, "Executing size reset for device %s", device.name)
+                AdbService.resetSize(device)
+            }
+            if (resetDpi) {
+                PluginLogger.debug(LogCategory.UI_EVENTS, "Executing DPI reset for device %s", device.name)
+                AdbService.resetDpi(device)
+            }
+            
+            // Проверяем, изменился ли размер и нужно ли перезапустить scrcpy
+            if (resetSize && currentSizeBefore != null) {
+                // Даём время на применение сброса
+                Thread.sleep(1000) // Увеличим задержку для надёжности
+                
+                // Получаем новый размер после сброса
+                val currentSizeAfter = AdbService.getCurrentSize(device).getOrNull()
+                PluginLogger.debug(LogCategory.UI_EVENTS, "Current size after reset for device %s: %s", 
+                    device.name, currentSizeAfter?.let { "${it.first}x${it.second}" } ?: "null")
+                
+                // Проверяем активность scrcpy
+                // Для Wi-Fi устройств нужно использовать логический серийный номер
+                val allDevices = getAllDevicesFromModel()
+                val deviceInfo = allDevices.find { it.device?.serialNumber == device.serialNumber }
+                val serialNumber = deviceInfo?.logicalSerialNumber ?: device.serialNumber
+                
+                PluginLogger.debug(LogCategory.UI_EVENTS, "Checking scrcpy for device: physical serial=%s, logical serial=%s", 
+                    device.serialNumber, serialNumber)
+                
+                val isScrcpyActive = ScrcpyService.isScrcpyActiveForDevice(serialNumber)
+                PluginLogger.debug(LogCategory.UI_EVENTS, "Scrcpy active for device %s: %s", serialNumber, isScrcpyActive)
+                
+                // Проверяем, нужно ли перезапустить scrcpy
+                // Перезапускаем если:
+                // 1. Размер изменился после сброса ИЛИ
+                // 2. Размер был кастомным (не дефолтным) перед сбросом
+                val sizeChanged = currentSizeAfter != null && currentSizeBefore != currentSizeAfter
+                
+                // Получаем дефолтный размер для сравнения
+                val defaultSizeResult = AdbService.getDefaultSize(device)
+                val defaultSize = defaultSizeResult.getOrNull()
+                val wasCustomSize = defaultSize != null && currentSizeBefore != defaultSize
+                
+                PluginLogger.debug(LogCategory.UI_EVENTS, 
+                    "Reset analysis for device %s: before=%sx%s, after=%sx%s, default=%sx%s, changed=%s, wasCustom=%s", 
+                    serialNumber,
+                    currentSizeBefore.first, currentSizeBefore.second,
+                    currentSizeAfter?.first ?: 0, currentSizeAfter?.second ?: 0,
+                    defaultSize?.first ?: 0, defaultSize?.second ?: 0,
+                    sizeChanged, wasCustomSize
+                )
+                
+                if (isScrcpyActive && (sizeChanged || wasCustomSize)) {
+                    PluginLogger.debug(LogCategory.UI_EVENTS, 
+                        "Restarting scrcpy for device %s (sizeChanged=%s, wasCustomSize=%s)", 
+                        serialNumber, sizeChanged, wasCustomSize
+                    )
+                    
+                    // Перезапускаем scrcpy в отдельном потоке
+                    Thread {
+                        Thread.sleep(500) // Даём время на стабилизацию
+                        val restartResult = ScrcpyService.restartScrcpyForDevice(serialNumber, project)
+                        PluginLogger.debug(LogCategory.UI_EVENTS, "Scrcpy restart result for device %s: %s", 
+                            serialNumber, restartResult)
+                    }.start()
+                } else {
+                    PluginLogger.debug(LogCategory.UI_EVENTS, 
+                        "Scrcpy restart not needed for device %s (isActive=%s, sizeChanged=%s, wasCustomSize=%s)", 
+                        serialNumber, isScrcpyActive, sizeChanged, wasCustomSize
+                    )
+                }
+            }
         }
     }
 
@@ -270,7 +352,7 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                     if (success) {
                         NotificationUtils.showSuccess(project, "ADB server killed successfully")
                         // Форсируем обновление списка устройств через небольшую задержку
-                        Timer(1000) {
+                        Timer(500) {
                             devicePollingService.forceUpdate()
                         }.apply {
                             isRepeats = false

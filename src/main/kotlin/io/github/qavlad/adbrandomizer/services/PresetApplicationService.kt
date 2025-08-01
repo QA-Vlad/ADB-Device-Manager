@@ -28,7 +28,7 @@ object PresetApplicationService {
                     return
                 }
                 
-                applyPresetToAllDevices(devices, preset, presetData, indicator)
+                applyPresetToAllDevices(devices, preset, presetData, indicator, project)
                 
                 // Обновляем состояние устройств после применения пресета
                 updateDeviceStatesAfterPresetApplication(devices, presetData)
@@ -136,7 +136,7 @@ object PresetApplicationService {
         return PresetData(width, height, dpi, appliedSettings)
     }
     
-    private fun applyPresetToAllDevices(devices: List<IDevice>, preset: DevicePreset, presetData: PresetData, indicator: ProgressIndicator) {
+    private fun applyPresetToAllDevices(devices: List<IDevice>, preset: DevicePreset, presetData: PresetData, indicator: ProgressIndicator, project: Project) {
         devices.forEach { device ->
             indicator.text = "Applying '${preset.label}' to ${device.name}..."
             
@@ -223,6 +223,21 @@ object PresetApplicationService {
                 
                 // Дополнительная задержка после установки размера
                 Thread.sleep(500)
+                
+                // Проверяем и перезапускаем scrcpy если он активен для этого устройства
+                val serialNumber = device.serialNumber
+                if (ScrcpyService.isScrcpyActiveForDevice(serialNumber)) {
+                    PluginLogger.debug(LogCategory.PRESET_SERVICE, 
+                        "Scrcpy is active for device %s, restarting after resolution change", 
+                        serialNumber
+                    )
+                    
+                    // Перезапускаем scrcpy в отдельном потоке, чтобы не блокировать применение пресета
+                    Thread {
+                        Thread.sleep(500) // Даём время на стабилизацию после изменения разрешения
+                        ScrcpyService.restartScrcpyForDevice(serialNumber, project)
+                    }.start()
+                }
             }
             
             if (presetData.dpi != null) {
