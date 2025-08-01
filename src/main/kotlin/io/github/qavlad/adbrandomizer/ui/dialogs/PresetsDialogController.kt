@@ -661,6 +661,37 @@ class PresetsDialogController(
     }
 
 
+    /**
+     * Собирает текущий порядок из таблицы без сохранения в файл
+     */
+    private fun collectCurrentTableOrder(): List<String> {
+        val order = mutableListOf<String>()
+        
+        if (dialogState.isShowAllPresetsMode()) {
+            val listColumn = if (tableModel.columnCount > 8) tableModel.columnCount - 1 else -1
+            
+            for (i in 0 until tableModel.rowCount) {
+                // Пропускаем строку с кнопкой "+"
+                if (tableModel.getValueAt(i, 0) == "+") {
+                    continue
+                }
+                
+                val preset = tableModel.getPresetAt(i) ?: continue
+                val listName = if (listColumn >= 0) {
+                    tableModel.getValueAt(i, listColumn)?.toString() ?: ""
+                } else {
+                    ""
+                }
+                
+                if (listName.isNotEmpty() && preset.id.isNotEmpty()) {
+                    order.add("${listName}::${preset.id}")
+                }
+            }
+        }
+        
+        return order
+    }
+    
     fun onRowMoved(fromIndex: Int, toIndex: Int) {
         serviceLocator.tableDragDropHandler.onRowMoved(
             fromIndex = fromIndex,
@@ -679,6 +710,13 @@ class PresetsDialogController(
         
         // Обновляем заголовок таблицы, чтобы убрать визуальный индикатор сортировки
         table.tableHeader.repaint()
+        
+        // Обновляем порядок в памяти для режима Show All (без сохранения в файл)
+        if (dialogState.isShowAllPresetsMode()) {
+            val currentOrder = collectCurrentTableOrder()
+            stateManager.updateInMemoryTableOrder(currentOrder)
+            println("ADB_DEBUG: Updated in-memory table order after drag-and-drop with ${currentOrder.size} items")
+        }
     }
 
     fun showContextMenu(e: MouseEvent) {
