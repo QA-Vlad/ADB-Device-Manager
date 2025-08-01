@@ -81,6 +81,8 @@ class EventHandlersInitializer(
                     
                     if (controller.isTableInitialized()) {
                         onLoadPresetsIntoTable()
+                        // Ориентация уже применена к данным в initializeTempPresetLists
+                        println("ADB_DEBUG: onListChanged - orientation already applied to all lists")
                     }
                 }
             },
@@ -192,6 +194,8 @@ class EventHandlersInitializer(
                 if (controller.isTableInitialized()) {
                     onSetupTableColumns()
                     onLoadPresetsIntoTable()
+                    // Ориентация уже применена к данным в initializeTempPresetLists
+                    println("ADB_DEBUG: handleShowAllPresetsChanged - orientation already applied to all lists")
                 }
             }
         }
@@ -259,6 +263,8 @@ class EventHandlersInitializer(
             dialogState.withDuplicatesFilterSwitching {
                 dialogState.withTableUpdate {
                     onLoadPresetsIntoTable()
+                    // Ориентация уже применена к данным в initializeTempPresetLists
+                    println("ADB_DEBUG: handleHideDuplicatesChanged - orientation already applied to all lists")
                 }
             }
             

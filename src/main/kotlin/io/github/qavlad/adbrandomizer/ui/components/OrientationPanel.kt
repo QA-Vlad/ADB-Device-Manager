@@ -12,13 +12,24 @@ import javax.swing.event.TableColumnModelEvent
 import javax.swing.event.ChangeEvent
 import javax.swing.event.ListSelectionEvent
 
+enum class Orientation {
+    PORTRAIT,
+    LANDSCAPE
+}
+
 /**
  * Панель с иконками ориентации, которая отслеживает позицию колонки Size
  */
 class OrientationPanel(private val table: JTable) : JPanel() {
     
     private val portraitIcon = IconLoader.getIcon("/icons/mobile.svg", OrientationPanel::class.java)
+    private val portraitInactiveIcon = IconLoader.getIcon("/icons/mobile_inactive.svg", OrientationPanel::class.java)
     private val landscapeIcon = IconLoader.getIcon("/icons/mobile_landscape.svg", OrientationPanel::class.java)
+    private val landscapeInactiveIcon = IconLoader.getIcon("/icons/mobile_landscape_inactive.svg", OrientationPanel::class.java)
+    
+    private var currentOrientation = Orientation.PORTRAIT
+    private var orientationChangeListener: ((Orientation) -> Unit)? = null
+    private var isListenerReady = false
     
     private val portraitButton = JButton(portraitIcon).apply {
         preferredSize = Dimension(JBUIScale.scale(24), JBUIScale.scale(24))
@@ -44,7 +55,7 @@ class OrientationPanel(private val table: JTable) : JPanel() {
         
         addActionListener { 
             PluginLogger.debug(LogCategory.UI_EVENTS, "Portrait orientation clicked")
-            // TODO: Implement orientation switch logic
+            switchToPortrait()
         }
     }
     
@@ -72,7 +83,7 @@ class OrientationPanel(private val table: JTable) : JPanel() {
         
         addActionListener { 
             PluginLogger.debug(LogCategory.UI_EVENTS, "Landscape orientation clicked")
-            // TODO: Implement orientation switch logic
+            switchToLandscape()
         }
     }
     
@@ -85,6 +96,9 @@ class OrientationPanel(private val table: JTable) : JPanel() {
         
         add(portraitButton)
         add(landscapeButton)
+        
+        // Устанавливаем начальное состояние
+        updateButtonStates()
         
         // Инициализация позиции и слушателей
         SwingUtilities.invokeLater {
@@ -140,6 +154,153 @@ class OrientationPanel(private val table: JTable) : JPanel() {
         // Для отладки - рисуем границы панели (закомментировано)
         // g.color = Color.RED.withAlpha(30)
         // g.fillRect(0, 0, width, height)
+    }
+    
+    private fun updateButtonStates() {
+        when (currentOrientation) {
+            Orientation.PORTRAIT -> {
+                portraitButton.icon = portraitIcon
+                landscapeButton.icon = landscapeInactiveIcon
+            }
+            Orientation.LANDSCAPE -> {
+                portraitButton.icon = portraitInactiveIcon
+                landscapeButton.icon = landscapeIcon
+            }
+        }
+    }
+    
+    private fun switchToPortrait() {
+        if (currentOrientation == Orientation.PORTRAIT) return
+        
+        println("ADB_DEBUG: switchToPortrait called!")
+        println("ADB_DEBUG: Stack trace:")
+        Thread.currentThread().stackTrace.take(10).forEach { 
+            println("ADB_DEBUG:   at $it")
+        }
+        
+        currentOrientation = Orientation.PORTRAIT
+        updateButtonStates()
+        updateTableResolutions(true)
+        
+        // Уведомляем слушателей о смене ориентации только если слушатель готов
+        if (isListenerReady) {
+            orientationChangeListener?.invoke(Orientation.PORTRAIT)
+        } else {
+            println("ADB_DEBUG: Listener not ready yet, skipping notification")
+        }
+        
+        PluginLogger.debug(LogCategory.UI_EVENTS, "Switched to portrait orientation")
+    }
+    
+    private fun switchToLandscape() {
+        if (currentOrientation == Orientation.LANDSCAPE) return
+        
+        currentOrientation = Orientation.LANDSCAPE
+        updateButtonStates()
+        updateTableResolutions(false)
+        
+        // Уведомляем слушателей о смене ориентации только если слушатель готов
+        if (isListenerReady) {
+            orientationChangeListener?.invoke(Orientation.LANDSCAPE)
+        } else {
+            println("ADB_DEBUG: Listener not ready yet, skipping notification")
+        }
+        
+        PluginLogger.debug(LogCategory.UI_EVENTS, "Switched to landscape orientation")
+    }
+    
+    private fun updateTableResolutions(toPortrait: Boolean) {
+        val model = table.model as? DevicePresetTableModel ?: return
+        
+        println("ADB_DEBUG: updateTableResolutions called - toPortrait: $toPortrait")
+        println("ADB_DEBUG: Stack trace:")
+        Thread.currentThread().stackTrace.take(10).forEach { 
+            println("ADB_DEBUG:   at $it")
+        }
+        
+        // Отключаем события таблицы, чтобы избежать множественных обновлений
+        table.isEnabled = false
+        
+        try {
+            for (row in 0 until model.rowCount) {
+                // Пропускаем строку с кнопкой добавления
+                val firstColumn = model.getValueAt(row, 0) as? String
+                if (firstColumn == "+") continue
+                
+                val currentSize = model.getValueAt(row, 3) as? String ?: continue
+                if (currentSize.isBlank()) continue
+                
+                // Парсим разрешение
+                val parts = currentSize.split("x", "×")
+                if (parts.size != 2) continue
+                
+                val width = parts[0].trim().toIntOrNull() ?: continue
+                val height = parts[1].trim().toIntOrNull() ?: continue
+                
+                // Определяем нужно ли менять ориентацию
+                val isCurrentlyPortrait = height > width
+                val needsChange = if (toPortrait) !isCurrentlyPortrait else isCurrentlyPortrait
+                
+                if (needsChange) {
+                    // Меняем местами ширину и высоту
+                    val newSize = "${height}x${width}"
+                    model.setValueAt(newSize, row, 3)
+                    
+                    PluginLogger.debug(LogCategory.UI_EVENTS, 
+                        "Changed resolution at row $row from $currentSize to $newSize")
+                }
+            }
+        } finally {
+            table.isEnabled = true
+        }
+        
+        // Обновляем отображение таблицы
+        table.repaint()
+    }
+    
+    /**
+     * Возвращает текущую ориентацию
+     */
+    fun getCurrentOrientation(): Orientation {
+        return currentOrientation
+    }
+    
+    /**
+     * Устанавливает ориентацию и обновляет UI
+     */
+    fun setOrientation(orientation: Orientation, applyToTable: Boolean = false) {
+        if (currentOrientation != orientation) {
+            currentOrientation = orientation
+            updateButtonStates()
+            
+            // Применяем к таблице если запрошено
+            if (applyToTable) {
+                updateTableResolutions(orientation == Orientation.PORTRAIT)
+                // Уведомляем слушателей о смене ориентации только если слушатель готов
+                if (isListenerReady) {
+                    orientationChangeListener?.invoke(orientation)
+                } else {
+                    println("ADB_DEBUG: setOrientation - Listener not ready yet, skipping notification")
+                }
+            }
+            
+            PluginLogger.debug(LogCategory.UI_EVENTS, "Orientation set to: $orientation, applyToTable: $applyToTable")
+        }
+    }
+    
+    /**
+     * Устанавливает слушатель изменения ориентации
+     */
+    fun setOrientationChangeListener(listener: (Orientation) -> Unit) {
+        orientationChangeListener = listener
+    }
+    
+    /**
+     * Активирует слушатель, разрешая обработку событий изменения ориентации
+     */
+    fun activateListener() {
+        isListenerReady = true
+        println("ADB_DEBUG: OrientationPanel listener activated")
     }
 
 }

@@ -14,6 +14,8 @@ import io.github.qavlad.adbrandomizer.ui.services.PresetsDialogServiceLocator
 import io.github.qavlad.adbrandomizer.ui.services.ControllerStateManager
 import io.github.qavlad.adbrandomizer.ui.services.TableColumnManager
 import io.github.qavlad.adbrandomizer.ui.renderers.ValidationRenderer
+import io.github.qavlad.adbrandomizer.utils.PluginLogger
+import io.github.qavlad.adbrandomizer.utils.logging.LogCategory
 import io.github.qavlad.adbrandomizer.utils.ButtonUtils
 import java.awt.Container
 import java.awt.event.MouseEvent
@@ -21,6 +23,8 @@ import javax.swing.SwingUtilities
 import io.github.qavlad.adbrandomizer.ui.components.TableWithAddButtonPanel
 import io.github.qavlad.adbrandomizer.ui.commands.CommandContext
 import io.github.qavlad.adbrandomizer.services.DevicePreset
+import io.github.qavlad.adbrandomizer.ui.components.OrientationPanel
+import io.github.qavlad.adbrandomizer.ui.components.Orientation
 
 /**
  * Контроллер для диалога настроек.
@@ -55,6 +59,7 @@ class PresetsDialogController(
     lateinit var listManagerPanel: PresetListManagerPanel
         private set
     private var tableWithButtonPanel: TableWithAddButtonPanel? = null
+    private var orientationPanel: OrientationPanel? = null
 
     // Делегаты для удобства доступа
     private val dialogState get() = serviceLocator.dialogState
@@ -66,10 +71,87 @@ class PresetsDialogController(
     /**
      * Инициализация контроллера
      */
-    fun initialize() {
+    fun initialize(orientationPanel: OrientationPanel?) {
+        this.orientationPanel = orientationPanel
         serviceLocator.componentInitService.performInitialSetup()
+        
+        // Загружаем сохранённую ориентацию
+        orientationPanel?.let { panel ->
+            val savedOrientation = PresetStorageService.getOrientation()
+            println("ADB_DEBUG: PresetsDialogController.initialize - savedOrientation: $savedOrientation")
+            try {
+                val orientation = Orientation.valueOf(savedOrientation)
+                // Устанавливаем визуальное состояние панели
+                panel.setOrientation(orientation, applyToTable = false)
+                PluginLogger.debug(LogCategory.UI_EVENTS, "Loaded saved orientation: $orientation")
+                println("ADB_DEBUG: Set orientation panel to $orientation")
+                
+                // Данные уже будут конвертированы в initializeTempPresetLists если нужно
+            } catch (e: IllegalArgumentException) {
+                // Если сохранённое значение некорректно, используем PORTRAIT по умолчанию
+                panel.setOrientation(Orientation.PORTRAIT, applyToTable = false)
+                PluginLogger.error(LogCategory.UI_EVENTS, "Invalid saved orientation: $savedOrientation", e)
+            }
+            
+            // ВАЖНО: НЕ устанавливаем слушатель здесь, так как таблица еще не готова
+            // Слушатель будет установлен позже в setupOrientationListener()
+        }
+    }
+    
+    /**
+     * Устанавливает слушатель изменения ориентации после полной инициализации
+     */
+    fun setupOrientationListener() {
+        orientationPanel?.let { panel ->
+            println("ADB_DEBUG: Setting up orientation change listener")
+            panel.setOrientationChangeListener { newOrientation ->
+                println("ADB_DEBUG: Orientation changed to: $newOrientation")
+                
+                // Применяем новую ориентацию ко всем спискам в памяти
+                applyOrientationToAllTempLists(newOrientation)
+                
+                // Синхронизируем изменения из таблицы в tempLists
+                syncTableChangesToTempListsInternal()
+                
+                // Если мы в режиме Show All, нужно обновить таблицу
+                if (dialogState.isShowAllPresetsMode()) {
+                    loadPresetsIntoTable()
+                }
+            }
+            // Активируем слушатель после его установки
+            panel.activateListener()
+        }
     }
 
+    /**
+     * Применяет ориентацию ко всем временным спискам
+     */
+    private fun applyOrientationToAllTempLists(orientation: Orientation) {
+        println("ADB_DEBUG: applyOrientationToAllTempLists called with orientation: $orientation")
+        val isLandscape = orientation == Orientation.LANDSCAPE
+        
+        serviceLocator.tempListsManager.getTempLists().values.forEach { list ->
+            println("ADB_DEBUG:   Applying $orientation to list: ${list.name}")
+            list.presets.forEach { preset ->
+                val parts = preset.size.split("x")
+                if (parts.size == 2) {
+                    val width = parts[0].toIntOrNull()
+                    val height = parts[1].toIntOrNull()
+                    if (width != null && height != null) {
+                        val isCurrentlyPortrait = height > width
+                        
+                        // Если нужна LANDSCAPE и сейчас PORTRAIT, или нужна PORTRAIT и сейчас LANDSCAPE
+                        if ((isLandscape && isCurrentlyPortrait) || (!isLandscape && !isCurrentlyPortrait)) {
+                            val oldSize = preset.size
+                            preset.size = "${height}x${width}"
+                            println("ADB_DEBUG:     Converted ${preset.label}: $oldSize -> ${preset.size}")
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
     /**
      * Создает панель управления списками пресетов
      */
@@ -419,6 +501,42 @@ class PresetsDialogController(
         stateManager.modifiedListIds.clear()
         stateManager.modifiedListIds.addAll(initResult.modifiedListIds)
         
+        // Применяем сохраненную ориентацию ко всем загруженным спискам
+        // Файлы всегда хранятся в портретной ориентации, применяем текущую при загрузке
+        val savedOrientation = PresetStorageService.getOrientation()
+        println("ADB_DEBUG: initializeTempPresetLists - savedOrientation: $savedOrientation")
+        if (savedOrientation == "LANDSCAPE") {
+            PluginLogger.debug(LogCategory.UI_EVENTS, "Applying saved LANDSCAPE orientation to all loaded lists")
+            println("ADB_DEBUG: Applying LANDSCAPE orientation to all loaded lists after initialization")
+            var convertedCount = 0
+            serviceLocator.tempListsManager.getTempLists().values.forEach { list ->
+                println("ADB_DEBUG:   Processing list for orientation: ${list.name}")
+                list.presets.forEach { preset ->
+                    val parts = preset.size.split("x")
+                    if (parts.size == 2) {
+                        val width = parts[0].toIntOrNull()
+                        val height = parts[1].toIntOrNull()
+                        if (width != null && height != null) {
+                            // Конвертируем в LANDSCAPE независимо от текущей ориентации
+                            // Если уже в LANDSCAPE (width > height), оставляем как есть
+                            // Если в PORTRAIT (height > width), меняем местами
+                            if (height > width) {
+                                val oldSize = preset.size
+                                preset.size = "${height}x${width}"
+                                println("ADB_DEBUG:     Converted ${preset.label}: $oldSize -> ${preset.size}")
+                                convertedCount++
+                            } else {
+                                println("ADB_DEBUG:     Already in landscape: ${preset.label}: ${preset.size}")
+                            }
+                        }
+                    }
+                }
+            }
+            println("ADB_DEBUG: Total converted to landscape: $convertedCount presets")
+        } else {
+            println("ADB_DEBUG: Orientation is PORTRAIT, no conversion needed")
+        }
+        
         // Обновляем комбобокс если панель уже создана
         if (this::listManagerPanel.isInitialized) {
             println("ADB_DEBUG: Reloading lists in combobox after file system check")
@@ -441,6 +559,17 @@ class PresetsDialogController(
                 onAddButtonRow = { addButtonRow() },
                 inMemoryTableOrder = stateManager.inMemoryTableOrder
             )
+            
+            // Применяем текущую ориентацию к загруженным пресетам
+            PluginLogger.debug(LogCategory.UI_EVENTS, "loadPresetsIntoTable completed, calling applyCurrentOrientationToTable")
+            
+            // Проверяем, если ориентация должна быть LANDSCAPE, но панель показывает PORTRAIT
+            val savedOrientation = PresetStorageService.getOrientation()
+            println("ADB_DEBUG: loadPresetsIntoTable - checking orientation consistency, saved: $savedOrientation")
+            
+            // Не нужно применять ориентацию, если данные уже были конвертированы в initializeTempPresetLists
+            // и панель уже установлена в правильную ориентацию в initialize()
+            println("ADB_DEBUG: loadPresetsIntoTable - skipping orientation application, already handled in initialization")
         } catch (_: IllegalStateException) {
             println("ADB_DEBUG: ExtendedTableLoader not initialized yet, skipping load")
         }
@@ -671,7 +800,15 @@ class PresetsDialogController(
 
     // === Сохранение и загрузка ===
 
-    fun saveSettings() {
+    fun saveSettings(orientationPanel: OrientationPanel?) {
+        // Сохраняем ориентацию
+        orientationPanel?.let {
+            val currentOrientation = it.getCurrentOrientation()
+            println("ADB_DEBUG: saveSettings - saving orientation: ${currentOrientation.name}")
+            PresetStorageService.setOrientation(currentOrientation.name)
+            println("ADB_DEBUG: saveSettings - orientation saved, verifying: ${PresetStorageService.getOrientation()}")
+        }
+        
         serviceLocator.presetSaveManager.saveSettings(
             table = table,
             tableModel = tableModel,
@@ -1002,4 +1139,5 @@ class PresetsDialogController(
             listManagerPanel.setShowAllPresets(false)
         }
     }
+
 }

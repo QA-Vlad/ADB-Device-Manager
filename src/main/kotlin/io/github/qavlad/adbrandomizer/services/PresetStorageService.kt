@@ -87,6 +87,7 @@ object PresetStorageService {
     private const val SHOW_ALL_PRESETS_MODE_KEY = "ADB_RANDOMIZER_SHOW_ALL_PRESETS_MODE"
     private const val HIDE_DUPLICATES_MODE_KEY = "ADB_RANDOMIZER_HIDE_DUPLICATES_MODE"
     private const val SHOW_COUNTERS_KEY = "ADB_RANDOMIZER_SHOW_COUNTERS"
+    private const val ORIENTATION_KEY = "ADB_RANDOMIZER_ORIENTATION"
     
     /**
      * Сохраняет состояние чекбокса "Show all presets"
@@ -152,6 +153,20 @@ object PresetStorageService {
         } catch (_: Exception) {
             emptyList()
         }
+    }
+    
+    /**
+     * Сохраняет текущую ориентацию
+     */
+    fun setOrientation(orientation: String) {
+        properties.setValue(ORIENTATION_KEY, orientation)
+    }
+    
+    /**
+     * Получает сохранённую ориентацию
+     */
+    fun getOrientation(): String {
+        return properties.getValue(ORIENTATION_KEY) ?: "PORTRAIT"
     }
 
 }

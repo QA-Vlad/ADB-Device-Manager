@@ -7,6 +7,8 @@ import com.intellij.util.ui.JBUI
 import io.github.qavlad.adbrandomizer.config.PluginConfig
 import io.github.qavlad.adbrandomizer.ui.components.TableWithAddButtonPanel
 import io.github.qavlad.adbrandomizer.ui.components.OrientationPanel
+import io.github.qavlad.adbrandomizer.ui.components.Orientation
+import io.github.qavlad.adbrandomizer.services.PresetStorageService
 import io.github.qavlad.adbrandomizer.utils.PluginLogger
 import io.github.qavlad.adbrandomizer.utils.logging.LogCategory
 import java.awt.BorderLayout
@@ -24,6 +26,7 @@ import java.awt.Desktop
 class PresetsDialog(project: Project?) : DialogWrapper(project) {
     
     private val controller = PresetsDialogController(project, this)
+    private var orientationPanel: OrientationPanel? = null
 
     init {
         PluginLogger.debug(LogCategory.UI_EVENTS, "PresetsDialog constructor called")
@@ -34,11 +37,13 @@ class PresetsDialog(project: Project?) : DialogWrapper(project) {
         // Инициализируем контроллер после создания диалога
         SwingUtilities.invokeLater {
             controller.addHoverEffectToDialogButtons(contentPane)
-            controller.initialize()
+            controller.initialize(orientationPanel)
             
             // Устанавливаем фокус на таблицу после полной инициализации
             SwingUtilities.invokeLater {
                 controller.setFocusToTable()
+                // Устанавливаем слушатель ориентации после полной инициализации таблицы
+                controller.setupOrientationListener()
             }
             
             // Добавляем ховер эффект к кнопке Open presets folder
@@ -50,9 +55,19 @@ class PresetsDialog(project: Project?) : DialogWrapper(project) {
         val mainPanel = JPanel(BorderLayout())
         
         // Используем новый компонент OrientationPanel
-        val orientationPanel = OrientationPanel(table)
+        orientationPanel = OrientationPanel(table)
         
-        mainPanel.add(orientationPanel, BorderLayout.NORTH)
+        // Устанавливаем сохраненную ориентацию сразу после создания панели
+        val savedOrientation = PresetStorageService.getOrientation()
+        println("ADB_DEBUG: PresetsDialog - setting saved orientation: $savedOrientation")
+        try {
+            val orientation = Orientation.valueOf(savedOrientation)
+            orientationPanel?.setOrientation(orientation, applyToTable = false)
+        } catch (_: IllegalArgumentException) {
+            println("ADB_DEBUG: Invalid saved orientation: $savedOrientation")
+        }
+        
+        mainPanel.add(orientationPanel!!, BorderLayout.NORTH)
         mainPanel.add(tablePanel, BorderLayout.CENTER)
         
         return mainPanel
@@ -115,7 +130,7 @@ class PresetsDialog(project: Project?) : DialogWrapper(project) {
     }
 
     override fun doOKAction() {
-        controller.saveSettings()
+        controller.saveSettings(orientationPanel)
         controller.dispose()
         super.doOKAction()
     }

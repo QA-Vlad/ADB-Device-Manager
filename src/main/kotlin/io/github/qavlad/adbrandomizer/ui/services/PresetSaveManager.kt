@@ -4,6 +4,7 @@ import com.intellij.ui.table.JBTable
 import io.github.qavlad.adbrandomizer.services.DevicePreset
 import io.github.qavlad.adbrandomizer.services.PresetList
 import io.github.qavlad.adbrandomizer.services.PresetListService
+import io.github.qavlad.adbrandomizer.services.PresetStorageService
 import io.github.qavlad.adbrandomizer.ui.components.DevicePresetTableModel
 import io.github.qavlad.adbrandomizer.ui.dialogs.DialogStateManager
 
@@ -29,6 +30,33 @@ class PresetSaveManager(
         modifiedListIds: Set<String>,
         onSaveCurrentTableState: () -> Unit
     ) {
+        // Конвертируем все размеры обратно в портретную ориентацию перед сохранением
+        // чтобы в файлах всегда хранились оригинальные значения
+        val savedOrientation = PresetStorageService.getOrientation()
+        println("ADB_DEBUG: PresetSaveManager.saveSettings - savedOrientation: $savedOrientation")
+        if (savedOrientation == "LANDSCAPE") {
+            println("ADB_DEBUG: Converting all presets back to portrait orientation before saving")
+            var convertedCount = 0
+            tempListsManager.getTempLists().values.forEach { list ->
+                println("ADB_DEBUG:   Processing list: ${list.name}")
+                list.presets.forEach { preset ->
+                    val parts = preset.size.split("x")
+                    if (parts.size == 2) {
+                        val width = parts[0].toIntOrNull()
+                        val height = parts[1].toIntOrNull()
+                        if (width != null && height != null && width > height) {
+                            // Меняем местами только если ширина больше высоты (горизонтальная ориентация)
+                            val oldSize = preset.size
+                            preset.size = "${height}x${width}"
+                            println("ADB_DEBUG:     Converted ${preset.label}: $oldSize -> ${preset.size}")
+                            convertedCount++
+                        }
+                    }
+                }
+            }
+            println("ADB_DEBUG: Converted $convertedCount presets to portrait orientation")
+        }
+        
         // Если включен режим Show All, нужно сохранить текущий порядок из таблицы
         if (dialogState.isShowAllPresetsMode()) {
             saveShowAllModeOrder(
@@ -62,6 +90,24 @@ class PresetSaveManager(
                 // Порядок уже сохранен выше
             }
         )
+        
+        // После сохранения конвертируем обратно в горизонтальную ориентацию если нужно
+        if (savedOrientation == "LANDSCAPE") {
+            println("ADB_DEBUG: Converting presets back to landscape orientation after saving")
+            tempListsManager.getTempLists().values.forEach { list ->
+                list.presets.forEach { preset ->
+                    val parts = preset.size.split("x")
+                    if (parts.size == 2) {
+                        val width = parts[0].toIntOrNull()
+                        val height = parts[1].toIntOrNull()
+                        if (width != null && height != null && height > width) {
+                            // Меняем местами только если высота больше ширины (портретная ориентация)
+                            preset.size = "${height}x${width}"
+                        }
+                    }
+                }
+            }
+        }
     }
     
     /**
