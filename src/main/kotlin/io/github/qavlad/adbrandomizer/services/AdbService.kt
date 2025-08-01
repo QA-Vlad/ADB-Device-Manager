@@ -259,6 +259,84 @@ object AdbService {
             }
         }
     }
+    
+    fun setOrientationToPortrait(device: IDevice): Result<Unit> {
+        return runDeviceOperation(device.name, "set orientation to portrait") {
+            // Отключаем автоповорот экрана
+            val disableRotationCommand = "settings put system accelerometer_rotation 0"
+            device.executeShellCommand(disableRotationCommand, NullOutputReceiver(), PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            PluginLogger.commandExecuted(disableRotationCommand, device.name, true)
+            
+            // Устанавливаем портретную ориентацию (0)
+            val setOrientationCommand = "settings put system user_rotation 0"
+            device.executeShellCommand(setOrientationCommand, NullOutputReceiver(), PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            PluginLogger.commandExecuted(setOrientationCommand, device.name, true)
+            
+            // Дополнительно форсируем ориентацию через wm
+            val wmOrientationCommand = "wm set-user-rotation lock 0"
+            device.executeShellCommand(wmOrientationCommand, NullOutputReceiver(), PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            PluginLogger.commandExecuted(wmOrientationCommand, device.name, true)
+        }
+    }
+    
+    fun setOrientationToLandscape(device: IDevice): Result<Unit> {
+        return runDeviceOperation(device.name, "set orientation to landscape") {
+            // Отключаем автоповорот экрана
+            val disableRotationCommand = "settings put system accelerometer_rotation 0"
+            device.executeShellCommand(disableRotationCommand, NullOutputReceiver(), PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            PluginLogger.commandExecuted(disableRotationCommand, device.name, true)
+            
+            // Устанавливаем горизонтальную ориентацию (1 - поворот на 90 градусов по часовой)
+            val setOrientationCommand = "settings put system user_rotation 1"
+            device.executeShellCommand(setOrientationCommand, NullOutputReceiver(), PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            PluginLogger.commandExecuted(setOrientationCommand, device.name, true)
+            
+            // Дополнительно форсируем ориентацию через wm
+            val wmOrientationCommand = "wm set-user-rotation lock 1"
+            device.executeShellCommand(wmOrientationCommand, NullOutputReceiver(), PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            PluginLogger.commandExecuted(wmOrientationCommand, device.name, true)
+        }
+    }
+    
+    fun getCurrentOrientation(device: IDevice): Result<Int> {
+        return runDeviceOperation(device.name, "get current orientation") {
+            val receiver = CollectingOutputReceiver()
+            device.executeShellCommand("settings get system user_rotation", receiver, PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            
+            val output = receiver.output.trim()
+            val rotation = output.toIntOrNull() ?: 0
+            PluginLogger.debug("Current orientation for device %s: %d", device.name, rotation)
+            rotation
+        }
+    }
+    
+    fun getNaturalOrientation(device: IDevice): Result<String> {
+        return runDeviceOperation(device.name, "get natural orientation") {
+            // Сначала получаем физические размеры экрана
+            val receiver = CollectingOutputReceiver()
+            device.executeShellCommand("wm size", receiver, PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            
+            val output = receiver.output.trim()
+            val sizePattern = Pattern.compile("Physical size: (\\d+)x(\\d+)")
+            val matcher = sizePattern.matcher(output)
+            
+            if (matcher.find()) {
+                val physicalWidth = matcher.group(1).toInt()
+                val physicalHeight = matcher.group(2).toInt()
+                
+                // Для большинства телефонов естественная ориентация - портретная (высота > ширины)
+                // Для планшетов - горизонтальная (ширина > высоты)
+                val naturalOrientation = if (physicalHeight > physicalWidth) "portrait" else "landscape"
+                PluginLogger.debug("Device %s natural orientation: %s (physical: %dx%d)", 
+                    device.name, naturalOrientation, physicalWidth, physicalHeight)
+                naturalOrientation
+            } else {
+                // По умолчанию считаем телефон (портретная ориентация)
+                PluginLogger.debug("Could not determine natural orientation for device %s, defaulting to portrait", device.name)
+                "portrait"
+            }
+        }
+    }
 
     fun enableTcpIp(device: IDevice, port: Int = 5555): Result<Unit> {
         return runDeviceOperation(device.name, "enable TCP/IP on port $port") {

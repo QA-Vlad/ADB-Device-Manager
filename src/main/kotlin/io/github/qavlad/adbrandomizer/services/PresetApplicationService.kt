@@ -141,7 +141,88 @@ object PresetApplicationService {
             indicator.text = "Applying '${preset.label}' to ${device.name}..."
             
             if (presetData.width != null && presetData.height != null) {
-                AdbService.setSize(device, presetData.width, presetData.height)
+                // Определяем естественную ориентацию устройства
+                val naturalOrientation = AdbService.getNaturalOrientation(device).getOrNull() ?: "portrait"
+                val isNaturallyPortrait = naturalOrientation == "portrait"
+                
+                // Определяем целевую ориентацию по разрешению
+                val targetIsLandscape = presetData.width > presetData.height
+                
+                // Получаем текущую ориентацию устройства
+                val currentRotation = AdbService.getCurrentOrientation(device).getOrNull() ?: 0
+                val isCurrentlyLandscape = currentRotation == 1 || currentRotation == 3
+                
+                // Логируем для отладки
+                PluginLogger.debug(LogCategory.PRESET_SERVICE, 
+                    "Device %s: natural orientation=%s, applying %dx%d, target orientation: %s, current: %s (rotation=%d)", 
+                    device.name,
+                    naturalOrientation,
+                    presetData.width, 
+                    presetData.height,
+                    if (targetIsLandscape) "landscape" else "portrait",
+                    if (isCurrentlyLandscape) "landscape" else "portrait",
+                    currentRotation
+                )
+                
+                // Определяем, какие значения передавать в wm size
+                // Для устройств с естественной портретной ориентацией:
+                // - В портретном режиме: меньшее значение × большее значение
+                // - В горизонтальном режиме: большее значение × меньшее значение
+                var finalWidth = presetData.width
+                var finalHeight = presetData.height
+                
+                if (isNaturallyPortrait) {
+                    // Телефон - естественная ориентация портретная
+                    if (targetIsLandscape) {
+                        // Хотим горизонтальную ориентацию - меняем ориентацию устройства
+                        if (!isCurrentlyLandscape) {
+                            PluginLogger.debug(LogCategory.PRESET_SERVICE, "Switching device to landscape")
+                            AdbService.setOrientationToLandscape(device)
+                            Thread.sleep(1500)
+                        }
+                        // Для телефона в горизонтальной ориентации wm size всё равно ожидает 
+                        // размеры относительно естественной (портретной) ориентации
+                        // Поэтому меняем местами ширину и высоту
+                        finalWidth = presetData.height
+                        finalHeight = presetData.width
+                    } else {
+                        // Хотим портретную ориентацию
+                        if (isCurrentlyLandscape) {
+                            PluginLogger.debug(LogCategory.PRESET_SERVICE, "Switching device to portrait")
+                            AdbService.setOrientationToPortrait(device)
+                            Thread.sleep(1500)
+                        }
+                        // Оставляем как есть - уже в правильном формате для портретной ориентации
+                    }
+                } else {
+                    // Планшет - естественная ориентация горизонтальная
+                    if (!targetIsLandscape) {
+                        // Хотим портретную ориентацию на планшете
+                        if (isCurrentlyLandscape) {
+                            PluginLogger.debug(LogCategory.PRESET_SERVICE, "Switching tablet to portrait")
+                            AdbService.setOrientationToPortrait(device)
+                            Thread.sleep(1500)
+                        }
+                    } else {
+                        // Хотим горизонтальную ориентацию на планшете
+                        if (!isCurrentlyLandscape) {
+                            PluginLogger.debug(LogCategory.PRESET_SERVICE, "Switching tablet to landscape")
+                            AdbService.setOrientationToLandscape(device)
+                            Thread.sleep(1500)
+                        }
+                    }
+                    // Для планшетов размеры передаём как есть
+                }
+                
+                PluginLogger.debug(LogCategory.PRESET_SERVICE, 
+                    "Applying size: %dx%d (original: %dx%d)", 
+                    finalWidth, finalHeight, presetData.width, presetData.height
+                )
+                
+                AdbService.setSize(device, finalWidth, finalHeight)
+                
+                // Дополнительная задержка после установки размера
+                Thread.sleep(500)
             }
             
             if (presetData.dpi != null) {
