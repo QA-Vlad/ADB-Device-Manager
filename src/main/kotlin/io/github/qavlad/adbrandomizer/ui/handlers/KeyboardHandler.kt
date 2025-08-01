@@ -453,6 +453,9 @@ class KeyboardHandler(
         
         val newRect = table.getCellRect(newRow, adjustedColumn, false)
         table.repaint(newRect)
+        
+        // Обеспечиваем видимость новой выделенной ячейки
+        table.scrollRectToVisible(table.getCellRect(newRow, adjustedColumn, true))
     }
 
     private fun findComponentRecursive(container: Container, predicate: (java.awt.Component) -> Boolean): java.awt.Component? {
