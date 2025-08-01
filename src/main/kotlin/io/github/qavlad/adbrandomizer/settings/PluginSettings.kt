@@ -1,0 +1,26 @@
+package io.github.qavlad.adbrandomizer.settings
+
+import com.intellij.openapi.components.*
+import com.intellij.util.xmlb.XmlSerializerUtil
+
+@State(
+    name = "io.github.qavlad.adbrandomizer.settings.PluginSettings",
+    storages = [Storage("AdbRandomizerSettings.xml")]
+)
+@Service(Service.Level.APP)
+class PluginSettings : PersistentStateComponent<PluginSettings> {
+    
+    // Настройка для автоматического перезапуска scrcpy при изменении разрешения
+    var restartScrcpyOnResolutionChange: Boolean = true
+    
+    override fun getState(): PluginSettings = this
+    
+    override fun loadState(state: PluginSettings) {
+        XmlSerializerUtil.copyBean(state, this)
+    }
+    
+    companion object {
+        val instance: PluginSettings
+            get() = service()
+    }
+}

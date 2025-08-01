@@ -10,6 +10,7 @@ import io.github.qavlad.adbrandomizer.utils.ValidationUtils
 import io.github.qavlad.adbrandomizer.ui.services.TableStateTracker
 import io.github.qavlad.adbrandomizer.utils.PluginLogger
 import io.github.qavlad.adbrandomizer.utils.logging.LogCategory
+import io.github.qavlad.adbrandomizer.settings.PluginSettings
 import javax.swing.SwingUtilities
 
 object PresetApplicationService {
@@ -225,18 +226,25 @@ object PresetApplicationService {
                 Thread.sleep(500)
                 
                 // Проверяем и перезапускаем scrcpy если он активен для этого устройства
-                val serialNumber = device.serialNumber
-                if (ScrcpyService.isScrcpyActiveForDevice(serialNumber)) {
+                val settings = PluginSettings.instance
+                if (settings.restartScrcpyOnResolutionChange) {
+                    val serialNumber = device.serialNumber
+                    if (ScrcpyService.isScrcpyActiveForDevice(serialNumber)) {
+                        PluginLogger.debug(LogCategory.PRESET_SERVICE, 
+                            "Scrcpy is active for device %s, restarting after resolution change", 
+                            serialNumber
+                        )
+                        
+                        // Перезапускаем scrcpy в отдельном потоке, чтобы не блокировать применение пресета
+                        Thread {
+                            Thread.sleep(500) // Даём время на стабилизацию после изменения разрешения
+                            ScrcpyService.restartScrcpyForDevice(serialNumber, project)
+                        }.start()
+                    }
+                } else {
                     PluginLogger.debug(LogCategory.PRESET_SERVICE, 
-                        "Scrcpy is active for device %s, restarting after resolution change", 
-                        serialNumber
+                        "Scrcpy restart is disabled in settings"
                     )
-                    
-                    // Перезапускаем scrcpy в отдельном потоке, чтобы не блокировать применение пресета
-                    Thread {
-                        Thread.sleep(500) // Даём время на стабилизацию после изменения разрешения
-                        ScrcpyService.restartScrcpyForDevice(serialNumber, project)
-                    }.start()
                 }
             }
             

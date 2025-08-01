@@ -1,4 +1,5 @@
 <!-- Файл: src/main/resources/META-INF/plugin.xml -->
+<!--suppress PluginXmlI18n -->
 <idea-plugin>
     <!-- 1. Уникальный ID плагина, основанный на пакете -->
     <id>io.github.qavlad.adbrandomizer</id>
@@ -34,5 +35,11 @@
         <notificationGroup
                 id="ADB Randomizer Notifications"
                 displayType="BALLOON"/>
+                
+        <!-- Регистрация настроек плагина -->
+        <applicationConfigurable
+                id="io.github.qavlad.adbrandomizer.settings"
+                displayName="ADB Screen Randomizer"
+                instance="io.github.qavlad.adbrandomizer.settings.PluginSettingsConfigurable"/>
     </extensions>
 </idea-plugin>

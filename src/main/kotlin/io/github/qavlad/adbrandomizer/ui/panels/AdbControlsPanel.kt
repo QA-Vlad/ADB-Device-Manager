@@ -15,6 +15,8 @@ import io.github.qavlad.adbrandomizer.utils.NotificationUtils
 import io.github.qavlad.adbrandomizer.utils.ValidationUtils
 import io.github.qavlad.adbrandomizer.utils.PluginLogger
 import io.github.qavlad.adbrandomizer.utils.logging.LogCategory
+import io.github.qavlad.adbrandomizer.settings.PluginSettings
+import com.intellij.openapi.options.ShowSettingsUtil
 import java.awt.*
 import java.util.Locale
 import javax.swing.*
@@ -47,7 +49,8 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
         
         compactActionPanel = CompactActionPanel(
             onConnectDevice = { promptForManualConnection() },
-            onKillAdbServer = { executeKillAdbServer() }
+            onKillAdbServer = { executeKillAdbServer() },
+            onOpenSettings = { openPluginSettings() }
         )
         
         deviceListPanel = DeviceListPanel(
@@ -304,7 +307,8 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                     sizeChanged, wasCustomSize
                 )
                 
-                if (isScrcpyActive && (sizeChanged || wasCustomSize)) {
+                val settings = PluginSettings.instance
+                if (settings.restartScrcpyOnResolutionChange && isScrcpyActive && (sizeChanged || wasCustomSize)) {
                     PluginLogger.debug(LogCategory.UI_EVENTS, 
                         "Restarting scrcpy for device %s (sizeChanged=%s, wasCustomSize=%s)", 
                         serialNumber, sizeChanged, wasCustomSize
@@ -319,8 +323,8 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                     }.start()
                 } else {
                     PluginLogger.debug(LogCategory.UI_EVENTS, 
-                        "Scrcpy restart not needed for device %s (isActive=%s, sizeChanged=%s, wasCustomSize=%s)", 
-                        serialNumber, isScrcpyActive, sizeChanged, wasCustomSize
+                        "Scrcpy restart not needed for device %s (isActive=%s, sizeChanged=%s, wasCustomSize=%s, settingEnabled=%s)", 
+                        serialNumber, isScrcpyActive, sizeChanged, wasCustomSize, settings.restartScrcpyOnResolutionChange
                     )
                 }
             }
@@ -643,6 +647,10 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
 
     private fun openPresetsDialog() {
         PresetsDialog(project).show()
+    }
+    
+    private fun openPluginSettings() {
+        ShowSettingsUtil.getInstance().showSettingsDialog(project, "ADB Screen Randomizer")
     }
     
     // ==================== LIFECYCLE ====================

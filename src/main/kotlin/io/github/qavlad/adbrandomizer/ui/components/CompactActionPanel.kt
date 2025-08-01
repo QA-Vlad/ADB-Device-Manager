@@ -12,7 +12,8 @@ import javax.swing.*
  */
 class CompactActionPanel(
     private val onConnectDevice: () -> Unit,
-    private val onKillAdbServer: () -> Unit
+    private val onKillAdbServer: () -> Unit,
+    private val onOpenSettings: () -> Unit
 ) : JPanel(FlowLayout(FlowLayout.RIGHT, 2, 0)) {
 
     init {
@@ -37,8 +38,16 @@ class CompactActionPanel(
             action = onKillAdbServer
         )
         
+        // Кнопка настроек
+        val settingsButton = createIconButton(
+            icon = AllIcons.General.Settings,
+            tooltip = "Plugin Settings",
+            action = onOpenSettings
+        )
+        
         add(connectButton)
         add(refreshButton)
+        add(settingsButton)
     }
     
     private fun createIconButton(
