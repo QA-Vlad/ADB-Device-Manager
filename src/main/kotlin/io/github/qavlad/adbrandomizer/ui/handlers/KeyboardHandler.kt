@@ -3,6 +3,8 @@ package io.github.qavlad.adbrandomizer.ui.handlers
 import io.github.qavlad.adbrandomizer.ui.components.DevicePresetTableModel
 import io.github.qavlad.adbrandomizer.ui.components.HoverState
 import io.github.qavlad.adbrandomizer.ui.components.CommandHistoryManager
+import io.github.qavlad.adbrandomizer.ui.components.Orientation
+import io.github.qavlad.adbrandomizer.ui.components.OrientationPanel
 import java.awt.KeyEventDispatcher
 import java.awt.KeyboardFocusManager
 import java.awt.Toolkit
@@ -14,6 +16,7 @@ import javax.swing.JTable
 import javax.swing.JButton
 import javax.swing.SwingUtilities
 import com.intellij.openapi.util.SystemInfo
+import java.awt.Container
 
 class KeyboardHandler(
     private val table: JTable,
@@ -247,6 +250,58 @@ class KeyboardHandler(
         }
     }
 
+    private fun findOrientationPanel(): OrientationPanel? {
+        // Поднимаемся по иерархии компонентов от таблицы, чтобы найти OrientationPanel
+        var parent: Container? = table.parent
+        while (parent != null) {
+            // Ищем OrientationPanel среди компонентов каждого уровня
+            parent.components.forEach { component ->
+                if (component is OrientationPanel) {
+                    return component
+                }
+            }
+            parent = parent.parent
+        }
+        
+        println("ADB_DEBUG: OrientationPanel not found in component hierarchy")
+        return null
+    }
+    
+    private fun applySmartPasteForSize(sizeText: String): String {
+        // Находим OrientationPanel через иерархию компонентов
+        val orientationPanel = findOrientationPanel()
+        val currentOrientation = orientationPanel?.getCurrentOrientation() ?: return sizeText
+        
+        // Парсим размер
+        val parts = sizeText.split("x", "×")
+        if (parts.size != 2) {
+            println("ADB_DEBUG: Smart paste - invalid format: '$sizeText'")
+            return sizeText
+        }
+        
+        val width = parts[0].trim().toIntOrNull()
+        val height = parts[1].trim().toIntOrNull()
+        
+        if (width == null || height == null) {
+            println("ADB_DEBUG: Smart paste - invalid dimensions: '$sizeText'")
+            return sizeText
+        }
+        
+        // Определяем ориентацию вставляемого размера
+        val isPastedPortrait = height > width
+        val isCurrentPortrait = currentOrientation == Orientation.PORTRAIT
+        
+        // Если ориентации не совпадают - корректируем
+        if (isPastedPortrait != isCurrentPortrait) {
+            val correctedSize = "${height}x${width}"
+            println("ADB_DEBUG: Smart paste - auto-corrected orientation: '$sizeText' -> '$correctedSize' (current: $currentOrientation)")
+            return correctedSize
+        }
+        
+        println("ADB_DEBUG: Smart paste - no correction needed, orientation matches")
+        return sizeText
+    }
+    
     private fun pasteCellFromClipboard() {
         if (hoverState().selectedTableRow >= 0 && hoverState().selectedTableColumn >= 0) {
             try {
@@ -256,7 +311,7 @@ class KeyboardHandler(
                 if (data != null && data.isDataFlavorSupported(DataFlavor.stringFlavor)) {
                     val row = hoverState().selectedTableRow
                     val column = hoverState().selectedTableColumn
-                    val clipboardText = (data.getTransferData(DataFlavor.stringFlavor) as String).trim()
+                    var clipboardText = (data.getTransferData(DataFlavor.stringFlavor) as String).trim()
 
                     // Проверяем, находится ли таблица в режиме редактирования этой ячейки
                     if (table.isEditing && table.editingRow == row && table.editingColumn == column) {
@@ -264,6 +319,11 @@ class KeyboardHandler(
                         // Ctrl+V будет работать как в обычном текстовом поле
                         return
                     } else {
+                        // Умная вставка для колонки Size (индекс 3)
+                        if (column == 3 && clipboardText.isNotBlank()) {
+                            clipboardText = applySmartPasteForSize(clipboardText)
+                        }
+                        
                         // Не в режиме редактирования - заменяем содержимое ячейки полностью
                         tableModel.setValueAt(clipboardText, row, column)
                         println("ADB_DEBUG: Вставлено из буфера: '$clipboardText' (история: ${historyManager.size()})")
