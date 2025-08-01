@@ -3,6 +3,7 @@ package io.github.qavlad.adbrandomizer.ui.components
 import com.intellij.openapi.util.IconLoader
 import com.intellij.ui.scale.JBUIScale
 import com.intellij.util.ui.JBUI
+import io.github.qavlad.adbrandomizer.ui.services.SelectionTracker
 import io.github.qavlad.adbrandomizer.utils.PluginLogger
 import io.github.qavlad.adbrandomizer.utils.logging.LogCategory
 import java.awt.*
@@ -178,6 +179,9 @@ class OrientationPanel(private val table: JTable) : JPanel() {
             println("ADB_DEBUG:   at $it")
         }
         
+        // Пропускаем восстановление выделения после смены ориентации
+        SelectionTracker.setSkipNextRestore()
+        
         currentOrientation = Orientation.PORTRAIT
         updateButtonStates()
         updateTableResolutions(true)
@@ -194,6 +198,9 @@ class OrientationPanel(private val table: JTable) : JPanel() {
     
     private fun switchToLandscape() {
         if (currentOrientation == Orientation.LANDSCAPE) return
+        
+        // Пропускаем восстановление выделения после смены ориентации
+        SelectionTracker.setSkipNextRestore()
         
         currentOrientation = Orientation.LANDSCAPE
         updateButtonStates()

@@ -12,6 +12,7 @@ object SelectionTracker {
     private var selectedColumn: Int = -1
     private var hoverStateUpdater: ((Int, Int) -> Unit)? = null
     private var isRestoring: Boolean = false
+    private var shouldSkipRestore: Boolean = false
     
     /**
      * Сохраняет текущее выделение
@@ -43,6 +44,12 @@ object SelectionTracker {
      * Восстанавливает выделение после перезагрузки таблицы
      */
     fun restoreSelection(table: JTable) {
+        if (shouldSkipRestore) {
+            println("ADB_DEBUG: SelectionTracker.restoreSelection - skipped due to shouldSkipRestore flag")
+            shouldSkipRestore = false
+            return
+        }
+        
         val model = table.model as? DevicePresetTableModel ?: return
         val presetId = selectedPresetId ?: return
         
@@ -98,4 +105,12 @@ object SelectionTracker {
      * Проверяет, есть ли сохраненное выделение
      */
     fun hasSelection(): Boolean = selectedPresetId != null && selectedColumn >= 0
+    
+    /**
+     * Устанавливает флаг пропуска восстановления выделения
+     */
+    fun setSkipNextRestore() {
+        shouldSkipRestore = true
+        println("ADB_DEBUG: SelectionTracker.setSkipNextRestore - will skip next restore")
+    }
 }
