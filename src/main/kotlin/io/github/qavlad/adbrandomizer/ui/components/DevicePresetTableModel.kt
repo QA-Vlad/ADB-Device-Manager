@@ -31,6 +31,7 @@ class DevicePresetTableModel : DefaultTableModel {
     }
 
     private var isUndoOperation = false
+    private var isOrientationChange = false
     private val historyManager: CommandHistoryManager
     // Храним ID пресетов в отдельной структуре вместо видимой колонки
     private val presetIds = mutableMapOf<Int, String>()
@@ -77,7 +78,7 @@ class DevicePresetTableModel : DefaultTableModel {
         val oldValue = getValueAt(row, column)
         
         // Захватываем информацию о пресете ДО изменения для истории команд
-        val presetBeforeEdit = if (!isUndoOperation && column in 2..4) {
+        val presetBeforeEdit = if (!isUndoOperation && !isOrientationChange && column in 2..4) {
             getPresetAt(row)
         } else null
         
@@ -351,5 +352,13 @@ class DevicePresetTableModel : DefaultTableModel {
         } finally {
             isUndoOperation = false
         }
+    }
+    
+    /**
+     * Устанавливает флаг, указывающий, что происходит изменение ориентации
+     * @param isChanging true, если происходит изменение ориентации
+     */
+    fun setOrientationChanging(isChanging: Boolean) {
+        isOrientationChange = isChanging
     }
 }

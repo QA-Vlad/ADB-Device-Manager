@@ -221,6 +221,9 @@ class OrientationPanel(private val table: JTable) : JPanel() {
         // Отключаем события таблицы, чтобы избежать множественных обновлений
         table.isEnabled = false
         
+        // Устанавливаем флаг, что происходит изменение ориентации
+        model.setOrientationChanging(true)
+        
         try {
             for (row in 0 until model.rowCount) {
                 // Пропускаем строку с кнопкой добавления
@@ -251,6 +254,8 @@ class OrientationPanel(private val table: JTable) : JPanel() {
                 }
             }
         } finally {
+            // Сбрасываем флаг изменения ориентации
+            model.setOrientationChanging(false)
             table.isEnabled = true
         }
         
