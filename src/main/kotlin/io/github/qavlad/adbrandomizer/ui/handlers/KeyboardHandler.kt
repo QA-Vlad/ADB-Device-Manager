@@ -455,12 +455,12 @@ class KeyboardHandler(
         table.repaint(newRect)
     }
 
-    private fun findComponentRecursive(container: java.awt.Container, predicate: (java.awt.Component) -> Boolean): java.awt.Component? {
+    private fun findComponentRecursive(container: Container, predicate: (java.awt.Component) -> Boolean): java.awt.Component? {
         for (component in container.components) {
             if (predicate(component)) {
                 return component
             }
-            if (component is java.awt.Container) {
+            if (component is Container) {
                 val found = findComponentRecursive(component, predicate)
                 if (found != null) return found
             }
@@ -472,7 +472,7 @@ class KeyboardHandler(
         if (container is JButton && container.text == text) {
             return container
         }
-        if (container is java.awt.Container) {
+        if (container is Container) {
             for (component in container.components) {
                 val found = findButtonInContainer(component, text)
                 if (found != null) return found
