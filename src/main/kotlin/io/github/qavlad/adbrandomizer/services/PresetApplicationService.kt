@@ -11,6 +11,7 @@ import io.github.qavlad.adbrandomizer.ui.services.TableStateTracker
 import io.github.qavlad.adbrandomizer.utils.PluginLogger
 import io.github.qavlad.adbrandomizer.utils.logging.LogCategory
 import io.github.qavlad.adbrandomizer.settings.PluginSettings
+import io.github.qavlad.adbrandomizer.services.integration.scrcpy.ScrcpyService
 import javax.swing.SwingUtilities
 
 object PresetApplicationService {

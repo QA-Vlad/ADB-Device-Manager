@@ -1,4 +1,4 @@
-package io.github.qavlad.adbrandomizer.ui.dialogs
+package io.github.qavlad.adbrandomizer.services.integration.scrcpy.ui
 
 import com.intellij.ide.BrowserUtil
 import com.intellij.openapi.fileChooser.FileChooser

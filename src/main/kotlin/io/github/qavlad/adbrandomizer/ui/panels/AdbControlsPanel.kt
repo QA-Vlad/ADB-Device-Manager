@@ -8,9 +8,10 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.Messages
 import io.github.qavlad.adbrandomizer.config.PluginConfig
 import io.github.qavlad.adbrandomizer.services.*
+import io.github.qavlad.adbrandomizer.services.integration.scrcpy.ScrcpyService
+import io.github.qavlad.adbrandomizer.services.integration.scrcpy.ui.ScrcpyCompatibilityDialog
 import io.github.qavlad.adbrandomizer.ui.components.*
 import io.github.qavlad.adbrandomizer.ui.dialogs.PresetsDialog
-import io.github.qavlad.adbrandomizer.ui.dialogs.ScrcpyCompatibilityDialog
 import io.github.qavlad.adbrandomizer.utils.NotificationUtils
 import io.github.qavlad.adbrandomizer.utils.ValidationUtils
 import io.github.qavlad.adbrandomizer.utils.PluginLogger

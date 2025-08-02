@@ -1,12 +1,13 @@
-// Файл: src/main/kotlin/io/github/qavlad/adbrandomizer/services/ScrcpyService.kt
+// Файл: src/main/kotlin/io/github/qavlad/adbrandomizer/services/integration/scrcpy/ScrcpyService.kt
 
-package io.github.qavlad.adbrandomizer.services
+package io.github.qavlad.adbrandomizer.services.integration.scrcpy
 
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.progress.ProcessCanceledException
 import com.intellij.openapi.project.Project
 import io.github.qavlad.adbrandomizer.config.PluginConfig
-import io.github.qavlad.adbrandomizer.ui.dialogs.ScrcpyCompatibilityDialog
+import io.github.qavlad.adbrandomizer.services.PresetStorageService
+import io.github.qavlad.adbrandomizer.services.integration.scrcpy.ui.ScrcpyCompatibilityDialog
 import io.github.qavlad.adbrandomizer.utils.AdbPathResolver
 import io.github.qavlad.adbrandomizer.utils.PluginLogger
 import io.github.qavlad.adbrandomizer.utils.logging.LogCategory
