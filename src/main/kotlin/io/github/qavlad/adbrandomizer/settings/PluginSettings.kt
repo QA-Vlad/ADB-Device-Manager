@@ -13,6 +13,12 @@ class PluginSettings : PersistentStateComponent<PluginSettings> {
     // Настройка для автоматического перезапуска scrcpy при изменении разрешения
     var restartScrcpyOnResolutionChange: Boolean = true
     
+    // Настройка для автоматического перезапуска Running Devices при изменении разрешения (только Android Studio)
+    var restartRunningDevicesOnResolutionChange: Boolean = true
+    
+    // Настройка для включения режима отладки
+    var debugMode: Boolean = false
+    
     override fun getState(): PluginSettings = this
     
     override fun loadState(state: PluginSettings) {

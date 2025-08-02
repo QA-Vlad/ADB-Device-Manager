@@ -138,6 +138,9 @@ object PresetApplicationService {
     }
     
     private fun applyPresetToAllDevices(devices: List<IDevice>, preset: DevicePreset, presetData: PresetData, indicator: ProgressIndicator, project: Project) {
+        // Collect devices that need Running Devices restart
+        val devicesNeedingRunningDevicesRestart = mutableListOf<IDevice>()
+        
         devices.forEach { device ->
             indicator.text = "Applying '${preset.label}' to ${device.name}..."
             
@@ -246,10 +249,38 @@ object PresetApplicationService {
                         "Scrcpy restart is disabled in settings"
                     )
                 }
+                
+                // Check if Running Devices restart is needed (Android Studio only)
+                AndroidStudioIntegrationService.instance?.let { androidService ->
+                    if (settings.restartRunningDevicesOnResolutionChange && 
+                        androidService.isRunningDevicesActive(device)) {
+                        PluginLogger.debug(LogCategory.PRESET_SERVICE, 
+                            "Running Devices is active for device %s, will restart after all devices are processed", 
+                            device.serialNumber
+                        )
+                        devicesNeedingRunningDevicesRestart.add(device)
+                    }
+                }
             }
             
             if (presetData.dpi != null) {
                 AdbService.setDpi(device, presetData.dpi)
+            }
+        }
+        
+        // Restart Running Devices for all affected devices
+        if (devicesNeedingRunningDevicesRestart.isNotEmpty()) {
+            AndroidStudioIntegrationService.instance?.let { androidService ->
+                PluginLogger.debug(LogCategory.PRESET_SERVICE, 
+                    "Restarting Running Devices for %d devices", 
+                    devicesNeedingRunningDevicesRestart.size
+                )
+                
+                // Restart in a separate thread to avoid blocking
+                Thread {
+                    Thread.sleep(500) // Give time for resolution changes to stabilize
+                    androidService.restartRunningDevicesForMultiple(devicesNeedingRunningDevicesRestart)
+                }.start()
             }
         }
     }

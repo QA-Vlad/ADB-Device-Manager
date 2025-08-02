@@ -327,6 +327,27 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                         serialNumber, isScrcpyActive, sizeChanged, wasCustomSize, settings.restartScrcpyOnResolutionChange
                     )
                 }
+                
+                // Check and restart Running Devices if needed (Android Studio only)
+                AndroidStudioIntegrationService.instance?.let { androidService ->
+                    if (settings.restartRunningDevicesOnResolutionChange && (sizeChanged || wasCustomSize)) {
+                        if (androidService.isRunningDevicesActive(device)) {
+                            PluginLogger.debug(LogCategory.UI_EVENTS, 
+                                "Restarting Running Devices for device %s", serialNumber
+                            )
+                            
+                            // Restart Running Devices in a separate thread
+                            Thread {
+                                Thread.sleep(500) // Give time for stabilization
+                                val restartResult = androidService.restartRunningDevices(device)
+                                PluginLogger.debug(LogCategory.UI_EVENTS, 
+                                    "Running Devices restart result for device %s: %s", 
+                                    serialNumber, restartResult
+                                )
+                            }.start()
+                        }
+                    }
+                }
             }
         }
     }

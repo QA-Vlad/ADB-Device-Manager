@@ -36,6 +36,11 @@
                 id="ADB Randomizer Notifications"
                 displayType="BALLOON"/>
                 
+        <!-- Регистрация группы для отладочных уведомлений -->
+        <notificationGroup
+                id="ADB Randomizer Debug"
+                displayType="BALLOON"/>
+                
         <!-- Регистрация настроек плагина -->
         <applicationConfigurable
                 id="io.github.qavlad.adbrandomizer.settings"
