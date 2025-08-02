@@ -137,13 +137,6 @@ object FileLogger {
         }
         log(errorMessage, "ERROR")
     }
-    
-    /**
-     * Logs a warning message
-     */
-    fun logWarn(message: String) {
-        log(message, "WARN")
-    }
 
     /**
      * Logs Running Devices specific messages
