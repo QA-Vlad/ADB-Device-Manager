@@ -12,7 +12,8 @@ enum class LogCategory(val displayName: String, val defaultLevel: LogLevel) {
     DRAG_DROP("Drag & Drop", LogLevel.WARN),
     KEYBOARD("Keyboard", LogLevel.WARN),
     SORTING("Sorting", LogLevel.WARN),
-    COMMAND_HISTORY("Command History", LogLevel.WARN);
+    COMMAND_HISTORY("Command History", LogLevel.WARN),
+    DEVICE_STATE("Device State", LogLevel.INFO);
     
     companion object {
         fun fromName(name: String): LogCategory? = values().find { it.name == name }

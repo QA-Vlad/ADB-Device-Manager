@@ -294,12 +294,18 @@ object AdbService {
         }
     }
     
-    fun setOrientationToPortrait(device: IDevice): Result<Unit> {
+    fun setOrientationToPortrait(device: IDevice): Result<Pair<Unit, Boolean>> {
         return runDeviceOperation(device.name, "set orientation to portrait") {
-            // Отключаем автоповорот экрана
-            val disableRotationCommand = "settings put system accelerometer_rotation 0"
-            device.executeShellCommand(disableRotationCommand, NullOutputReceiver(), PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-            PluginLogger.commandExecuted(disableRotationCommand, device.name, true)
+            // Сначала проверяем текущее состояние автоповорота
+            val wasAutoRotationEnabled = isAutoRotationEnabled(device).getOrNull() ?: false
+            PluginLogger.debug("Auto-rotation was enabled before orientation change: %s", wasAutoRotationEnabled)
+            
+            // Отключаем автоповорот экрана только если он был включен
+            if (wasAutoRotationEnabled) {
+                val disableRotationCommand = "settings put system accelerometer_rotation 0"
+                device.executeShellCommand(disableRotationCommand, NullOutputReceiver(), PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                PluginLogger.commandExecuted(disableRotationCommand, device.name, true)
+            }
             
             // Устанавливаем портретную ориентацию (0)
             val setOrientationCommand = "settings put system user_rotation 0"
@@ -310,15 +316,24 @@ object AdbService {
             val wmOrientationCommand = "wm set-user-rotation lock 0"
             device.executeShellCommand(wmOrientationCommand, NullOutputReceiver(), PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             PluginLogger.commandExecuted(wmOrientationCommand, device.name, true)
+            
+            // Возвращаем Unit и флаг, был ли автоповорот включен
+            Pair(Unit, wasAutoRotationEnabled)
         }
     }
     
-    fun setOrientationToLandscape(device: IDevice): Result<Unit> {
+    fun setOrientationToLandscape(device: IDevice): Result<Pair<Unit, Boolean>> {
         return runDeviceOperation(device.name, "set orientation to landscape") {
-            // Отключаем автоповорот экрана
-            val disableRotationCommand = "settings put system accelerometer_rotation 0"
-            device.executeShellCommand(disableRotationCommand, NullOutputReceiver(), PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-            PluginLogger.commandExecuted(disableRotationCommand, device.name, true)
+            // Сначала проверяем текущее состояние автоповорота
+            val wasAutoRotationEnabled = isAutoRotationEnabled(device).getOrNull() ?: false
+            PluginLogger.debug("Auto-rotation was enabled before orientation change: %s", wasAutoRotationEnabled)
+            
+            // Отключаем автоповорот экрана только если он был включен
+            if (wasAutoRotationEnabled) {
+                val disableRotationCommand = "settings put system accelerometer_rotation 0"
+                device.executeShellCommand(disableRotationCommand, NullOutputReceiver(), PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                PluginLogger.commandExecuted(disableRotationCommand, device.name, true)
+            }
             
             // Устанавливаем горизонтальную ориентацию (1 - поворот на 90 градусов по часовой)
             val setOrientationCommand = "settings put system user_rotation 1"
@@ -329,6 +344,9 @@ object AdbService {
             val wmOrientationCommand = "wm set-user-rotation lock 1"
             device.executeShellCommand(wmOrientationCommand, NullOutputReceiver(), PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             PluginLogger.commandExecuted(wmOrientationCommand, device.name, true)
+            
+            // Возвращаем Unit и флаг, был ли автоповорот включен
+            Pair(Unit, wasAutoRotationEnabled)
         }
     }
     
@@ -341,6 +359,28 @@ object AdbService {
             val rotation = output.toIntOrNull() ?: 0
             PluginLogger.debug("Current orientation for device %s: %d", device.name, rotation)
             rotation
+        }
+    }
+    
+    fun isAutoRotationEnabled(device: IDevice): Result<Boolean> {
+        return runDeviceOperation(device.name, "get auto-rotation status") {
+            val receiver = CollectingOutputReceiver()
+            device.executeShellCommand("settings get system accelerometer_rotation", receiver, PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            
+            val output = receiver.output.trim()
+            val isEnabled = output == "1"
+            PluginLogger.debug("Auto-rotation enabled for device %s: %s", device.name, isEnabled)
+            isEnabled
+        }
+    }
+    
+    fun setAutoRotation(device: IDevice, enabled: Boolean): Result<Unit> {
+        return runDeviceOperation(device.name, "set auto-rotation to $enabled") {
+            val value = if (enabled) "1" else "0"
+            val command = "settings put system accelerometer_rotation $value"
+            device.executeShellCommand(command, NullOutputReceiver(), PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            PluginLogger.commandExecuted(command, device.name, true)
+            PluginLogger.debug("Auto-rotation set to %s for device %s", enabled, device.name)
         }
     }
     

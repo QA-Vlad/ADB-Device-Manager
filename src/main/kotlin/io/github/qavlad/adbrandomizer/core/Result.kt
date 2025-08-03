@@ -27,6 +27,12 @@ sealed class Result<out T> {
     }
     
     fun isSuccess(): Boolean = this is Success
+    
+    
+    fun getErrorMessage(): String? = when (this) {
+        is Success -> null
+        is Error -> message ?: exception.message
+    }
 }
 
 // Функции для создания Result

@@ -142,6 +142,17 @@ object PresetApplicationService {
         // Collect devices that need Running Devices restart
         val devicesNeedingRunningDevicesRestart = mutableListOf<IDevice>()
         
+        // Сохраняем состояния автоповорота для всех устройств перед применением пресетов
+        val devicesWithAutoRotation = mutableListOf<IDevice>()
+        devices.forEach { device ->
+            if (presetData.width != null && presetData.height != null) {
+                val wasAutoRotationEnabled = AutoRotationStateManager.saveAutoRotationState(device)
+                if (wasAutoRotationEnabled) {
+                    devicesWithAutoRotation.add(device)
+                }
+            }
+        }
+        
         devices.forEach { device ->
             indicator.text = "Applying '${preset.label}' to ${device.name}..."
             
@@ -182,8 +193,10 @@ object PresetApplicationService {
                         // Хотим горизонтальную ориентацию - меняем ориентацию устройства
                         if (!isCurrentlyLandscape) {
                             PluginLogger.debug(LogCategory.PRESET_SERVICE, "Switching device to landscape")
-                            AdbService.setOrientationToLandscape(device)
-                            Thread.sleep(1500)
+                            val result = AdbService.setOrientationToLandscape(device)
+                            if (result.isSuccess()) {
+                                Thread.sleep(1500)
+                            }
                         }
                         // Для телефона в горизонтальной ориентации wm size всё равно ожидает 
                         // размеры относительно естественной (портретной) ориентации
@@ -194,8 +207,10 @@ object PresetApplicationService {
                         // Хотим портретную ориентацию
                         if (isCurrentlyLandscape) {
                             PluginLogger.debug(LogCategory.PRESET_SERVICE, "Switching device to portrait")
-                            AdbService.setOrientationToPortrait(device)
-                            Thread.sleep(1500)
+                            val result = AdbService.setOrientationToPortrait(device)
+                            if (result.isSuccess()) {
+                                Thread.sleep(1500)
+                            }
                         }
                         // Оставляем как есть - уже в правильном формате для портретной ориентации
                     }
@@ -205,15 +220,19 @@ object PresetApplicationService {
                         // Хотим портретную ориентацию на планшете
                         if (isCurrentlyLandscape) {
                             PluginLogger.debug(LogCategory.PRESET_SERVICE, "Switching tablet to portrait")
-                            AdbService.setOrientationToPortrait(device)
-                            Thread.sleep(1500)
+                            val result = AdbService.setOrientationToPortrait(device)
+                            if (result.isSuccess()) {
+                                Thread.sleep(1500)
+                            }
                         }
                     } else {
                         // Хотим горизонтальную ориентацию на планшете
                         if (!isCurrentlyLandscape) {
                             PluginLogger.debug(LogCategory.PRESET_SERVICE, "Switching tablet to landscape")
-                            AdbService.setOrientationToLandscape(device)
-                            Thread.sleep(1500)
+                            val result = AdbService.setOrientationToLandscape(device)
+                            if (result.isSuccess()) {
+                                Thread.sleep(1500)
+                            }
                         }
                     }
                     // Для планшетов размеры передаём как есть
@@ -283,6 +302,21 @@ object PresetApplicationService {
                     androidService.restartRunningDevicesForMultiple(devicesNeedingRunningDevicesRestart)
                 }.start()
             }
+        }
+        
+        // Восстанавливаем автоповорот для устройств, у которых он был включен
+        if (devicesWithAutoRotation.isNotEmpty()) {
+            PluginLogger.debug(LogCategory.PRESET_SERVICE, 
+                "Restoring auto-rotation for %d devices", 
+                devicesWithAutoRotation.size
+            )
+            
+            Thread {
+                Thread.sleep(2000) // Даём время на завершение всех операций
+                devicesWithAutoRotation.forEach { device ->
+                    AutoRotationStateManager.restoreAutoRotationState(device)
+                }
+            }.start()
         }
     }
     
