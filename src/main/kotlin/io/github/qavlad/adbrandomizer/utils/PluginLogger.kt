@@ -1,14 +1,10 @@
 package io.github.qavlad.adbrandomizer.utils
 
-import com.intellij.openapi.diagnostic.Logger
 import io.github.qavlad.adbrandomizer.utils.logging.LogCategory
 import io.github.qavlad.adbrandomizer.utils.logging.LogLevel
-import io.github.qavlad.adbrandomizer.utils.logging.LoggingConfiguration
+import io.github.qavlad.adbrandomizer.utils.logging.LoggingController
 
 object PluginLogger {
-    private val logger = Logger.getInstance("ADB_Randomizer")
-    private const val PREFIX = "ADB_Randomizer"
-    private val config = LoggingConfiguration.getInstance()
     
     fun trace(category: LogCategory, message: String, vararg args: Any?) {
         log(LogLevel.TRACE, category, message, null, *args)
@@ -31,39 +27,22 @@ object PluginLogger {
     }
     
     fun debugWithRateLimit(category: LogCategory, key: String, message: String, vararg args: Any?) {
-        logWithRateLimit(LogLevel.DEBUG, category, key, message, null, *args)
+        logWithRateLimit(LogLevel.DEBUG, category, key, message, *args)
     }
     
+    // Оставляем для будущего использования, может понадобиться для INFO логов с ограничением частоты
+    @Suppress("unused")
     fun infoWithRateLimit(category: LogCategory, key: String, message: String, vararg args: Any?) {
-        logWithRateLimit(LogLevel.INFO, category, key, message, null, *args)
+        logWithRateLimit(LogLevel.INFO, category, key, message, *args)
     }
     
     private fun log(level: LogLevel, category: LogCategory, message: String, throwable: Throwable?, vararg args: Any?) {
-        if (!config.shouldLog(level, category)) return
-        
-        val formattedMessage = formatMessage(category, message, args)
-        
-        when (level) {
-            LogLevel.TRACE, LogLevel.DEBUG -> if (logger.isDebugEnabled) logger.debug(formattedMessage, throwable)
-            LogLevel.INFO -> logger.info(formattedMessage, throwable)
-            LogLevel.WARN -> logger.warn(formattedMessage, throwable)
-            LogLevel.ERROR -> logger.error(formattedMessage, throwable)
-        }
+        LoggingController.processLog(level, category, message, throwable, *args)
     }
     
-    private fun logWithRateLimit(level: LogLevel, category: LogCategory, key: String, message: String, throwable: Throwable?, vararg args: Any?) {
-        if (!config.shouldLogWithRateLimit(key, level, category)) return
-        
-        log(level, category, message, throwable, *args)
-    }
-    
-    private fun formatMessage(category: LogCategory, message: String, args: Array<out Any?>): String {
-        val formatted = if (args.isNotEmpty()) {
-            message.format(*args)
-        } else {
-            message
-        }
-        return "$PREFIX [${category.displayName}]: $formatted"
+    private fun logWithRateLimit(level: LogLevel, category: LogCategory, key: String, message: String, vararg args: Any?) {
+        // Для rate limited логов не поддерживаем throwable, так как это обычно для частых информационных сообщений
+        LoggingController.processLogWithRateLimit(level, category, key, message, null, *args)
     }
     
     // Специализированные методы для частых операций
