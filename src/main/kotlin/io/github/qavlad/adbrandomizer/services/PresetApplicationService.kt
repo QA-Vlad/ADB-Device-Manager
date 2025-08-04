@@ -252,17 +252,27 @@ object PresetApplicationService {
                 val settings = PluginSettings.instance
                 if (settings.restartScrcpyOnResolutionChange) {
                     val serialNumber = device.serialNumber
-                    if (ScrcpyService.isScrcpyActiveForDevice(serialNumber)) {
-                        PluginLogger.debug(LogCategory.PRESET_SERVICE, 
-                            "Scrcpy is active for device %s, restarting after resolution change", 
+                    // Проверяем любые процессы scrcpy (наши или внешние)
+                    if (ScrcpyService.hasAnyScrcpyProcessForDevice(serialNumber)) {
+                        PluginLogger.info(LogCategory.PRESET_SERVICE, 
+                            "Found scrcpy process for device %s, restarting after resolution change", 
                             serialNumber
                         )
                         
                         // Перезапускаем scrcpy в отдельном потоке, чтобы не блокировать применение пресета
                         Thread {
                             Thread.sleep(500) // Даём время на стабилизацию после изменения разрешения
-                            ScrcpyService.restartScrcpyForDevice(serialNumber, project)
+                            val restartResult = ScrcpyService.restartScrcpyForDevice(serialNumber, project)
+                            PluginLogger.info(LogCategory.PRESET_SERVICE, 
+                                "Scrcpy restart result for device %s: %s", 
+                                serialNumber, restartResult.toString()
+                            )
                         }.start()
+                    } else {
+                        PluginLogger.debug(LogCategory.PRESET_SERVICE, 
+                            "No scrcpy processes found for device %s", 
+                            serialNumber
+                        )
                     }
                 } else {
                     PluginLogger.debug(LogCategory.PRESET_SERVICE, 

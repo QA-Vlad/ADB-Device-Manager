@@ -285,8 +285,12 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                 PluginLogger.debug(LogCategory.UI_EVENTS, "Checking scrcpy for device: physical serial=%s, logical serial=%s", 
                     device.serialNumber, serialNumber)
                 
-                val isScrcpyActive = ScrcpyService.isScrcpyActiveForDevice(serialNumber)
-                PluginLogger.debug(LogCategory.UI_EVENTS, "Scrcpy active for device %s: %s", serialNumber, isScrcpyActive)
+                // Проверяем как наши, так и внешние процессы scrcpy
+                val isOurScrcpyActive = ScrcpyService.isScrcpyActiveForDevice(serialNumber)
+                val hasAnyScrcpy = ScrcpyService.hasAnyScrcpyProcessForDevice(serialNumber)
+                
+                PluginLogger.debug(LogCategory.UI_EVENTS, "Scrcpy check for device %s: our=%s, any=%s", 
+                    serialNumber, isOurScrcpyActive, hasAnyScrcpy)
                 
                 // Проверяем, нужно ли перезапустить scrcpy
                 // Перезапускаем если:
@@ -309,10 +313,11 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                 )
                 
                 val settings = PluginSettings.instance
-                if (settings.restartScrcpyOnResolutionChange && isScrcpyActive && (sizeChanged || wasCustomSize)) {
+                // Перезапускаем если есть ЛЮБОЙ процесс scrcpy (наш или внешний)
+                if (settings.restartScrcpyOnResolutionChange && hasAnyScrcpy && (sizeChanged || wasCustomSize)) {
                     PluginLogger.debug(LogCategory.UI_EVENTS, 
-                        "Restarting scrcpy for device %s (sizeChanged=%s, wasCustomSize=%s)", 
-                        serialNumber, sizeChanged, wasCustomSize
+                        "Restarting scrcpy for device %s (sizeChanged=%s, wasCustomSize=%s, ourScrcpy=%s, anyScrcpy=%s)", 
+                        serialNumber, sizeChanged, wasCustomSize, isOurScrcpyActive, true
                     )
                     
                     // Перезапускаем scrcpy в отдельном потоке
@@ -324,8 +329,8 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                     }.start()
                 } else {
                     PluginLogger.debug(LogCategory.UI_EVENTS, 
-                        "Scrcpy restart not needed for device %s (isActive=%s, sizeChanged=%s, wasCustomSize=%s, settingEnabled=%s)", 
-                        serialNumber, isScrcpyActive, sizeChanged, wasCustomSize, settings.restartScrcpyOnResolutionChange
+                        "Scrcpy restart not needed for device %s (hasAnyScrcpy=%s, sizeChanged=%s, wasCustomSize=%s, settingEnabled=%s)", 
+                        serialNumber, hasAnyScrcpy, sizeChanged, wasCustomSize, settings.restartScrcpyOnResolutionChange
                     )
                 }
                 

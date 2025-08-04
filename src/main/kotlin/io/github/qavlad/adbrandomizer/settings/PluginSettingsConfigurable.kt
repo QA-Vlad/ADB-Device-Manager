@@ -152,7 +152,7 @@ class PluginSettingsPanel : JBPanel<PluginSettingsPanel>(VerticalFlowLayout(Vert
             val result = JOptionPane.showConfirmDialog(
                 this,
                 """This will reset ALL plugin data including:
-                    
+
 • All plugin settings
 • All custom presets  
 • WiFi device history
@@ -161,7 +161,7 @@ class PluginSettingsPanel : JBPanel<PluginSettingsPanel>(VerticalFlowLayout(Vert
 
 ⚠️ This action cannot be undone!
 
-Are you sure you want to continue?""".trimIndent(),
+Are you sure you want to continue?""",
                 "Confirm Reset",
                 JOptionPane.YES_NO_OPTION,
                 JOptionPane.WARNING_MESSAGE
