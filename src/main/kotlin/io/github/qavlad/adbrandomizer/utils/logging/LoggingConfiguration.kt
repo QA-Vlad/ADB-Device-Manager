@@ -118,6 +118,14 @@ class LoggingConfiguration : PersistentStateComponent<LoggingConfiguration.State
         lastLogTimes.clear()
     }
     
+    /**
+     * Сбрасывает все настройки логирования на значения по умолчанию
+     */
+    fun resetToDefaults() {
+        state = State()
+        lastLogTimes.clear()
+    }
+    
     companion object {
         fun getInstance(): LoggingConfiguration = service()
     }

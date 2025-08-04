@@ -2,11 +2,13 @@ package io.github.qavlad.adbrandomizer.settings
 
 import com.intellij.openapi.options.Configurable
 import com.intellij.openapi.ui.VerticalFlowLayout
+import com.intellij.ui.JBColor
 import com.intellij.ui.components.JBCheckBox
 import com.intellij.ui.components.JBPanel
 import com.intellij.util.ui.JBUI
 import io.github.qavlad.adbrandomizer.utils.AndroidStudioDetector
 import io.github.qavlad.adbrandomizer.utils.FileLogger
+import io.github.qavlad.adbrandomizer.services.PluginResetService
 import java.awt.Desktop
 import java.awt.FlowLayout
 import javax.swing.*
@@ -58,6 +60,11 @@ class PluginSettingsPanel : JBPanel<PluginSettingsPanel>(VerticalFlowLayout(Vert
         isEnabled = false
     }
     
+    private val resetAllButton = JButton("Reset All Plugin Data").apply {
+        toolTipText = "Resets all plugin settings, presets, and cached data to default values"
+        foreground = JBColor.RED
+    }
+    
     init {
         createUI()
         setupListeners()
@@ -93,6 +100,27 @@ class PluginSettingsPanel : JBPanel<PluginSettingsPanel>(VerticalFlowLayout(Vert
         debugPanel.add(buttonPanel)
         
         add(debugPanel)
+        
+        // Reset section
+        val resetPanel = JPanel(VerticalFlowLayout(VerticalFlowLayout.TOP)).apply {
+            border = JBUI.Borders.empty(10)
+        }
+        
+        val resetSeparator = JSeparator()
+        resetPanel.add(resetSeparator)
+        
+        val resetLabel = JLabel("Danger Zone").apply {
+            font = font.deriveFont(font.style or java.awt.Font.BOLD)
+            border = JBUI.Borders.empty(10, 0, 5, 0)
+        }
+        resetPanel.add(resetLabel)
+        
+        val resetButtonPanel = JPanel(FlowLayout(FlowLayout.LEFT)).apply {
+            add(resetAllButton)
+        }
+        resetPanel.add(resetButtonPanel)
+        
+        add(resetPanel)
     }
     
     private fun setupListeners() {
@@ -116,6 +144,50 @@ class PluginSettingsPanel : JBPanel<PluginSettingsPanel>(VerticalFlowLayout(Vert
                     "Error",
                     JOptionPane.ERROR_MESSAGE
                 )
+            }
+        }
+        
+        // Reset all plugin data when button clicked
+        resetAllButton.addActionListener {
+            val result = JOptionPane.showConfirmDialog(
+                this,
+                """This will reset ALL plugin data including:
+                    
+• All plugin settings
+• All custom presets  
+• WiFi device history
+• Log files
+• All cached data
+
+⚠️ This action cannot be undone!
+
+Are you sure you want to continue?""".trimIndent(),
+                "Confirm Reset",
+                JOptionPane.YES_NO_OPTION,
+                JOptionPane.WARNING_MESSAGE
+            )
+            
+            if (result == JOptionPane.YES_OPTION) {
+                try {
+                    PluginResetService.resetAllPluginData()
+                    
+                    // Reset UI to reflect changes
+                    reset()
+                    
+                    JOptionPane.showMessageDialog(
+                        this,
+                        "Plugin data has been reset to defaults.\nPlease restart the IDE for all changes to take effect.",
+                        "Reset Complete",
+                        JOptionPane.INFORMATION_MESSAGE
+                    )
+                } catch (e: Exception) {
+                    JOptionPane.showMessageDialog(
+                        this,
+                        "Failed to reset plugin data: ${e.message}",
+                        "Reset Failed",
+                        JOptionPane.ERROR_MESSAGE
+                    )
+                }
             }
         }
     }
