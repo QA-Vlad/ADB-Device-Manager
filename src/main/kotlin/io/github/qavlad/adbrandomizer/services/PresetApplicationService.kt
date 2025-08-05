@@ -142,6 +142,44 @@ object PresetApplicationService {
         // Collect devices that need Running Devices restart
         val devicesNeedingRunningDevicesRestart = mutableListOf<IDevice>()
         
+        // Сохраняем активные приложения для каждого устройства перед изменением разрешения
+        val devicesWithActiveApps = mutableMapOf<IDevice, Pair<String, String>>()
+        val settings = PluginSettings.instance
+        
+        if (settings.restartActiveAppOnResolutionChange && presetData.width != null && presetData.height != null) {
+            devices.forEach { device ->
+                // Получаем текущее разрешение для сравнения
+                val currentSizeResult = AdbService.getCurrentSize(device)
+                val currentSize = currentSizeResult.getOrNull()
+                
+                // Проверяем, изменится ли разрешение
+                if (currentSize != null && (currentSize.first != presetData.width || currentSize.second != presetData.height)) {
+                    // Получаем активное приложение
+                    val focusedAppResult = AdbService.getCurrentFocusedApp(device)
+                    val focusedApp = focusedAppResult.getOrNull()
+                    
+                    if (focusedApp != null) {
+                        // Проверяем, не является ли это системным приложением
+                        val isSystemResult = AdbService.isSystemApp(device, focusedApp.first)
+                        val isSystem = isSystemResult.getOrNull() ?: false
+                        
+                        if (!isSystem) {
+                            devicesWithActiveApps[device] = focusedApp
+                            PluginLogger.debug(LogCategory.PRESET_SERVICE, 
+                                "Will restart app %s on device %s after resolution change", 
+                                focusedApp.first, device.serialNumber
+                            )
+                        } else {
+                            PluginLogger.debug(LogCategory.PRESET_SERVICE, 
+                                "Skipping system app %s on device %s", 
+                                focusedApp.first, device.serialNumber
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        
         // Сохраняем состояния автоповорота для всех устройств перед применением пресетов
         val devicesWithAutoRotation = mutableListOf<IDevice>()
         devices.forEach { device ->
@@ -249,7 +287,6 @@ object PresetApplicationService {
                 Thread.sleep(500)
                 
                 // Проверяем и перезапускаем scrcpy если он активен для этого устройства
-                val settings = PluginSettings.instance
                 if (settings.restartScrcpyOnResolutionChange) {
                     val serialNumber = device.serialNumber
                     // Проверяем любые процессы scrcpy (наши или внешние)
@@ -312,6 +349,51 @@ object PresetApplicationService {
                     androidService.restartRunningDevicesForMultiple(devicesNeedingRunningDevicesRestart)
                 }.start()
             }
+        }
+        
+        // Перезапускаем активные приложения, если нужно
+        if (devicesWithActiveApps.isNotEmpty()) {
+            PluginLogger.debug(LogCategory.PRESET_SERVICE, 
+                "Restarting active apps for %d devices", 
+                devicesWithActiveApps.size
+            )
+            
+            Thread {
+                Thread.sleep(1000) // Даём время на стабилизацию после изменения разрешения
+                
+                devicesWithActiveApps.forEach { (device, appInfo) ->
+                    val (packageName, activityName) = appInfo
+                    PluginLogger.debug(LogCategory.PRESET_SERVICE, 
+                        "Restarting app %s on device %s", 
+                        packageName, device.serialNumber
+                    )
+                    
+                    // Останавливаем приложение
+                    val stopResult = AdbService.stopApp(device, packageName)
+                    stopResult.onError { exception, message ->
+                        PluginLogger.error("Failed to stop app $packageName on device ${device.serialNumber}", 
+                            exception, message ?: "")
+                    }
+                    
+                    if (stopResult.isSuccess()) {
+                        Thread.sleep(500) // Небольшая задержка между остановкой и запуском
+                        
+                        // Запускаем приложение заново
+                        val startResult = AdbService.startApp(device, packageName, activityName)
+                        startResult.onError { exception, message ->
+                            PluginLogger.error("Failed to start app $packageName on device ${device.serialNumber}", 
+                                exception, message ?: "")
+                        }
+                        
+                        if (startResult.isSuccess()) {
+                            PluginLogger.info(LogCategory.PRESET_SERVICE, 
+                                "Successfully restarted app %s on device %s", 
+                                packageName, device.serialNumber
+                            )
+                        }
+                    }
+                }
+            }.start()
         }
         
         // Восстанавливаем автоповорот для устройств, у которых он был включен

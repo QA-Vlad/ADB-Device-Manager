@@ -9,6 +9,7 @@ import io.github.qavlad.adbrandomizer.core.Result
 import io.github.qavlad.adbrandomizer.utils.AdbPathResolver
 import io.github.qavlad.adbrandomizer.utils.PluginLogger
 import io.github.qavlad.adbrandomizer.utils.ValidationUtils
+import kotlinx.coroutines.runBlocking
 import java.util.concurrent.TimeUnit
 import java.util.regex.Pattern
 import io.github.qavlad.adbrandomizer.core.runDeviceOperation
@@ -17,12 +18,16 @@ import io.github.qavlad.adbrandomizer.core.runAdbOperation
 object AdbService {
 
     fun getConnectedDevices(@Suppress("UNUSED_PARAMETER") project: Project): Result<List<IDevice>> {
-        return AdbConnectionManager.getConnectedDevices()
+        return runBlocking {
+            AdbConnectionManager.getConnectedDevices()
+        }
     }
 
     // Overload для обратной совместимости
     fun getConnectedDevices(): Result<List<IDevice>> {
-        return AdbConnectionManager.getConnectedDevices()
+        return runBlocking {
+            AdbConnectionManager.getConnectedDevices()
+        }
     }
     
     fun isDeviceAuthorized(serialNumber: String): Boolean {
@@ -540,6 +545,91 @@ object AdbService {
                 PluginLogger.warn("Connection timed out for %s", target)
                 return@runAdbOperation false
             }
+        }
+    }
+    
+    fun getCurrentFocusedApp(device: IDevice): Result<Pair<String, String>?> {
+        return runDeviceOperation(device.name, "get current focused app") {
+            val receiver = CollectingOutputReceiver()
+            device.executeShellCommand("dumpsys window | grep mCurrentFocus", receiver, PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            
+            val output = receiver.output.trim()
+            PluginLogger.debug("Current focus output for device %s: %s", device.name, output)
+            
+            if (output.isBlank() || output.contains("null")) {
+                return@runDeviceOperation null
+            }
+            
+            // Паттерн для извлечения package и activity из mCurrentFocus
+            // Пример: mCurrentFocus=Window{1234567 u0 com.example.app/.MainActivity}
+            val pattern = Pattern.compile("mCurrentFocus=Window\\{[^}]+\\s+u\\d+\\s+([^/]+)/([^}\\s]+)}")
+            val matcher = pattern.matcher(output)
+            
+            if (matcher.find()) {
+                val packageName = matcher.group(1)
+                val activityName = matcher.group(2)
+                PluginLogger.debug("Found focused app: %s/%s", packageName, activityName)
+                Pair(packageName, activityName)
+            } else {
+                // Альтернативный паттерн для других форматов вывода
+                val altPattern = Pattern.compile("([a-zA-Z0-9._]+)/([a-zA-Z0-9._]+)")
+                val altMatcher = altPattern.matcher(output)
+                if (altMatcher.find()) {
+                    val packageName = altMatcher.group(1)
+                    val activityName = altMatcher.group(2)
+                    PluginLogger.debug("Found focused app (alt pattern): %s/%s", packageName, activityName)
+                    Pair(packageName, activityName)
+                } else {
+                    null
+                }
+            }
+        }
+    }
+    
+    fun stopApp(device: IDevice, packageName: String): Result<Unit> {
+        return runDeviceOperation(device.name, "stop app $packageName") {
+            val command = "am force-stop $packageName"
+            device.executeShellCommand(command, NullOutputReceiver(), PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            PluginLogger.commandExecuted(command, device.name, true)
+        }
+    }
+    
+    fun startApp(device: IDevice, packageName: String, activityName: String): Result<Unit> {
+        return runDeviceOperation(device.name, "start app $packageName/$activityName") {
+            val fullActivityName = if (activityName.startsWith(".")) {
+                "$packageName$activityName"
+            } else {
+                activityName
+            }
+            val command = "am start -n $packageName/$fullActivityName"
+            device.executeShellCommand(command, NullOutputReceiver(), PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            PluginLogger.commandExecuted(command, device.name, true)
+        }
+    }
+    
+    fun isSystemApp(device: IDevice, packageName: String): Result<Boolean> {
+        return runDeviceOperation(device.name, "check if system app $packageName") {
+            // Проверяем, является ли приложение системным
+            val receiver = CollectingOutputReceiver()
+            device.executeShellCommand("pm list packages -s | grep $packageName", receiver, PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            
+            val output = receiver.output.trim()
+            val isSystem = output.contains("package:$packageName")
+            
+            // Дополнительная проверка на известные лаунчеры
+            val knownLaunchers = listOf(
+                "com.android.launcher",
+                "com.android.launcher2",
+                "com.android.launcher3",
+                "com.google.android.launcher",
+                "com.sec.android.app.launcher",
+                "com.miui.home",
+                "com.oppo.launcher",
+                "com.oneplus.launcher",
+                "com.huawei.android.launcher"
+            )
+            
+            isSystem || knownLaunchers.contains(packageName)
         }
     }
 }

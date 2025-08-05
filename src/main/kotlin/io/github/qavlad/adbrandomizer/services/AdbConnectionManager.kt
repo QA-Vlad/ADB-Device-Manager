@@ -2,12 +2,12 @@ package io.github.qavlad.adbrandomizer.services
 
 import com.android.ddmlib.AndroidDebugBridge
 import com.android.ddmlib.IDevice
-import com.intellij.openapi.application.ApplicationManager
 import io.github.qavlad.adbrandomizer.config.PluginConfig
 import io.github.qavlad.adbrandomizer.core.Result
 import io.github.qavlad.adbrandomizer.core.runAdbOperation
 import io.github.qavlad.adbrandomizer.utils.AdbPathResolver
 import io.github.qavlad.adbrandomizer.utils.PluginLogger
+import kotlinx.coroutines.*
 import java.util.concurrent.TimeUnit
 
 /**
@@ -21,18 +21,18 @@ internal object AdbConnectionManager {
     private var lastDeviceCount = -1
 
     @Suppress("DEPRECATION")
-    fun getOrCreateDebugBridge(): Result<AndroidDebugBridge> {
+    suspend fun getOrCreateDebugBridge(): Result<AndroidDebugBridge> = withContext(Dispatchers.IO) {
         if (customBridge != null && customBridge!!.isConnected) {
-            return Result.Success(customBridge!!)
+            return@withContext Result.Success(customBridge!!)
         }
 
         val adbPath = AdbPathResolver.findAdbExecutable()
         if (adbPath == null) {
             PluginLogger.error("ADB executable not found")
-            return Result.Error(Exception("ADB executable not found"), "ADB executable not found")
+            return@withContext Result.Error(Exception("ADB executable not found"), "ADB executable not found")
         }
 
-        return runAdbOperation("create debug bridge") {
+        runAdbOperation("create debug bridge") {
             PluginLogger.info("Starting ADB server...")
             val startServerCmd = ProcessBuilder(adbPath, "start-server")
             val process = startServerCmd.start()
@@ -49,7 +49,7 @@ internal object AdbConnectionManager {
 
             var attempts = PluginConfig.Adb.BRIDGE_CONNECTION_ATTEMPTS
             while (customBridge != null && !customBridge!!.isConnected && attempts > 0) {
-                Thread.sleep(PluginConfig.Adb.BRIDGE_CONNECTION_DELAY_MS)
+                delay(PluginConfig.Adb.BRIDGE_CONNECTION_DELAY_MS)
                 attempts--
             }
 
@@ -62,18 +62,14 @@ internal object AdbConnectionManager {
         }
     }
 
-    fun getConnectedDevices(): Result<List<IDevice>> {
-        return runAdbOperation("get connected devices") {
-            var bridge: AndroidDebugBridge? = null
-
-            ApplicationManager.getApplication().invokeAndWait {
-                val bridgeResult = getOrCreateDebugBridge()
-                bridge = when (bridgeResult) {
-                    is Result.Success -> bridgeResult.data
-                    is Result.Error -> {
-                        PluginLogger.error("Failed to create debug bridge", bridgeResult.exception)
-                        null
-                    }
+    suspend fun getConnectedDevices(): Result<List<IDevice>> = withContext(Dispatchers.IO) {
+        runAdbOperation("get connected devices") {
+            val bridgeResult = getOrCreateDebugBridge()
+            val bridge = when (bridgeResult) {
+                is Result.Success -> bridgeResult.data
+                is Result.Error -> {
+                    PluginLogger.error("Failed to create debug bridge", bridgeResult.exception)
+                    null
                 }
             }
 
@@ -82,17 +78,17 @@ internal object AdbConnectionManager {
             }
 
             var attempts = PluginConfig.Adb.DEVICE_LIST_WAIT_ATTEMPTS
-            while (!bridge!!.hasInitialDeviceList() && attempts > 0) {
+            while (!bridge.hasInitialDeviceList() && attempts > 0) {
                 try {
-                    Thread.sleep(PluginConfig.Adb.DEVICE_LIST_WAIT_DELAY_MS)
-                } catch (_: InterruptedException) {
-                    Thread.currentThread().interrupt()
-                    throw Exception("Device list wait interrupted")
+                    delay(PluginConfig.Adb.DEVICE_LIST_WAIT_DELAY_MS)
+                } catch (e: CancellationException) {
+                    // Rethrow CancellationException to properly handle coroutine cancellation
+                    throw e
                 }
                 attempts--
             }
 
-            val devices = bridge!!.devices.filter { it.isOnline }
+            val devices = bridge.devices.filter { it.isOnline }
 
             if (devices.size != lastDeviceCount) {
                 PluginLogger.info("Connected devices count changed: %d", devices.size)

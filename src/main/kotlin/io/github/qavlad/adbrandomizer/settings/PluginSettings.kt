@@ -16,6 +16,9 @@ class PluginSettings : PersistentStateComponent<PluginSettings> {
     // Настройка для автоматического перезапуска Running Devices при изменении разрешения (только Android Studio)
     var restartRunningDevicesOnResolutionChange: Boolean = true
     
+    // Настройка для автоматического перезапуска активного приложения при изменении разрешения
+    var restartActiveAppOnResolutionChange: Boolean = false
+    
     // Настройка для включения режима отладки
     var debugMode: Boolean = false
     

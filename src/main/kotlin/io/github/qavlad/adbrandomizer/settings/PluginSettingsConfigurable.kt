@@ -51,6 +51,10 @@ class PluginSettingsPanel : JBPanel<PluginSettingsPanel>(VerticalFlowLayout(Vert
         toolTipText = "When enabled, Android Studio's Running Devices will automatically restart when screen resolution is changed via presets or reset"
     }
     
+    private val restartActiveAppCheckBox = JBCheckBox("Automatically restart active app when screen resolution changes").apply {
+        toolTipText = "When enabled, the currently active app will be restarted after resolution change (excluding system apps and launchers)"
+    }
+    
     private val debugModeCheckBox = JBCheckBox("Enable debug mode (writes logs to file)").apply {
         toolTipText = "When enabled, all plugin logs will be written to files in the plugin directory"
     }
@@ -83,6 +87,8 @@ class PluginSettingsPanel : JBPanel<PluginSettingsPanel>(VerticalFlowLayout(Vert
         if (AndroidStudioDetector.isAndroidStudio()) {
             mirroringPanel.add(restartRunningDevicesCheckBox)
         }
+        
+        mirroringPanel.add(restartActiveAppCheckBox)
         
         add(mirroringPanel)
         
@@ -197,6 +203,7 @@ Are you sure you want to continue?""",
         if (AndroidStudioDetector.isAndroidStudio()) {
             modified = modified || restartRunningDevicesCheckBox.isSelected != settings.restartRunningDevicesOnResolutionChange
         }
+        modified = modified || restartActiveAppCheckBox.isSelected != settings.restartActiveAppOnResolutionChange
         modified = modified || debugModeCheckBox.isSelected != settings.debugMode
         return modified
     }
@@ -206,6 +213,7 @@ Are you sure you want to continue?""",
         if (AndroidStudioDetector.isAndroidStudio()) {
             settings.restartRunningDevicesOnResolutionChange = restartRunningDevicesCheckBox.isSelected
         }
+        settings.restartActiveAppOnResolutionChange = restartActiveAppCheckBox.isSelected
         
         val debugModeChanged = settings.debugMode != debugModeCheckBox.isSelected
         settings.debugMode = debugModeCheckBox.isSelected
@@ -221,6 +229,7 @@ Are you sure you want to continue?""",
         if (AndroidStudioDetector.isAndroidStudio()) {
             restartRunningDevicesCheckBox.isSelected = settings.restartRunningDevicesOnResolutionChange
         }
+        restartActiveAppCheckBox.isSelected = settings.restartActiveAppOnResolutionChange
         debugModeCheckBox.isSelected = settings.debugMode
         openLogsButton.isEnabled = settings.debugMode
     }
