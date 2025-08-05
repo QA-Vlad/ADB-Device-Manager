@@ -47,6 +47,7 @@ object AdbService {
             device.executeShellCommand("ip route", receiver, PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             
             val output = receiver.output
+            PluginLogger.debug("IP route output for device %s: %s", device.name, output)
             if (output.isBlank()) {
                 throw Exception("Empty ip route output")
             }
@@ -67,6 +68,8 @@ object AdbService {
                     }
                 }
             }
+            
+            PluginLogger.debug("Found IP addresses for device %s: %s", device.name, addresses)
             
             // Приоритет интерфейсов: wlan > rmnet_data > eth
             val selectedIp = addresses.minByOrNull { (interfaceName, _) ->
@@ -482,10 +485,9 @@ object AdbService {
                 return@runAdbOperation true
             }
 
-            // Отключаемся от всех устройств перед новым подключением
-            val disconnectCmd = ProcessBuilder(adbPath, "disconnect")
-            disconnectCmd.start().waitFor(2, TimeUnit.SECONDS)
-            Thread.sleep(PluginConfig.Network.DISCONNECT_WAIT_MS)
+            // Не отключаемся от устройства перед подключением
+            // Это позволяет иметь несколько устройств подключенных одновременно
+            PluginLogger.debug("Skipping disconnect step to allow multiple simultaneous connections")
 
             // Подключаемся
             PluginLogger.info("Connecting to %s...", target)
@@ -497,16 +499,21 @@ object AdbService {
 
             if (completed) {
                 val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
-                PluginLogger.debug("Connect output: %s", output)
+                val exitCode = process.exitValue()
+                PluginLogger.debug("Connect output: %s (exit code: %d)", output, exitCode)
 
                 // Проверяем разные варианты успешного подключения
-                val success = (process.exitValue() == 0) &&
-                        (output.contains("connected to $ipAddress:$port") || 
-                         output.contains("connected to $target") ||
-                         output.contains("already connected to $target")) &&
-                        !output.contains("failed") &&
-                        !output.contains("cannot connect") &&
-                        !output.contains("Connection refused")
+                // ADB может возвращать успешный код выхода даже при неудачном подключении
+                val success = when {
+                    output.contains("connected to $target") -> true
+                    output.contains("connected to $ipAddress:$port") -> true
+                    output.contains("already connected to $target") -> true
+                    output.contains("failed to connect") -> false
+                    output.contains("cannot connect") -> false
+                    output.contains("Connection refused") -> false
+                    output.contains("unable to connect") -> false
+                    else -> exitCode == 0 && !output.contains("failed")
+                }
 
                 if (success) {
                     // Дополнительная проверка через devices
