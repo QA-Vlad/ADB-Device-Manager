@@ -24,6 +24,22 @@ object AdbService {
     fun getConnectedDevices(): Result<List<IDevice>> {
         return AdbConnectionManager.getConnectedDevices()
     }
+    
+    fun isDeviceAuthorized(serialNumber: String): Boolean {
+        return try {
+            val devicesResult = getConnectedDevices()
+            if (devicesResult is Result.Success) {
+                devicesResult.data.any { device ->
+                    device.serialNumber == serialNumber && device.isOnline
+                }
+            } else {
+                false
+            }
+        } catch (e: Exception) {
+            PluginLogger.error("Error checking device authorization", e)
+            false
+        }
+    }
 
     fun getDeviceIpAddress(device: IDevice): Result<String> {
         return runDeviceOperation(device.name, "get IP address") {

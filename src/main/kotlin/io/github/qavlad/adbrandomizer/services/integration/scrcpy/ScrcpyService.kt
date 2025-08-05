@@ -6,15 +6,23 @@ import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.progress.ProcessCanceledException
 import com.intellij.openapi.project.Project
 import io.github.qavlad.adbrandomizer.config.PluginConfig
+import io.github.qavlad.adbrandomizer.core.Result
+import io.github.qavlad.adbrandomizer.services.AdbService
 import io.github.qavlad.adbrandomizer.services.PresetStorageService
 import io.github.qavlad.adbrandomizer.services.integration.scrcpy.ui.ScrcpyCompatibilityDialog
 import io.github.qavlad.adbrandomizer.utils.AdbPathResolver
+import io.github.qavlad.adbrandomizer.utils.NotificationUtils
 import io.github.qavlad.adbrandomizer.utils.PluginLogger
 import io.github.qavlad.adbrandomizer.utils.logging.LogCategory
 import java.io.File
 import java.util.concurrent.TimeUnit
 
 object ScrcpyService {
+
+    private enum class LaunchResult {
+        SUCCESS,
+        UNAUTHORIZED
+    }
 
     private val scrcpyName = if (System.getProperty("os.name").startsWith("Windows")) 
         PluginConfig.Scrcpy.SCRCPY_NAMES["windows"]!! 
@@ -23,6 +31,11 @@ object ScrcpyService {
     
     // Хранилище активных scrcpy процессов по серийному номеру устройства
     private val activeScrcpyProcesses = mutableMapOf<String, Process>()
+    private var lastLaunchResult: LaunchResult = LaunchResult.SUCCESS
+    // Хранилище устройств, которые потеряли авторизацию
+    private val unauthorizedDevices = mutableSetOf<String>()
+    // Хранилище недавно запущенных процессов (временное)
+    private val recentlyStartedProcesses = mutableMapOf<Long, String>() // PID -> serialNumber
 
     fun findScrcpyExecutable(): String? {
         val savedPath = PresetStorageService.getScrcpyPath()
@@ -276,7 +289,7 @@ object ScrcpyService {
                     
                     // Если не нашли процессы по серийному номеру, но есть scrcpy процессы,
                     // попробуем альтернативную стратегию
-                    tryAlternativeScrcpyKillStrategy(serialNumber, isWindows)
+                    tryAlternativeScrcpyKillStrategy(serialNumber)
                 }
             }
             
@@ -291,6 +304,12 @@ object ScrcpyService {
      * Проверяет, является ли процесс с указанным PID нашим
      */
     private fun isOurProcess(pid: Int): Boolean {
+        // Сначала проверяем временное хранилище недавно запущенных процессов
+        if (recentlyStartedProcesses.containsKey(pid.toLong())) {
+            PluginLogger.debug(LogCategory.SCRCPY, "Process PID=%s is in recently started list", pid)
+            return true
+        }
+        
         // Проверяем, есть ли процесс с таким PID в нашем списке активных процессов
         for ((_, process) in activeScrcpyProcesses) {
             try {
@@ -319,19 +338,59 @@ object ScrcpyService {
      */
     private fun killProcess(pid: String, isWindows: Boolean) {
         try {
-            val killCommand = if (isWindows) {
-                listOf("taskkill", "/F", "/PID", pid)
+            if (isWindows) {
+                // Сначала пробуем мягкое завершение без /F
+                val softKillCommand = listOf("taskkill", "/PID", pid)
+                val softProcess = ProcessBuilder(softKillCommand).start()
+                
+                if (softProcess.waitFor(3, TimeUnit.SECONDS)) {
+                    val exitCode = softProcess.exitValue()
+                    if (exitCode == 0) {
+                        PluginLogger.info(LogCategory.SCRCPY, "Successfully terminated process with PID: %s (soft kill)", pid)
+                        Thread.sleep(1000) // Даём время процессу корректно завершиться
+                        return
+                    }
+                }
+                
+                // Если мягкое завершение не сработало, используем принудительное
+                PluginLogger.info(LogCategory.SCRCPY, "Soft kill failed for PID %s, using force kill", pid)
+                val forceKillCommand = listOf("taskkill", "/F", "/PID", pid)
+                val forceProcess = ProcessBuilder(forceKillCommand).start()
+                
+                if (forceProcess.waitFor(5, TimeUnit.SECONDS)) {
+                    val exitCode = forceProcess.exitValue()
+                    if (exitCode == 0) {
+                        PluginLogger.info(LogCategory.SCRCPY, "Successfully killed process with PID: %s (force kill)", pid)
+                    } else {
+                        PluginLogger.warn(LogCategory.SCRCPY, "Failed to kill process with PID %s, exit code: %s", pid, exitCode.toString())
+                    }
+                }
             } else {
-                listOf("kill", "-9", pid)
-            }
-            
-            val process = ProcessBuilder(killCommand).start()
-            if (process.waitFor(5, TimeUnit.SECONDS)) {
-                val exitCode = process.exitValue()
-                if (exitCode == 0) {
-                    PluginLogger.info(LogCategory.SCRCPY, "Successfully killed process with PID: %s", pid)
-                } else {
-                    PluginLogger.warn(LogCategory.SCRCPY, "Failed to kill process with PID %s, exit code: %s", pid, exitCode.toString())
+                // Для Unix сначала пробуем SIGTERM
+                val softKillCommand = listOf("kill", "-15", pid)
+                val softProcess = ProcessBuilder(softKillCommand).start()
+                
+                if (softProcess.waitFor(3, TimeUnit.SECONDS)) {
+                    val exitCode = softProcess.exitValue()
+                    if (exitCode == 0) {
+                        PluginLogger.info(LogCategory.SCRCPY, "Successfully terminated process with PID: %s (SIGTERM)", pid)
+                        Thread.sleep(1000)
+                        return
+                    }
+                }
+                
+                // Если не сработало, используем SIGKILL
+                PluginLogger.info(LogCategory.SCRCPY, "SIGTERM failed for PID %s, using SIGKILL", pid)
+                val forceKillCommand = listOf("kill", "-9", pid)
+                val forceProcess = ProcessBuilder(forceKillCommand).start()
+                
+                if (forceProcess.waitFor(5, TimeUnit.SECONDS)) {
+                    val exitCode = forceProcess.exitValue()
+                    if (exitCode == 0) {
+                        PluginLogger.info(LogCategory.SCRCPY, "Successfully killed process with PID: %s (SIGKILL)", pid)
+                    } else {
+                        PluginLogger.warn(LogCategory.SCRCPY, "Failed to kill process with PID %s, exit code: %s", pid, exitCode.toString())
+                    }
                 }
             }
         } catch (e: Exception) {
@@ -343,92 +402,39 @@ object ScrcpyService {
      * Альтернативная стратегия для закрытия процессов scrcpy
      * Используется когда не можем найти процесс по серийному номеру
      */
-    private fun tryAlternativeScrcpyKillStrategy(serialNumber: String, isWindows: Boolean) {
+    private fun tryAlternativeScrcpyKillStrategy(serialNumber: String) {
         try {
             PluginLogger.info(LogCategory.SCRCPY, "Trying alternative strategy to find scrcpy processes")
             
-            // Проверяем, подключено ли устройство через ADB
-            val checkCommand = if (isWindows) {
-                listOf("cmd.exe", "/c", "adb", "devices", "-l")
-            } else {
-                listOf("adb", "devices", "-l")
-            }
-            
-            val processBuilder = ProcessBuilder(checkCommand)
-            val process = processBuilder.start()
-            val output = process.inputStream.bufferedReader().use { it.readText() }
-            
-            PluginLogger.debug(LogCategory.SCRCPY, "ADB devices output: %s", output)
-            
-            // Ищем наше устройство в списке подключенных
-            val lines = output.lines()
-            var deviceFound = false
-            
-            for (line in lines) {
-                if (line.contains(serialNumber) && line.contains("device")) {
-                    deviceFound = true
-                    PluginLogger.info(LogCategory.SCRCPY, "Device %s is connected", serialNumber)
-                    break
-                }
-            }
+            // Используем AdbService вместо прямого вызова adb devices
+            val deviceFound = AdbService.isDeviceAuthorized(serialNumber)
             
             if (deviceFound) {
-                // Если устройство подключено, закрываем ВСЕ внешние процессы scrcpy
-                PluginLogger.warn(LogCategory.SCRCPY, "Will kill ALL external scrcpy processes as fallback")
-                
-                val killCommand = if (isWindows) {
-                    // Получаем все процессы scrcpy через tasklist
-                    listOf("cmd.exe", "/c", "tasklist | findstr scrcpy.exe")
-                } else {
-                    listOf("pgrep", "scrcpy")
-                }
-                
-                val killProcessBuilder = ProcessBuilder(killCommand)
-                val killProcess = killProcessBuilder.start()
-                val killOutput = killProcess.inputStream.bufferedReader().use { it.readText() }
-                
-                val pidsToKill = mutableListOf<String>()
-                
-                if (isWindows) {
-                    // Парсим вывод tasklist
-                    killOutput.lines().forEach { line ->
-                        if (line.contains("scrcpy.exe")) {
-                            val parts = line.trim().split("\\s+".toRegex())
-                            if (parts.size >= 2) {
-                                val pid = parts[1]
-                                if (pid.isNotBlank()) {
-                                    val pidInt = pid.toIntOrNull()
-                                    if (pidInt != null && !isOurProcess(pidInt)) {
-                                        pidsToKill.add(pid)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    killOutput.lines().forEach { pid ->
-                        if (pid.isNotBlank()) {
-                            val pidInt = pid.toIntOrNull()
-                            if (pidInt != null && !isOurProcess(pidInt)) {
-                                pidsToKill.add(pid)
-                            }
-                        }
-                    }
-                }
-                
-                PluginLogger.info(LogCategory.SCRCPY, "Found %s external scrcpy processes to kill (alternative strategy)", 
-                    pidsToKill.size.toString())
-                
-                for (pid in pidsToKill) {
-                    PluginLogger.info(LogCategory.SCRCPY, "Killing scrcpy process PID=%s (alternative strategy)", pid)
-                    killProcess(pid, isWindows)
-                }
+                PluginLogger.info(LogCategory.SCRCPY, "Device %s is connected", serialNumber)
+                // НЕ убиваем процессы в альтернативной стратегии!
+                // Просто логируем предупреждение
+                PluginLogger.warn(LogCategory.SCRCPY, "Could not identify external scrcpy process for device %s", serialNumber)
+                PluginLogger.warn(LogCategory.SCRCPY, "External scrcpy process may still be running")
             }
-            
-            process.waitFor(3, TimeUnit.SECONDS)
             
         } catch (e: Exception) {
             PluginLogger.error(LogCategory.SCRCPY, "Error in alternative scrcpy kill strategy", e)
+        }
+    }
+    
+    /**
+     * Проверяет и стабилизирует ADB соединение
+     */
+    private fun ensureAdbStable() {
+        try {
+            // Проверяем состояние ADB через наш сервис
+            val devicesResult = AdbService.getConnectedDevices()
+            if (devicesResult is Result.Error) {
+                PluginLogger.warn(LogCategory.SCRCPY, "ADB connection unstable, waiting for stabilization")
+                Thread.sleep(2000)
+            }
+        } catch (e: Exception) {
+            PluginLogger.warn(LogCategory.SCRCPY, "Error checking ADB stability: %s", e.message ?: "Unknown")
         }
     }
     
@@ -441,8 +447,35 @@ object ScrcpyService {
         // Останавливаем внешние процессы scrcpy для этого устройства
         stopExternalScrcpyProcesses(serialNumber)
         
-        // Небольшая задержка перед перезапуском
-        Thread.sleep(1000)
+        // Увеличенная задержка для стабилизации после остановки процессов
+        Thread.sleep(3000)
+        
+        // Проверяем и стабилизируем ADB соединение перед запуском scrcpy
+        ensureAdbStable()
+        
+        // Проверяем, что устройство все еще авторизовано
+        if (!AdbService.isDeviceAuthorized(serialNumber)) {
+            PluginLogger.warn(LogCategory.SCRCPY, "Device %s is not authorized after stopping external processes", serialNumber)
+            // Даем больше времени для восстановления соединения
+            Thread.sleep(3000)
+            
+            // Проверяем еще раз
+            if (!AdbService.isDeviceAuthorized(serialNumber)) {
+                PluginLogger.error(LogCategory.SCRCPY, "Device %s is still unauthorized, cannot restart scrcpy", null, serialNumber)
+                ApplicationManager.getApplication().invokeLater {
+                    NotificationUtils.showError(
+                        project,
+                        "Device $serialNumber lost authorization. Please re-authorize USB debugging and then manually start mirroring."
+                    )
+                }
+                // Сохраняем информацию о том, что устройство потеряло авторизацию
+                unauthorizedDevices.add(serialNumber)
+                return false
+            } else {
+                // Если устройство было ранее неавторизовано, но теперь авторизовано - убираем из списка
+                unauthorizedDevices.remove(serialNumber)
+            }
+        }
         
         // Находим путь к scrcpy
         val scrcpyPath = findScrcpyExecutable()
@@ -480,29 +513,44 @@ object ScrcpyService {
             }
 
             PluginLogger.info(LogCategory.SCRCPY, "Using ADB: %s", adbPath)
+            
+            // Стабилизируем ADB перед запуском scrcpy
+            ensureAdbStable()
 
             val version = checkScrcpyVersion(scrcpyPath)
             val success = tryDifferentScrcpyMethods(scrcpyPath, serialNumber, adbPath)
 
             if (!success) {
-                var retry = false
-                ApplicationManager.getApplication().invokeAndWait {
-                    val dialog = ScrcpyCompatibilityDialog(
-                        project,
-                        version.ifBlank { "Unknown" },
-                        serialNumber
-                    )
-                    dialog.show()
-                    if (dialog.exitCode == PluginConfig.UIConstants.RETRY_EXIT_CODE) {
-                        retry = true
+                // Проверяем причину неудачи
+                if (lastLaunchResult == LaunchResult.UNAUTHORIZED) {
+                    PluginLogger.error(LogCategory.SCRCPY, "Device %s is unauthorized", null, serialNumber)
+                    ApplicationManager.getApplication().invokeLater {
+                        NotificationUtils.showError(
+                            project,
+                            "Device $serialNumber is not authorized. Please check USB debugging authorization."
+                        )
                     }
-                }
+                } else {
+                    // Показываем диалог совместимости только если проблема не в авторизации
+                    var retry = false
+                    ApplicationManager.getApplication().invokeAndWait {
+                        val dialog = ScrcpyCompatibilityDialog(
+                            project,
+                            version.ifBlank { "Unknown" },
+                            serialNumber
+                        )
+                        dialog.show()
+                        if (dialog.exitCode == PluginConfig.UIConstants.RETRY_EXIT_CODE) {
+                            retry = true
+                        }
+                    }
 
-                if (retry) {
-                    PluginLogger.info(LogCategory.SCRCPY, "New scrcpy path selected. Retrying screen mirroring...")
-                    val newPath = findScrcpyExecutable()
-                    if (newPath != null) {
-                        return launchScrcpy(newPath, serialNumber, project)
+                    if (retry) {
+                        PluginLogger.info(LogCategory.SCRCPY, "New scrcpy path selected. Retrying screen mirroring...")
+                        val newPath = findScrcpyExecutable()
+                        if (newPath != null) {
+                            return launchScrcpy(newPath, serialNumber, project)
+                        }
                     }
                 }
             }
@@ -519,12 +567,25 @@ object ScrcpyService {
     }
 
     private fun tryDifferentScrcpyMethods(scrcpyPath: String, serialNumber: String, adbPath: String): Boolean {
+        // Сбрасываем результат перед началом попыток
+        lastLaunchResult = LaunchResult.SUCCESS
+        
         if (tryScrcpyWithDisplayId(scrcpyPath, serialNumber, adbPath)) return true
+        if (lastLaunchResult == LaunchResult.UNAUTHORIZED) return false
+        
         if (tryScrcpyWithV4l2(scrcpyPath, serialNumber, adbPath)) return true
+        if (lastLaunchResult == LaunchResult.UNAUTHORIZED) return false
+        
         if (tryScrcpyWithCompatibilityFlags(scrcpyPath, serialNumber, adbPath)) return true
+        if (lastLaunchResult == LaunchResult.UNAUTHORIZED) return false
+        
         if (tryMinimalScrcpy(scrcpyPath, serialNumber, adbPath)) return true
+        if (lastLaunchResult == LaunchResult.UNAUTHORIZED) return false
 
-        showScrcpyUpdateMessage()
+        // Показываем сообщение о совместимости только если проблема не в авторизации
+        if (lastLaunchResult != LaunchResult.UNAUTHORIZED) {
+            showScrcpyUpdateMessage()
+        }
         return false
     }
 
@@ -577,6 +638,7 @@ object ScrcpyService {
             processBuilder.directory(File(scrcpyPath).parentFile)
             val process = processBuilder.start()
 
+            var unauthorizedDetected = false
             val outputReader = Thread {
                 try {
                     process.inputStream.bufferedReader().use { reader ->
@@ -592,6 +654,11 @@ object ScrcpyService {
                     process.errorStream.bufferedReader().use { reader ->
                         reader.lineSequence().take(PluginConfig.Scrcpy.MAX_LOG_LINES).forEach { line ->
                             PluginLogger.info(LogCategory.SCRCPY, "scrcpy stderr: %s", line)
+                            // Проверяем на ошибку unauthorized
+                            if (line.contains("unauthorized", ignoreCase = true) || 
+                                line.contains("Device is unauthorized", ignoreCase = true)) {
+                                unauthorizedDetected = true
+                            }
                         }
                     }
                 } catch (_: Exception) { /* Игнорируем ошибки чтения */ }
@@ -599,12 +666,32 @@ object ScrcpyService {
 
             outputReader.start()
             errorReader.start()
+            
+            // Сразу добавляем процесс во временное хранилище
+            try {
+                val pid = process.pid()
+                recentlyStartedProcesses[pid] = serialNumber
+                PluginLogger.debug(LogCategory.SCRCPY, "Added process PID=%s to recently started for device %s", pid, serialNumber)
+                
+                // Удаляем из временного хранилища через 10 секунд
+                Thread {
+                    Thread.sleep(10000)
+                    recentlyStartedProcesses.remove(pid)
+                    PluginLogger.debug(LogCategory.SCRCPY, "Removed process PID=%s from recently started", pid)
+                }.start()
+            } catch (e: Exception) {
+                PluginLogger.debug(LogCategory.SCRCPY, "Could not get PID for recently started process: %s", e.message ?: "Unknown")
+            }
 
             Thread.sleep(PluginConfig.Scrcpy.STARTUP_WAIT_MS)
 
             if (!process.isAlive) {
                 val exitCode = process.exitValue()
                 PluginLogger.info(LogCategory.SCRCPY, "Scrcpy process finished early. Exit code: %s", exitCode)
+                // Если обнаружен unauthorized, сохраняем флаг для последующей обработки
+                if (unauthorizedDetected) {
+                    lastLaunchResult = LaunchResult.UNAUTHORIZED
+                }
                 return exitCode == 0
             }
 
@@ -613,10 +700,16 @@ object ScrcpyService {
             if (!process.isAlive) {
                 val exitCode = process.exitValue()
                 PluginLogger.info(LogCategory.SCRCPY, "Scrcpy process closed after startup. Exit code: %s", exitCode)
+                if (unauthorizedDetected) {
+                    lastLaunchResult = LaunchResult.UNAUTHORIZED
+                }
                 return exitCode == 0
             }
 
             PluginLogger.info(LogCategory.SCRCPY, "Scrcpy started successfully for device: %s", serialNumber)
+            
+            // Сбрасываем флаг при успешном запуске
+            lastLaunchResult = LaunchResult.SUCCESS
             
             // Сохраняем процесс для возможности управления им
             activeScrcpyProcesses[serialNumber] = process
