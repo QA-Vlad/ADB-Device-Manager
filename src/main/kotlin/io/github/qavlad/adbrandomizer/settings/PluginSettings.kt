@@ -19,6 +19,9 @@ class PluginSettings : PersistentStateComponent<PluginSettings> {
     // Настройка для автоматического перезапуска активного приложения при изменении разрешения
     var restartActiveAppOnResolutionChange: Boolean = false
     
+    // Настройка для автоматического переключения устройства на Wi-Fi сеть ПК при подключении
+    var autoSwitchToHostWifi: Boolean = true
+    
     // Настройка для включения режима отладки
     var debugMode: Boolean = false
     

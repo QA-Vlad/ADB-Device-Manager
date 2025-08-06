@@ -9,6 +9,10 @@ import io.github.qavlad.adbrandomizer.core.Result
 import io.github.qavlad.adbrandomizer.utils.AdbPathResolver
 import io.github.qavlad.adbrandomizer.utils.PluginLogger
 import io.github.qavlad.adbrandomizer.utils.ValidationUtils
+import io.github.qavlad.adbrandomizer.utils.DeviceConnectionUtils
+import io.github.qavlad.adbrandomizer.utils.NotificationUtils
+import io.github.qavlad.adbrandomizer.settings.PluginSettings
+import io.github.qavlad.adbrandomizer.exceptions.ManualWifiSwitchRequiredException
 import kotlinx.coroutines.runBlocking
 import java.util.concurrent.TimeUnit
 import java.util.regex.Pattern
@@ -445,16 +449,29 @@ object AdbService {
 
             PluginLogger.info("Enabling TCP/IP mode on port %d for device %s", port, device.serialNumber)
             
+            // Проверяем, не включён ли уже TCP/IP режим
+            val checkReceiver = CollectingOutputReceiver()
+            device.executeShellCommand("getprop service.adb.tcp.port", checkReceiver, 2, TimeUnit.SECONDS)
+            val currentPort = checkReceiver.output.trim()
+            
+            if (currentPort == port.toString()) {
+                PluginLogger.info("TCP/IP already enabled on port %d for device %s", port, device.name)
+                return@runDeviceOperation
+            }
+            
             try {
                 // Включаем TCP/IP режим
                 device.executeShellCommand("setprop service.adb.tcp.port $port", NullOutputReceiver(), PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
                 Thread.sleep(500)
                 
-                // Перезапускаем ADB сервис на устройстве
-                device.executeShellCommand("stop adbd", NullOutputReceiver(), PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-                Thread.sleep(500)
-                device.executeShellCommand("start adbd", NullOutputReceiver(), PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-                Thread.sleep(1500)
+                // Перезапускаем ADB сервис на устройстве ТОЛЬКО если порт изменился
+                if (currentPort != port.toString()) {
+                    PluginLogger.info("Restarting adbd to apply TCP/IP port change")
+                    device.executeShellCommand("stop adbd", NullOutputReceiver(), PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                    Thread.sleep(500)
+                    device.executeShellCommand("start adbd", NullOutputReceiver(), PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                    Thread.sleep(1500)
+                }
                 
                 PluginLogger.info("TCP/IP mode enabled on port %d for device %s", port, device.name)
             } catch (e: Exception) {
@@ -472,12 +489,30 @@ object AdbService {
             if (adbPath == null) {
                 throw Exception("ADB path not found")
             }
-
-            if (!ValidationUtils.isValidIpAddress(ipAddress)) {
-                throw Exception("Invalid IP address: $ipAddress")
+            
+            // Проверяем настройку автопереключения Wi-Fi
+            val settings = PluginSettings.instance
+            var actualIpAddress = ipAddress
+            if (settings.autoSwitchToHostWifi) {
+                try {
+                    // Пытаемся переключить устройство на ту же Wi-Fi сеть, что и ПК
+                    val newIp = tryAutoSwitchWifi(ipAddress)
+                    if (newIp != null) {
+                        PluginLogger.info("Using new IP address after WiFi switch: %s", newIp)
+                        actualIpAddress = newIp
+                    }
+                } catch (e: ManualWifiSwitchRequiredException) {
+                    // Требуется ручное переключение - прерываем подключение
+                    PluginLogger.info("Manual WiFi switch required, aborting connection attempt")
+                    throw e // Пробрасываем исключение дальше
+                }
             }
 
-            val target = "$ipAddress:$port"
+            if (!ValidationUtils.isValidIpAddress(actualIpAddress)) {
+                throw Exception("Invalid IP address: $actualIpAddress")
+            }
+
+            val target = "$actualIpAddress:$port"
             PluginLogger.wifiConnectionAttempt(ipAddress, port)
 
             // Сначала проверяем, не подключены ли уже
@@ -631,5 +666,142 @@ object AdbService {
             
             isSystem || knownLaunchers.contains(packageName)
         }
+    }
+    
+    private fun tryAutoSwitchWifi(targetDeviceIp: String): String? {
+        try {
+            // Получаем SSID Wi-Fi сети на ПК
+            val hostSSIDResult = WifiNetworkServiceOptimized.getHostWifiSSID()
+            val hostSSID = hostSSIDResult.getOrNull()
+            
+            if (hostSSID == null) {
+                PluginLogger.debug("Host is not connected to WiFi, skipping auto-switch")
+                return null
+            }
+            
+            PluginLogger.info("Host WiFi SSID: %s", hostSSID)
+            
+            // Пытаемся найти устройство через USB для переключения Wi-Fi
+            val devicesResult = getConnectedDevices()
+            val devices = devicesResult.getOrNull() ?: emptyList()
+            
+            // Ищем USB подключенное устройство с таким же IP
+            for (device in devices) {
+                if (!DeviceConnectionUtils.isWifiConnection(device.serialNumber)) {
+                    // Это USB устройство, проверяем его IP
+                    val deviceIpResult = getDeviceIpAddress(device)
+                    var deviceIp = deviceIpResult.getOrNull()
+                    
+                    // Если не удалось получить IP, пробуем еще раз с задержкой
+                    if (deviceIp == null) {
+                        Thread.sleep(1000)
+                        val retryResult = getDeviceIpAddress(device)
+                        deviceIp = retryResult.getOrNull()
+                    }
+                    
+                    if (deviceIp == targetDeviceIp) {
+                        // Нашли нужное устройство
+                        PluginLogger.info("Found USB device with target IP: %s", targetDeviceIp)
+                        
+                        // Проверяем текущий Wi-Fi на устройстве
+                        val deviceSSIDResult = WifiNetworkServiceOptimized.getDeviceWifiSSID(device)
+                        val deviceSSID = deviceSSIDResult.getOrNull()
+                        
+                        PluginLogger.info("Device WiFi SSID: %s", deviceSSID ?: "Not connected")
+                        
+                        if (deviceSSID != hostSSID) {
+                            // Нужно переключить сеть - проверяем root
+                            val hasRoot = WifiNetworkServiceOptimized.hasRootAccess(device)
+                            
+                            if (!hasRoot) {
+                                // Нет root - показываем информативное сообщение и прерываем подключение
+                                PluginLogger.info("Device needs manual WiFi switch from '%s' to '%s' (no root access)", 
+                                    deviceSSID ?: "unknown", hostSSID)
+                                
+                                NotificationUtils.showWarning(
+                                    "Manual Wi-Fi Switch Required",
+                                    String.format("Please switch device to '%s' network (currently on '%s')", 
+                                        hostSSID, deviceSSID ?: "unknown")
+                                )
+                                // Выбрасываем специальное исключение для прерывания подключения
+                                throw ManualWifiSwitchRequiredException(
+                                    "Manual switch to '$hostSSID' network required (currently on '${deviceSSID ?: "unknown"}')"
+                                )
+                            }
+                            
+                            // Есть root - автоматически переключаем
+                            PluginLogger.info("Switching device to host WiFi network: %s", hostSSID)
+                            val switchResult = WifiNetworkServiceOptimized.switchDeviceToWifiFast(device, hostSSID)
+                            
+                            switchResult.onError { exception, message ->
+                                PluginLogger.warn("Failed to auto-switch WiFi: %s", message ?: exception.message)
+                            }
+                            
+                            if (switchResult.isSuccess()) {
+                                PluginLogger.info("Successfully initiated WiFi switch to: %s", hostSSID)
+                                // Даем время на переключение сети
+                                Thread.sleep(2000) // Уменьшаем начальную задержку
+                                
+                                // Ждём пока устройство получит новый IP после переключения сети
+                                var newIp: String?
+                                var attempts = 0
+                                val maxAttempts = 6 // Ещё уменьшаем количество попыток
+                                
+                                PluginLogger.info("Waiting for device to get new IP address after WiFi switch...")
+                                
+                                // Сначала проверяем кеш (параллельная проверка могла уже сохранить IP)
+                                Thread.sleep(1000)
+                                newIp = WifiNetworkServiceOptimized.getDeviceIpWithCache(device)
+                                
+                                while (attempts < maxAttempts && newIp == null) {
+                                    Thread.sleep(1000) // Ещё уменьшаем интервал
+                                    
+                                    // Пытаемся получить новый IP (с кешем)
+                                    newIp = WifiNetworkServiceOptimized.getDeviceIpWithCache(device)
+                                    
+                                    if (newIp != null && ValidationUtils.isUsableIpAddress(newIp)) {
+                                        PluginLogger.info("Device got new IP address: %s (was: %s)", newIp, targetDeviceIp)
+                                        break
+                                    }
+                                    
+                                    attempts++
+                                    PluginLogger.debug("Attempt %d/%d: waiting for IP...", attempts, maxAttempts)
+                                }
+                                
+                                if (newIp == null) {
+                                    PluginLogger.warn("Device did not get IP address after WiFi switch")
+                                    // Попробуем включить TCP/IP ещё раз
+                                    PluginLogger.info("Re-enabling TCP/IP after network switch")
+                                    enableTcpIp(device, 5555)
+                                    Thread.sleep(3000)
+                                    
+                                    // Последняя попытка получить IP
+                                    val finalIpResult = getDeviceIpAddress(device)
+                                    newIp = finalIpResult.getOrNull()
+                                }
+                                
+                                // Возвращаем новый IP если он изменился
+                                if (newIp != null && newIp != targetDeviceIp) {
+                                    PluginLogger.info("Will use new IP for connection: %s", newIp)
+                                    return newIp
+                                }
+                            }
+                        } else {
+                            PluginLogger.debug("Device already on the same WiFi network")
+                        }
+                        
+                        return null
+                    }
+                }
+            }
+        } catch (e: ManualWifiSwitchRequiredException) {
+            // Пробрасываем это исключение дальше - нужно прервать подключение
+            // Не логируем как ошибку, так как это ожидаемое поведение
+            throw e
+        } catch (e: Exception) {
+            PluginLogger.warn("Error during WiFi check: %s", e.message)
+            // Продолжаем с обычным подключением даже если проверка не удалась
+        }
+        return null
     }
 }

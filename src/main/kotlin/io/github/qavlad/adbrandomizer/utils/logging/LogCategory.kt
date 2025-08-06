@@ -15,7 +15,8 @@ enum class LogCategory(val displayName: String, val defaultLevel: LogLevel) {
     COMMAND_HISTORY("Command History", LogLevel.WARN),
     DEVICE_STATE("Device State", LogLevel.INFO),
     ANDROID_STUDIO("Android Studio", LogLevel.INFO),
-    DEVICE_POLLING("Device Polling", LogLevel.WARN);
+    DEVICE_POLLING("Device Polling", LogLevel.WARN),
+    NETWORK("Network", LogLevel.INFO);
     
     companion object {
         fun fromName(name: String): LogCategory? = values().find { it.name == name }

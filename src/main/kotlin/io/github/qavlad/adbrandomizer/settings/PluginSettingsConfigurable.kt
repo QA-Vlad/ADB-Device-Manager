@@ -55,6 +55,10 @@ class PluginSettingsPanel : JBPanel<PluginSettingsPanel>(VerticalFlowLayout(Vert
         toolTipText = "When enabled, the currently active app will be restarted after resolution change (excluding system apps and launchers)"
     }
     
+    private val autoSwitchWifiCheckBox = JBCheckBox("Automatically switch device to PC's Wi-Fi network when connecting (root only)").apply {
+        toolTipText = "When enabled, the device will automatically switch to the same Wi-Fi network as your PC before establishing Wi-Fi connection. REQUIRES ROOT ACCESS on the device. Non-root devices will see instructions for manual switching."
+    }
+    
     private val debugModeCheckBox = JBCheckBox("Enable debug mode (writes logs to file)").apply {
         toolTipText = "When enabled, all plugin logs will be written to files in the plugin directory"
     }
@@ -91,6 +95,15 @@ class PluginSettingsPanel : JBPanel<PluginSettingsPanel>(VerticalFlowLayout(Vert
         mirroringPanel.add(restartActiveAppCheckBox)
         
         add(mirroringPanel)
+        
+        // Network settings
+        val networkPanel = JPanel(VerticalFlowLayout(VerticalFlowLayout.TOP)).apply {
+            border = JBUI.Borders.empty(10)
+        }
+        
+        networkPanel.add(autoSwitchWifiCheckBox)
+        
+        add(networkPanel)
         
         // Debug settings
         val debugPanel = JPanel(VerticalFlowLayout(VerticalFlowLayout.TOP)).apply {
@@ -204,6 +217,7 @@ Are you sure you want to continue?""",
             modified = modified || restartRunningDevicesCheckBox.isSelected != settings.restartRunningDevicesOnResolutionChange
         }
         modified = modified || restartActiveAppCheckBox.isSelected != settings.restartActiveAppOnResolutionChange
+        modified = modified || autoSwitchWifiCheckBox.isSelected != settings.autoSwitchToHostWifi
         modified = modified || debugModeCheckBox.isSelected != settings.debugMode
         return modified
     }
@@ -214,6 +228,7 @@ Are you sure you want to continue?""",
             settings.restartRunningDevicesOnResolutionChange = restartRunningDevicesCheckBox.isSelected
         }
         settings.restartActiveAppOnResolutionChange = restartActiveAppCheckBox.isSelected
+        settings.autoSwitchToHostWifi = autoSwitchWifiCheckBox.isSelected
         
         val debugModeChanged = settings.debugMode != debugModeCheckBox.isSelected
         settings.debugMode = debugModeCheckBox.isSelected
@@ -230,6 +245,7 @@ Are you sure you want to continue?""",
             restartRunningDevicesCheckBox.isSelected = settings.restartRunningDevicesOnResolutionChange
         }
         restartActiveAppCheckBox.isSelected = settings.restartActiveAppOnResolutionChange
+        autoSwitchWifiCheckBox.isSelected = settings.autoSwitchToHostWifi
         debugModeCheckBox.isSelected = settings.debugMode
         openLogsButton.isEnabled = settings.debugMode
     }

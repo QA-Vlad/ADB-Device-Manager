@@ -537,6 +537,11 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                     val firstConnectResult = AdbService.connectWifi(project, ipAddress)
                     var success = firstConnectResult.getOrNull() ?: run {
                         firstConnectResult.onError { exception, _ ->
+                            // Проверяем, не является ли это исключением о ручном переключении
+                            if (exception is io.github.qavlad.adbrandomizer.exceptions.ManualWifiSwitchRequiredException) {
+                                // Пробрасываем исключение дальше, не пытаемся повторно
+                                throw exception
+                            }
                             PluginLogger.wifiConnectionFailed(ipAddress, 5555, exception)
                         }
                         false
@@ -549,6 +554,11 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                         val retryConnectResult = AdbService.connectWifi(project, ipAddress)
                         success = retryConnectResult.getOrNull() ?: run {
                             retryConnectResult.onError { exception, _ ->
+                                // Проверяем, не является ли это исключением о ручном переключении
+                                if (exception is io.github.qavlad.adbrandomizer.exceptions.ManualWifiSwitchRequiredException) {
+                                    // Пробрасываем исключение дальше
+                                    throw exception
+                                }
                                 PluginLogger.wifiConnectionFailed(ipAddress, 5555, exception)
                             }
                             false
@@ -556,6 +566,10 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                     }
                     
                     showWifiConnectionResult(success, device.name, ipAddress)
+                } catch (_: io.github.qavlad.adbrandomizer.exceptions.ManualWifiSwitchRequiredException) {
+                    // Ручное переключение требуется - не показываем ошибку подключения
+                    PluginLogger.info("Manual WiFi switch required for device ${device.name}")
+                    // Уведомление уже показано в tryAutoSwitchWifi, ничего дополнительно не делаем
                 } catch (e: Exception) {
                     NotificationUtils.showError(project, "Error connecting to device: ${e.message}")
                 }

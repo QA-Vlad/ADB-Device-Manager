@@ -32,6 +32,18 @@ object NotificationUtils {
     }
 
     /**
+     * Показывает предупреждение с заголовком (без проекта)
+     */
+    fun showWarning(title: String, message: String) {
+        ApplicationManager.getApplication().invokeLater {
+            NotificationGroupManager.getInstance()
+                .getNotificationGroup(NOTIFICATION_GROUP_ID)
+                .createNotification(title, message, NotificationType.WARNING)
+                .notify(null)
+        }
+    }
+
+    /**
      * Базовый метод для показа уведомления
      */
     private fun showNotification(project: Project, message: String, type: NotificationType) {
