@@ -42,6 +42,13 @@ object NotificationUtils {
                 .notify(null)
         }
     }
+    
+    /**
+     * Показывает предупреждение для проекта
+     */
+    fun showWarning(project: Project, message: String) {
+        showNotification(project, message, NotificationType.WARNING)
+    }
 
     /**
      * Базовый метод для показа уведомления

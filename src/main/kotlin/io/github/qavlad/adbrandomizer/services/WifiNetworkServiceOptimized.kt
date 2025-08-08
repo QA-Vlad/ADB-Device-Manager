@@ -5,7 +5,6 @@ import io.github.qavlad.adbrandomizer.core.Result
 import io.github.qavlad.adbrandomizer.core.runDeviceOperation
 import io.github.qavlad.adbrandomizer.utils.PluginLogger
 import io.github.qavlad.adbrandomizer.utils.logging.LogCategory
-import io.github.qavlad.adbrandomizer.config.PluginConfig
 import com.android.ddmlib.CollectingOutputReceiver
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.*
@@ -16,7 +15,7 @@ import kotlinx.coroutines.*
  */
 object WifiNetworkServiceOptimized {
     
-    private val cacheService = DeviceCacheService.instance
+    private val cacheService by lazy { DeviceCacheService.instance }
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     
     /**
@@ -43,6 +42,35 @@ object WifiNetworkServiceOptimized {
         // Сохраняем в кеш
         cacheService.cacheRootAccess(device.serialNumber, hasRoot)
         return hasRoot
+    }
+    
+    /**
+     * Открывает настройки Wi-Fi с инструкцией для пользователя
+     */
+    private fun openWifiSettingsWithInstruction(device: IDevice, targetSSID: String) {
+        try {
+            // Открываем настройки Wi-Fi
+            device.executeShellCommand(
+                "am start -a android.settings.WIFI_SETTINGS", 
+                CollectingOutputReceiver(), 
+                2, TimeUnit.SECONDS
+            )
+            
+            // Альтернативный способ через input для показа подсказки
+            device.executeShellCommand(
+                "input text \"Connect_to_${targetSSID.replace(" ", "_")}\"",
+                CollectingOutputReceiver(),
+                1, TimeUnit.SECONDS
+            )
+            
+            PluginLogger.info(LogCategory.NETWORK, 
+                "Opened Wi-Fi settings on device %s. User needs to manually select '%s'",
+                device.serialNumber, targetSSID)
+                
+        } catch (e: Exception) {
+            PluginLogger.warn(LogCategory.NETWORK, 
+                "Failed to open Wi-Fi settings: %s", e.message)
+        }
     }
     
     /**
@@ -129,24 +157,18 @@ object WifiNetworkServiceOptimized {
                     }
                 }
             } else {
-                // Для устройств без root используем стандартный способ
-                PluginLogger.info(LogCategory.NETWORK, "No root access, using standard method")
+                // Для устройств без root - открываем настройки Wi-Fi для ручного переключения
+                PluginLogger.info(LogCategory.NETWORK, "No root access, opening Wi-Fi settings for manual selection")
                 
-                val connectReceiver = CollectingOutputReceiver()
-                device.executeShellCommand(
-                    "cmd wifi connect-network \"$ssid\" open",
-                    connectReceiver,
-                    5, TimeUnit.SECONDS
-                )
+                // Открываем настройки Wi-Fi с подсказкой
+                openWifiSettingsWithInstruction(device, ssid)
                 
-                val result = connectReceiver.output.trim()
-                PluginLogger.info(LogCategory.NETWORK, "Non-root connect result: %s", result)
+                // Даём время пользователю на ручное переключение
+                PluginLogger.info(LogCategory.NETWORK, 
+                    "Waiting for manual Wi-Fi switch to '%s'. User needs to select the network manually.", ssid)
                 
-                if (result.contains("Connection initiated")) {
-                    Thread.sleep(2000) // Больше времени для non-root
-                    connected = true
-                    cacheService.cacheWifiSecurity(ssid, DeviceCacheService.WifiSecurityType.OPEN)
-                }
+                // Не считаем это успешным автоматическим подключением
+                connected = false
             }
             
             // Запускаем параллельную проверку IP адреса

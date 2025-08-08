@@ -10,6 +10,7 @@ import io.github.qavlad.adbrandomizer.core.Result
 import io.github.qavlad.adbrandomizer.services.AdbService
 import io.github.qavlad.adbrandomizer.services.PresetStorageService
 import io.github.qavlad.adbrandomizer.services.integration.scrcpy.ui.ScrcpyCompatibilityDialog
+import io.github.qavlad.adbrandomizer.settings.PluginSettings
 import io.github.qavlad.adbrandomizer.utils.AdbPathResolver
 import io.github.qavlad.adbrandomizer.utils.NotificationUtils
 import io.github.qavlad.adbrandomizer.utils.PluginLogger
@@ -21,8 +22,12 @@ object ScrcpyService {
 
     private enum class LaunchResult {
         SUCCESS,
-        UNAUTHORIZED
+        UNAUTHORIZED,
+        INVALID_FLAGS
     }
+    
+    // Хранилище последней ошибки с флагами
+    private var lastInvalidFlagError: String? = null
 
     private val scrcpyName = if (System.getProperty("os.name").startsWith("Windows")) 
         PluginConfig.Scrcpy.SCRCPY_NAMES["windows"]!! 
@@ -488,7 +493,7 @@ object ScrcpyService {
         return launchScrcpy(scrcpyPath, serialNumber, project)
     }
 
-    fun launchScrcpy(scrcpyPath: String, serialNumber: String, @Suppress("UNUSED_PARAMETER") project: Project): Boolean {
+    fun launchScrcpy(scrcpyPath: String, serialNumber: String, project: Project): Boolean {
         try {
             if (scrcpyPath.isBlank() || serialNumber.isBlank()) {
                 PluginLogger.info(LogCategory.SCRCPY, "Empty scrcpy path or serial number provided")
@@ -517,8 +522,9 @@ object ScrcpyService {
             // Стабилизируем ADB перед запуском scrcpy
             ensureAdbStable()
 
-            val version = checkScrcpyVersion(scrcpyPath)
-            val success = tryDifferentScrcpyMethods(scrcpyPath, serialNumber, adbPath)
+            // Получаем пользовательские флаги
+            val customFlags = PluginSettings.instance.scrcpyCustomFlags
+            val success = launchScrcpyWithFlags(scrcpyPath, serialNumber, adbPath, customFlags, project)
 
             if (!success) {
                 // Проверяем причину неудачи
@@ -533,6 +539,7 @@ object ScrcpyService {
                 } else {
                     // Показываем диалог совместимости только если проблема не в авторизации
                     var retry = false
+                    val version = checkScrcpyVersion(scrcpyPath)
                     ApplicationManager.getApplication().invokeAndWait {
                         val dialog = ScrcpyCompatibilityDialog(
                             project,
@@ -566,68 +573,285 @@ object ScrcpyService {
         }
     }
 
-    private fun tryDifferentScrcpyMethods(scrcpyPath: String, serialNumber: String, adbPath: String): Boolean {
-        // Сбрасываем результат перед началом попыток
+    private fun launchScrcpyWithFlags(scrcpyPath: String, serialNumber: String, adbPath: String, customFlags: String, project: Project): Boolean {
+        // Сбрасываем результат перед началом попытки
         lastLaunchResult = LaunchResult.SUCCESS
+        lastInvalidFlagError = null
         
-        if (tryScrcpyWithDisplayId(scrcpyPath, serialNumber, adbPath)) return true
-        if (lastLaunchResult == LaunchResult.UNAUTHORIZED) return false
+        PluginLogger.info(LogCategory.SCRCPY, "Launching scrcpy with custom flags: %s", customFlags)
         
-        if (tryScrcpyWithV4l2(scrcpyPath, serialNumber, adbPath)) return true
-        if (lastLaunchResult == LaunchResult.UNAUTHORIZED) return false
-        
-        if (tryScrcpyWithCompatibilityFlags(scrcpyPath, serialNumber, adbPath)) return true
-        if (lastLaunchResult == LaunchResult.UNAUTHORIZED) return false
-        
-        if (tryMinimalScrcpy(scrcpyPath, serialNumber, adbPath)) return true
-        if (lastLaunchResult == LaunchResult.UNAUTHORIZED) return false
-
-        // Показываем сообщение о совместимости только если проблема не в авторизации
-        if (lastLaunchResult != LaunchResult.UNAUTHORIZED) {
-            showScrcpyUpdateMessage()
-        }
-        return false
-    }
-
-    private fun tryScrcpyWithDisplayId(scrcpyPath: String, serialNumber: String, adbPath: String): Boolean {
-        PluginLogger.info(LogCategory.SCRCPY, "Trying scrcpy with display-id 0...")
-        val command = listOf(scrcpyPath, "-s", serialNumber, "--no-audio", "--display-id=0", "--video-codec=h264")
-        return launchScrcpyProcess(command, adbPath, scrcpyPath, serialNumber)
-    }
-
-    private fun tryScrcpyWithV4l2(scrcpyPath: String, serialNumber: String, adbPath: String): Boolean {
-        PluginLogger.info(LogCategory.SCRCPY, "Trying scrcpy with force software encoder...")
-        val command = listOf(scrcpyPath, "-s", serialNumber, "--no-audio", "--video-codec=h264", "--video-encoder=OMX.google.h264.encoder")
-        return launchScrcpyProcess(command, adbPath, scrcpyPath, serialNumber)
-    }
-
-    private fun showScrcpyUpdateMessage() {
-        PluginLogger.info(LogCategory.SCRCPY, "=================================================")
-        PluginLogger.info(LogCategory.SCRCPY, "SCRCPY COMPATIBILITY ISSUE DETECTED")
-        PluginLogger.info(LogCategory.SCRCPY, "Your scrcpy version has known issues with Android 15")
-        PluginLogger.info(LogCategory.SCRCPY, "Showing compatibility dialog to user...")
-        PluginLogger.info(LogCategory.SCRCPY, "=================================================")
-    }
-
-    private fun tryScrcpyWithCompatibilityFlags(scrcpyPath: String, serialNumber: String, adbPath: String): Boolean {
-        PluginLogger.info(LogCategory.SCRCPY, "Trying scrcpy with compatibility flags...")
+        // Создаём команду с базовыми параметрами
         val command = mutableListOf(scrcpyPath, "-s", serialNumber)
-        command.addAll(listOf(
-            "--no-audio",
-            "--no-cleanup",
-            "--video-codec=h264",
-            "--max-size=1920",
-            "--video-bit-rate=8M",
-            "--disable-screensaver",
-            "--stay-awake"
-        ))
-        return launchScrcpyProcess(command, adbPath, scrcpyPath, serialNumber)
+        
+        // Добавляем пользовательские флаги, если они есть
+        var allFlags = listOf<String>()
+        if (customFlags.isNotBlank()) {
+            // Разбиваем флаги по пробелам, учитывая возможные кавычки
+            val parsedFlags = parseCommandLineFlags(customFlags)
+            
+            // Фильтруем явно невалидные флаги
+            allFlags = filterObviouslyInvalidFlags(parsedFlags)
+            
+            if (allFlags.size < parsedFlags.size) {
+                val removedFlags = parsedFlags.filterNot { allFlags.contains(it) }
+                PluginLogger.warn(LogCategory.SCRCPY, "Removed obviously invalid flags: %s", removedFlags.joinToString(" "))
+            }
+            
+            command.addAll(allFlags)
+        }
+        
+        val success = launchScrcpyProcess(command, adbPath, scrcpyPath, serialNumber)
+        
+        // Если не удалось из-за невалидных флагов, пробуем убрать проблемный флаг
+        if (!success && lastLaunchResult == LaunchResult.INVALID_FLAGS && lastInvalidFlagError != null) {
+            PluginLogger.warn(LogCategory.SCRCPY, "Retrying without problematic flag based on error: %s", lastInvalidFlagError)
+            
+            // Парсим ошибку и находим проблемный флаг/аргумент
+            val problematicFlag = extractProblematicFlag(lastInvalidFlagError!!)
+            
+            if (problematicFlag != null && allFlags.isNotEmpty()) {
+                // Убираем проблемный флаг и его возможное значение
+                val cleanedFlags = removeProblematicFlag(allFlags, problematicFlag)
+                
+                if (cleanedFlags.size < allFlags.size) {
+                    // Показываем уведомление пользователю о том, какой флаг был убран
+                    ApplicationManager.getApplication().invokeLater {
+                        NotificationUtils.showWarning(
+                            project,
+                            "Invalid scrcpy flag detected: '$problematicFlag'. Launching without it."
+                        )
+                    }
+                    
+                    // Пробуем снова с очищенными флагами
+                    val retryCommand = mutableListOf(scrcpyPath, "-s", serialNumber)
+                    retryCommand.addAll(cleanedFlags)
+                    
+                    // Сбрасываем статус перед повторной попыткой
+                    lastLaunchResult = LaunchResult.SUCCESS
+                    lastInvalidFlagError = null
+                    
+                    PluginLogger.info(LogCategory.SCRCPY, "Retrying with cleaned flags: %s", cleanedFlags.joinToString(" "))
+                    
+                    val retrySuccess = launchScrcpyProcess(retryCommand, adbPath, scrcpyPath, serialNumber)
+                    
+                    // Если повторная попытка успешна, уведомляем пользователя
+                    if (retrySuccess) {
+                        PluginLogger.info(LogCategory.SCRCPY, "Successfully launched scrcpy after removing invalid flag: %s", problematicFlag)
+                    }
+                    
+                    return retrySuccess
+                }
+            }
+            
+            // Если не смогли определить проблемный флаг, показываем общую ошибку
+            ApplicationManager.getApplication().invokeLater {
+                NotificationUtils.showError(
+                    project,
+                    "scrcpy failed: $lastInvalidFlagError. Please check your flags in settings."
+                )
+            }
+        }
+        
+        return success
     }
-
-    private fun tryMinimalScrcpy(scrcpyPath: String, serialNumber: String, adbPath: String): Boolean {
-        PluginLogger.info(LogCategory.SCRCPY, "Trying minimal scrcpy...")
-        val command = listOf(scrcpyPath, "-s", serialNumber, "--no-audio")
-        return launchScrcpyProcess(command, adbPath, scrcpyPath, serialNumber)
+    
+    private fun parseCommandLineFlags(flagsString: String): List<String> {
+        val result = mutableListOf<String>()
+        var current = StringBuilder()
+        var inQuotes = false
+        var escapeNext = false
+        
+        for (char in flagsString) {
+            when {
+                escapeNext -> {
+                    current.append(char)
+                    escapeNext = false
+                }
+                char == '\\' -> {
+                    escapeNext = true
+                }
+                char == '"' || char == '\'' -> {
+                    inQuotes = !inQuotes
+                }
+                char == ' ' && !inQuotes -> {
+                    if (current.isNotEmpty()) {
+                        result.add(current.toString())
+                        current = StringBuilder()
+                    }
+                }
+                else -> {
+                    current.append(char)
+                }
+            }
+        }
+        
+        if (current.isNotEmpty()) {
+            result.add(current.toString())
+        }
+        
+        return result
+    }
+    
+    /**
+     * Фильтрует явно невалидные флаги на основе базовых правил
+     * Использует ту же логику группировки, что и UI
+     */
+    private fun filterObviouslyInvalidFlags(flags: List<String>): List<String> {
+        val validFlags = mutableListOf<String>()
+        val invalidGroups = mutableListOf<String>()
+        
+        // Разрешенные символы: латинские буквы, цифры, дефис, подчёркивание, точка, слэш, двоеточие, знак равно, x
+        val validPattern = Regex("^[a-zA-Z0-9\\-_./:=x]+$")
+        
+        var currentFlagGroup = mutableListOf<String>()
+        var groupHasInvalidToken = false
+        
+        for (token in flags) {
+            if (token.isBlank()) continue
+            
+            // Если встретили новый флаг (начинается с -)
+            if (token.startsWith("-")) {
+                // Сохраняем предыдущую группу, если она была валидной
+                if (currentFlagGroup.isNotEmpty()) {
+                    if (!groupHasInvalidToken) {
+                        validFlags.addAll(currentFlagGroup)
+                    } else {
+                        invalidGroups.add(currentFlagGroup.joinToString(" "))
+                        PluginLogger.warn(LogCategory.SCRCPY, "Filtering out invalid flag group: %s", 
+                            currentFlagGroup.joinToString(" "))
+                    }
+                }
+                
+                // Начинаем новую группу
+                currentFlagGroup = mutableListOf(token)
+                groupHasInvalidToken = false
+                
+                // Проверяем валидность самого флага
+                if (!token.matches(validPattern)) {
+                    groupHasInvalidToken = true
+                } else {
+                    // Флаг должен иметь хотя бы один символ после дефиса(ов)
+                    val flagContent = token.removePrefix("--").removePrefix("-")
+                    if (flagContent.isEmpty() || flagContent == "-") {
+                        groupHasInvalidToken = true
+                    } else if (flagContent.matches(Regex("^[0-9]+$"))) {
+                        // Флаг не может состоять только из цифр
+                        groupHasInvalidToken = true
+                    }
+                }
+            }
+            // Это значение для текущего флага
+            else {
+                // Если нет текущего флага, это отдельный невалидный токен
+                if (currentFlagGroup.isEmpty()) {
+                    invalidGroups.add(token)
+                    PluginLogger.warn(LogCategory.SCRCPY, "Filtering out standalone argument: %s", token)
+                } else {
+                    // Добавляем к текущей группе
+                    currentFlagGroup.add(token)
+                    // Проверяем валидность токена
+                    if (!token.matches(validPattern)) {
+                        groupHasInvalidToken = true
+                    }
+                }
+            }
+        }
+        
+        // Обрабатываем последнюю группу
+        if (currentFlagGroup.isNotEmpty()) {
+            if (!groupHasInvalidToken) {
+                validFlags.addAll(currentFlagGroup)
+            } else {
+                invalidGroups.add(currentFlagGroup.joinToString(" "))
+                PluginLogger.warn(LogCategory.SCRCPY, "Filtering out invalid flag group: %s", 
+                    currentFlagGroup.joinToString(" "))
+            }
+        }
+        
+        return validFlags
+    }
+    
+    /**
+     * Извлекает проблемный флаг или аргумент из сообщения об ошибке
+     */
+    private fun extractProblematicFlag(errorMessage: String): String? {
+        // Паттерны для разных типов ошибок scrcpy
+        val patterns = listOf(
+            // scrcpy.exe: unknown option -- 123412
+            Regex("unknown option -- ([\\w-]+)"),
+            // ERROR: Unexpected additional argument: test
+            Regex("Unexpected additional argument:\\s*(.+)"),
+            // ERROR: Unknown option: --invalid-flag
+            Regex("Unknown option:\\s*(.+)"),
+            // ERROR: Unrecognized option: --bad-flag
+            Regex("Unrecognized option:\\s*(.+)"),
+            // ERROR: Could not parse: value
+            Regex("Could not parse:\\s*(.+)"),
+            // ERROR: Invalid value: something
+            Regex("Invalid value:\\s*(.+)"),
+            // Fallback для общего формата
+            Regex("unknown option[:\\s-]+(.+)")
+        )
+        
+        for (pattern in patterns) {
+            val match = pattern.find(errorMessage)
+            if (match != null) {
+                var flag = match.groupValues[1].trim()
+                // Если извлекли просто значение без дефисов, добавляем их для консистентности
+                if (!flag.startsWith("-") && flag.matches(Regex("^[\\w-]+$"))) {
+                    flag = "--$flag"
+                }
+                return flag
+            }
+        }
+        
+        return null
+    }
+    
+    /**
+     * Удаляет проблемный флаг из списка флагов
+     * Использует группировку флагов - удаляет всю группу, если она содержит проблемный элемент
+     */
+    private fun removeProblematicFlag(flags: List<String>, problematicFlag: String): List<String> {
+        val result = mutableListOf<String>()
+        var currentFlagGroup = mutableListOf<String>()
+        var groupContainsProblematic = false
+        
+        for (token in flags) {
+            // Если встретили новый флаг (начинается с -)
+            if (token.startsWith("-")) {
+                // Сохраняем предыдущую группу, если она не содержит проблемный элемент
+                if (currentFlagGroup.isNotEmpty() && !groupContainsProblematic) {
+                    result.addAll(currentFlagGroup)
+                }
+                
+                // Начинаем новую группу
+                currentFlagGroup = mutableListOf(token)
+                groupContainsProblematic = (token == problematicFlag || token.startsWith("$problematicFlag="))
+            }
+            // Это значение для текущего флага
+            else {
+                if (currentFlagGroup.isNotEmpty()) {
+                    currentFlagGroup.add(token)
+                    // Проверяем, является ли этот токен проблемным
+                    if (token == problematicFlag) {
+                        groupContainsProblematic = true
+                    }
+                } else {
+                    // Отдельный аргумент без флага - добавляем только если не проблемный
+                    if (token != problematicFlag) {
+                        result.add(token)
+                    }
+                }
+            }
+        }
+        
+        // Обрабатываем последнюю группу
+        if (currentFlagGroup.isNotEmpty() && !groupContainsProblematic) {
+            result.addAll(currentFlagGroup)
+        }
+        
+        return result
     }
 
     private fun launchScrcpyProcess(command: List<String>, adbPath: String, scrcpyPath: String, serialNumber: String): Boolean {
@@ -658,6 +882,15 @@ object ScrcpyService {
                             if (line.contains("unauthorized", ignoreCase = true) || 
                                 line.contains("Device is unauthorized", ignoreCase = true)) {
                                 unauthorizedDetected = true
+                            }
+                            // Проверяем на ошибки с флагами и сохраняем текст ошибки
+                            if (line.contains("Unexpected additional argument", ignoreCase = true) ||
+                                line.contains("Unknown option", ignoreCase = true) ||
+                                line.contains("Invalid", ignoreCase = true) ||
+                                line.contains("Could not parse", ignoreCase = true) ||
+                                line.contains("Unrecognized option", ignoreCase = true)) {
+                                lastLaunchResult = LaunchResult.INVALID_FLAGS
+                                lastInvalidFlagError = line
                             }
                         }
                     }
@@ -692,6 +925,13 @@ object ScrcpyService {
                 if (unauthorizedDetected) {
                     lastLaunchResult = LaunchResult.UNAUTHORIZED
                 }
+                // Если уже установлен INVALID_FLAGS, не перезаписываем
+                if (lastLaunchResult != LaunchResult.INVALID_FLAGS && exitCode != 0) {
+                    // Проверяем, возможно это проблема с флагами
+                    if (exitCode == 1 || exitCode == 2) {
+                        lastLaunchResult = LaunchResult.INVALID_FLAGS
+                    }
+                }
                 return exitCode == 0
             }
 
@@ -702,6 +942,12 @@ object ScrcpyService {
                 PluginLogger.info(LogCategory.SCRCPY, "Scrcpy process closed after startup. Exit code: %s", exitCode)
                 if (unauthorizedDetected) {
                     lastLaunchResult = LaunchResult.UNAUTHORIZED
+                }
+                // Если уже установлен INVALID_FLAGS, не перезаписываем
+                if (lastLaunchResult != LaunchResult.INVALID_FLAGS && exitCode != 0) {
+                    if (exitCode == 1 || exitCode == 2) {
+                        lastLaunchResult = LaunchResult.INVALID_FLAGS
+                    }
                 }
                 return exitCode == 0
             }

@@ -710,17 +710,17 @@ object AdbService {
                         PluginLogger.info("Device WiFi SSID: %s", deviceSSID ?: "Not connected")
                         
                         if (deviceSSID != hostSSID) {
-                            // Нужно переключить сеть - проверяем root
+                            // Нужно переключить сеть - проверяем root доступ
                             val hasRoot = WifiNetworkServiceOptimized.hasRootAccess(device)
                             
                             if (!hasRoot) {
-                                // Нет root - показываем информативное сообщение и прерываем подключение
+                                // Нет root - требуется ручное переключение (Shizuku не помогает с Wi-Fi)
                                 PluginLogger.info("Device needs manual WiFi switch from '%s' to '%s' (no root access)", 
                                     deviceSSID ?: "unknown", hostSSID)
                                 
                                 NotificationUtils.showWarning(
                                     "Manual Wi-Fi Switch Required",
-                                    String.format("Please switch device to '%s' network (currently on '%s')", 
+                                    String.format("Please switch device to '%s' network (currently on '%s'). Root access required for automatic switching.", 
                                         hostSSID, deviceSSID ?: "unknown")
                                 )
                                 // Выбрасываем специальное исключение для прерывания подключения
@@ -730,7 +730,7 @@ object AdbService {
                             }
                             
                             // Есть root - автоматически переключаем
-                            PluginLogger.info("Switching device to host WiFi network: %s", hostSSID)
+                            PluginLogger.info("Switching device to host WiFi network '%s' using root access", hostSSID)
                             val switchResult = WifiNetworkServiceOptimized.switchDeviceToWifiFast(device, hostSSID)
                             
                             switchResult.onError { exception, message ->

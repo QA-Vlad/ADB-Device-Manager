@@ -16,7 +16,7 @@ import java.time.format.DateTimeFormatter
 object LoggingController {
     private val logger = Logger.getInstance("ADB_Randomizer")
     private const val PREFIX = "ADB_Randomizer"
-    private val config = LoggingConfiguration.getInstance()
+    private val config by lazy { LoggingConfiguration.getInstance() }
     private val consoleFormatter = DateTimeFormatter.ofPattern("HH:mm:ss.SSS")
     
     /**

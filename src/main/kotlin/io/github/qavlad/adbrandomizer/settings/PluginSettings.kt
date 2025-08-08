@@ -25,6 +25,9 @@ class PluginSettings : PersistentStateComponent<PluginSettings> {
     // Настройка для включения режима отладки
     var debugMode: Boolean = false
     
+    // Пользовательские флаги для scrcpy
+    var scrcpyCustomFlags: String = "--show-touches --stay-awake --always-on-top"
+    
     override fun getState(): PluginSettings = this
     
     override fun loadState(state: PluginSettings) {

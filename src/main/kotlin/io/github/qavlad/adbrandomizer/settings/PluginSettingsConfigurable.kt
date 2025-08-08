@@ -5,13 +5,20 @@ import com.intellij.openapi.ui.VerticalFlowLayout
 import com.intellij.ui.JBColor
 import com.intellij.ui.components.JBCheckBox
 import com.intellij.ui.components.JBPanel
+import com.intellij.ui.components.JBTextField
 import com.intellij.util.ui.JBUI
 import io.github.qavlad.adbrandomizer.utils.AndroidStudioDetector
 import io.github.qavlad.adbrandomizer.utils.FileLogger
 import io.github.qavlad.adbrandomizer.services.PluginResetService
+import java.awt.Cursor
 import java.awt.Desktop
 import java.awt.FlowLayout
+import java.awt.event.MouseAdapter
+import java.awt.event.MouseEvent
+import java.net.URI
 import javax.swing.*
+import javax.swing.event.DocumentEvent
+import javax.swing.event.DocumentListener
 
 class PluginSettingsConfigurable : Configurable {
     private var settingsPanel: PluginSettingsPanel? = null
@@ -55,12 +62,24 @@ class PluginSettingsPanel : JBPanel<PluginSettingsPanel>(VerticalFlowLayout(Vert
         toolTipText = "When enabled, the currently active app will be restarted after resolution change (excluding system apps and launchers)"
     }
     
-    private val autoSwitchWifiCheckBox = JBCheckBox("Automatically switch device to PC's Wi-Fi network when connecting (root only)").apply {
-        toolTipText = "When enabled, the device will automatically switch to the same Wi-Fi network as your PC before establishing Wi-Fi connection. REQUIRES ROOT ACCESS on the device. Non-root devices will see instructions for manual switching."
+    private val autoSwitchWifiCheckBox = JBCheckBox("Automatically switch device to PC's Wi-Fi network when connecting (requires root)").apply {
+        toolTipText = "When enabled, the device will automatically switch to the same Wi-Fi network as your PC before establishing Wi-Fi connection. REQUIRES ROOT ACCESS on the device. Non-root devices will be shown Wi-Fi settings for manual switching."
     }
     
     private val debugModeCheckBox = JBCheckBox("Enable debug mode (writes logs to file)").apply {
         toolTipText = "When enabled, all plugin logs will be written to files in the plugin directory"
+    }
+    
+    private val scrcpyFlagsField = JBTextField().apply {
+        toolTipText = """<html>
+            Command line flags for scrcpy.<br>
+            <b>Example:</b> --show-touches --stay-awake --always-on-top<br>
+            <b>Note:</b> Use only valid scrcpy flags starting with -- or -<br>
+            Invalid flags will be ignored and defaults will be used.
+        </html>""".trimIndent()
+        
+        // Добавляем обработку фокуса для лучшего UX
+        putClientProperty("JTextField.clearButton.visible", true) // Показываем кнопку очистки если поддерживается
     }
     
     private val openLogsButton = JButton("Open Logs Folder").apply {
@@ -76,6 +95,7 @@ class PluginSettingsPanel : JBPanel<PluginSettingsPanel>(VerticalFlowLayout(Vert
     init {
         createUI()
         setupListeners()
+        setupFocusHandling()
         reset()
     }
     
@@ -93,6 +113,131 @@ class PluginSettingsPanel : JBPanel<PluginSettingsPanel>(VerticalFlowLayout(Vert
         }
         
         mirroringPanel.add(restartActiveAppCheckBox)
+        
+        // scrcpy flags settings
+        val scrcpyFlagsLabel = JLabel("scrcpy command line flags:").apply {
+            border = JBUI.Borders.empty(10, 0, 5, 0)
+        }
+        mirroringPanel.add(scrcpyFlagsLabel)
+        
+        mirroringPanel.add(scrcpyFlagsField)
+        
+        // Validation label for flags
+        val flagsValidationLabel = JLabel().apply {
+            foreground = JBColor.RED
+            border = JBUI.Borders.empty(2, 0, 5, 0)
+            isVisible = false
+        }
+        mirroringPanel.add(flagsValidationLabel)
+        
+        // Add validation listener
+        scrcpyFlagsField.document.addDocumentListener(object : DocumentListener {
+            override fun insertUpdate(e: DocumentEvent) = validateFlags()
+            override fun removeUpdate(e: DocumentEvent) = validateFlags()
+            override fun changedUpdate(e: DocumentEvent) = validateFlags()
+            
+            fun validateFlags() {
+                val flags = scrcpyFlagsField.text.trim()
+                if (flags.isNotBlank()) {
+                    val tokens = flags.split("\\s+".toRegex())
+                    val invalidGroups = mutableListOf<String>()
+                    
+                    // Разрешенные символы: латинские буквы, цифры, дефис, подчёркивание, точка, слэш, двоеточие, знак равно
+                    val validPattern = Regex("^[a-zA-Z0-9\\-_./:=x]+$")
+                    
+                    var currentFlagGroup = mutableListOf<String>()
+                    var groupHasInvalidToken = false
+                    
+                    for (token in tokens) {
+                        if (token.isBlank()) continue
+                        
+                        // Если встретили новый флаг (начинается с -)
+                        if (token.startsWith("-")) {
+                            // Сохраняем предыдущую группу, если она была невалидной
+                            if (currentFlagGroup.isNotEmpty() && groupHasInvalidToken) {
+                                invalidGroups.add(currentFlagGroup.joinToString(" "))
+                            }
+                            
+                            // Начинаем новую группу
+                            currentFlagGroup = mutableListOf(token)
+                            groupHasInvalidToken = false
+                            
+                            // Проверяем валидность самого флага
+                            if (!token.matches(validPattern)) {
+                                groupHasInvalidToken = true
+                            } else {
+                                // Флаг должен иметь хотя бы один символ после дефиса(ов)
+                                val flagContent = token.removePrefix("--").removePrefix("-")
+                                if (flagContent.isEmpty() || flagContent == "-") {
+                                    groupHasInvalidToken = true
+                                } else if (flagContent.matches(Regex("^[0-9]+$"))) {
+                                    // Флаг не может состоять только из цифр
+                                    groupHasInvalidToken = true
+                                }
+                            }
+                        }
+                        // Это значение для текущего флага
+                        else {
+                            // Если нет текущего флага, это отдельный невалидный токен
+                            if (currentFlagGroup.isEmpty()) {
+                                invalidGroups.add(token)
+                            } else {
+                                // Добавляем к текущей группе
+                                currentFlagGroup.add(token)
+                                // Проверяем валидность токена
+                                if (!token.matches(validPattern)) {
+                                    groupHasInvalidToken = true
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Обрабатываем последнюю группу
+                    if (currentFlagGroup.isNotEmpty() && groupHasInvalidToken) {
+                        invalidGroups.add(currentFlagGroup.joinToString(" "))
+                    }
+                    
+                    if (invalidGroups.isNotEmpty()) {
+                        flagsValidationLabel.text = "⚠ Invalid arguments: ${invalidGroups.joinToString(", ")}"
+                        flagsValidationLabel.isVisible = true
+                    } else {
+                        flagsValidationLabel.isVisible = false
+                    }
+                } else {
+                    flagsValidationLabel.isVisible = false
+                }
+            }
+        })
+        
+        // Documentation link
+        val docsLink = JLabel("<html><a href=''>View scrcpy documentation</a></html>").apply {
+            foreground = JBColor.BLUE
+            cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+            toolTipText = "Opens scrcpy documentation on GitHub"
+            
+            addMouseListener(object : MouseAdapter() {
+                override fun mouseClicked(e: MouseEvent) {
+                    try {
+                        Desktop.getDesktop().browse(URI("https://github.com/Genymobile/scrcpy/blob/master/README.md#features"))
+                    } catch (ex: Exception) {
+                        JOptionPane.showMessageDialog(
+                            this@PluginSettingsPanel,
+                            "Failed to open documentation: ${ex.message}",
+                            "Error",
+                            JOptionPane.ERROR_MESSAGE
+                        )
+                    }
+                }
+            })
+        }
+        
+        // Создаём панель для ссылки, чтобы она не растягивалась на всю ширину
+        val docsLinkPanel = JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
+            border = JBUI.Borders.emptyTop(5)
+            isOpaque = false
+            add(docsLink)
+        }
+        mirroringPanel.add(docsLinkPanel)
         
         add(mirroringPanel)
         
@@ -140,6 +285,40 @@ class PluginSettingsPanel : JBPanel<PluginSettingsPanel>(VerticalFlowLayout(Vert
         resetPanel.add(resetButtonPanel)
         
         add(resetPanel)
+    }
+    
+    private fun setupFocusHandling() {
+        // Добавляем обработчик клика на основную панель для снятия фокуса с текстовых полей
+        val mouseListener = object : MouseAdapter() {
+            override fun mousePressed(e: MouseEvent) {
+                // Если клик не на текстовом поле, снимаем с него фокус
+                val source = e.source
+                if (source != scrcpyFlagsField) {
+                    // Переводим фокус на панель
+                    this@PluginSettingsPanel.requestFocusInWindow()
+                }
+            }
+        }
+        
+        // Добавляем слушатель на все панели
+        this.addMouseListener(mouseListener)
+        
+        // Рекурсивно добавляем слушатель на все дочерние компоненты кроме текстовых полей и кнопок
+        fun addListenerRecursively(component: java.awt.Component) {
+            if (component is JPanel) {
+                component.addMouseListener(mouseListener)
+                for (child in component.components) {
+                    if (child !is JTextField && child !is JButton && child !is JCheckBox) {
+                        addListenerRecursively(child)
+                    }
+                }
+            }
+        }
+        
+        addListenerRecursively(this)
+        
+        // Делаем панель фокусируемой
+        this.isFocusable = true
     }
     
     private fun setupListeners() {
@@ -219,6 +398,7 @@ Are you sure you want to continue?""",
         modified = modified || restartActiveAppCheckBox.isSelected != settings.restartActiveAppOnResolutionChange
         modified = modified || autoSwitchWifiCheckBox.isSelected != settings.autoSwitchToHostWifi
         modified = modified || debugModeCheckBox.isSelected != settings.debugMode
+        modified = modified || scrcpyFlagsField.text != settings.scrcpyCustomFlags
         return modified
     }
     
@@ -229,6 +409,7 @@ Are you sure you want to continue?""",
         }
         settings.restartActiveAppOnResolutionChange = restartActiveAppCheckBox.isSelected
         settings.autoSwitchToHostWifi = autoSwitchWifiCheckBox.isSelected
+        settings.scrcpyCustomFlags = scrcpyFlagsField.text
         
         val debugModeChanged = settings.debugMode != debugModeCheckBox.isSelected
         settings.debugMode = debugModeCheckBox.isSelected
@@ -247,6 +428,7 @@ Are you sure you want to continue?""",
         restartActiveAppCheckBox.isSelected = settings.restartActiveAppOnResolutionChange
         autoSwitchWifiCheckBox.isSelected = settings.autoSwitchToHostWifi
         debugModeCheckBox.isSelected = settings.debugMode
+        scrcpyFlagsField.text = settings.scrcpyCustomFlags
         openLogsButton.isEnabled = settings.debugMode
     }
 }
