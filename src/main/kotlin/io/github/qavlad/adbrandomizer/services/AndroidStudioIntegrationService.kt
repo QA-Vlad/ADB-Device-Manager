@@ -34,10 +34,19 @@ class AndroidStudioIntegrationService {
     
     /**
      * Checks if Running Devices is active for the given device
+     * @deprecated Use hasActiveDeviceTab() for more accurate check
      */
     fun isRunningDevicesActive(device: IDevice): Boolean {
         if (!AndroidStudioDetector.isAndroidStudio()) return false
         return runningDevicesManager.isRunningDevicesActive(device)
+    }
+    
+    /**
+     * Checks if Running Devices has an active tab for the given device
+     */
+    fun hasActiveDeviceTab(device: IDevice): Boolean {
+        if (!AndroidStudioDetector.isAndroidStudio()) return false
+        return runningDevicesManager.hasActiveDeviceTab(device)
     }
     
     /**

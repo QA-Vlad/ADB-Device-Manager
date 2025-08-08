@@ -3,7 +3,7 @@ package io.github.qavlad.adbrandomizer.utils.logging
 enum class LogCategory(val displayName: String, val defaultLevel: LogLevel) {
     GENERAL("General", LogLevel.INFO),
     TABLE_OPERATIONS("Table Operations", LogLevel.WARN),
-    PRESET_SERVICE("Preset Service", LogLevel.WARN),
+    PRESET_SERVICE("Preset Service", LogLevel.INFO),
     SYNC_OPERATIONS("Sync Operations", LogLevel.WARN),
     UI_EVENTS("UI Events", LogLevel.WARN),
     SCRCPY("Scrcpy", LogLevel.INFO),
