@@ -7,6 +7,7 @@ import io.github.qavlad.adbrandomizer.services.integration.androidstudio.constan
 import io.github.qavlad.adbrandomizer.services.integration.androidstudio.ui.ActionExecutor
 import io.github.qavlad.adbrandomizer.services.integration.androidstudio.ui.ComponentFinder
 import io.github.qavlad.adbrandomizer.services.integration.androidstudio.ui.DeviceSelector
+import io.github.qavlad.adbrandomizer.ui.dialogs.DialogTracker
 import io.github.qavlad.adbrandomizer.utils.AndroidStudioDetector
 import io.github.qavlad.adbrandomizer.utils.ConsoleLogger
 import io.github.qavlad.adbrandomizer.utils.NotificationUtils
@@ -131,6 +132,32 @@ class RunningDevicesManager {
         
         val serialNumber = device.serialNumber
         
+        // Логируем начало процесса перезапуска
+        PluginLogger.info(LogCategory.ANDROID_STUDIO, 
+            "RUNNING_DEVICES: Starting restart process for device: %s", serialNumber
+        )
+        ConsoleLogger.logRunningDevices("Starting restart process for device: $serialNumber")
+        
+        // Проверяем, открыт ли диалог пресетов
+        val isDialogOpen = DialogTracker.isPresetsDialogOpen()
+        PluginLogger.info(LogCategory.ANDROID_STUDIO, 
+            "RUNNING_DEVICES: PresetsDialog is open: %s", isDialogOpen
+        )
+        
+        // Закрываем диалог пресетов, если он открыт
+        if (DialogTracker.closePresetsDialogIfOpen()) {
+            PluginLogger.info(LogCategory.ANDROID_STUDIO, 
+                "RUNNING_DEVICES: Successfully closed PresetsDialog before restart"
+            )
+            ConsoleLogger.logRunningDevices("Closed PresetsDialog before Running Devices restart")
+            // Даем немного времени для завершения закрытия
+            Thread.sleep(AndroidStudioConstants.SHORT_DELAY)
+        } else {
+            PluginLogger.info(LogCategory.ANDROID_STUDIO, 
+                "RUNNING_DEVICES: PresetsDialog was not open or already closed"
+            )
+        }
+        
         // First check if there's an active tab for this device
         if (!hasActiveDeviceTab(device)) {
             ConsoleLogger.logRunningDevices("No active tab for device $serialNumber in Running Devices, skipping restart")
@@ -175,7 +202,39 @@ class RunningDevicesManager {
     fun restartRunningDevicesForMultiple(devices: List<IDevice>): Boolean {
         if (!AndroidStudioDetector.isAndroidStudio() || devices.isEmpty()) return false
         
+        // Логируем начало процесса
+        PluginLogger.info(LogCategory.ANDROID_STUDIO, 
+            "RUNNING_DEVICES: Starting restart for %d devices", devices.size
+        )
         ConsoleLogger.logRunningDevices("Attempting to restart Running Devices for ${devices.size} devices")
+        
+        // Проверяем и закрываем диалог пресетов
+        val isDialogOpen = DialogTracker.isPresetsDialogOpen()
+        PluginLogger.info(LogCategory.ANDROID_STUDIO, 
+            "RUNNING_DEVICES: PresetsDialog is open: %s", isDialogOpen
+        )
+        
+        // Всегда пытаемся закрыть, независимо от isDialogOpen
+        PluginLogger.info(LogCategory.ANDROID_STUDIO, 
+            "RUNNING_DEVICES: Calling closePresetsDialogIfOpen()"
+        )
+        val dialogClosed = DialogTracker.closePresetsDialogIfOpen()
+        PluginLogger.info(LogCategory.ANDROID_STUDIO, 
+            "RUNNING_DEVICES: closePresetsDialogIfOpen() returned: %s", dialogClosed
+        )
+        
+        if (dialogClosed) {
+            PluginLogger.info(LogCategory.ANDROID_STUDIO, 
+                "RUNNING_DEVICES: Successfully closed PresetsDialog before multiple devices restart"
+            )
+            ConsoleLogger.logRunningDevices("Closed PresetsDialog before Running Devices restart")
+            // Даем немного времени для завершения закрытия
+            Thread.sleep(AndroidStudioConstants.MEDIUM_DELAY) // Больше времени для множественного перезапуска
+        } else {
+            PluginLogger.info(LogCategory.ANDROID_STUDIO, 
+                "RUNNING_DEVICES: PresetsDialog was not closed (was not open or failed to close)"
+            )
+        }
         
         // Filter devices that have active tabs
         val devicesWithTabs = devices.filter { device ->

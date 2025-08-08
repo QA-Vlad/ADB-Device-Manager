@@ -27,12 +27,26 @@ class PresetsDialog(project: Project?) : DialogWrapper(project) {
     
     private val controller = PresetsDialogController(project, this)
     private var orientationPanel: OrientationPanel? = null
+    
+    /**
+     * Восстанавливает оригинальное состояние диалога без сохранения изменений
+     * Используется при принудительном закрытии диалога
+     */
+    fun restoreStateAndClose() {
+        controller.restoreOriginalState()
+        DialogTracker.unregisterPresetsDialog()
+    }
 
     init {
-        PluginLogger.debug(LogCategory.UI_EVENTS, "PresetsDialog constructor called")
+        PluginLogger.info(LogCategory.UI_EVENTS, "PresetsDialog: Constructor called")
         title = "ADB Randomizer Presets"
         setOKButtonText("Save")
         init()
+        
+        // Регистрируем диалог в трекере
+        PluginLogger.info(LogCategory.UI_EVENTS, "PresetsDialog: Registering in DialogTracker")
+        DialogTracker.registerPresetsDialog(this)
+        PluginLogger.info(LogCategory.UI_EVENTS, "PresetsDialog: Registration complete")
         
         // Инициализируем контроллер после создания диалога
         SwingUtilities.invokeLater {
@@ -132,12 +146,14 @@ class PresetsDialog(project: Project?) : DialogWrapper(project) {
     override fun doOKAction() {
         controller.saveSettings(orientationPanel)
         controller.dispose()
+        DialogTracker.unregisterPresetsDialog()
         super.doOKAction()
     }
 
     override fun doCancelAction() {
         controller.restoreOriginalState()
         controller.dispose()
+        DialogTracker.unregisterPresetsDialog()
         super.doCancelAction()
     }
     
