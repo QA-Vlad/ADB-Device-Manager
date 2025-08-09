@@ -43,17 +43,47 @@ object ScrcpyService {
     private val recentlyStartedProcesses = mutableMapOf<Long, String>() // PID -> serialNumber
 
     fun findScrcpyExecutable(): String? {
+        // 1. Проверяем путь из настроек плагина (если пользователь явно задал)
+        val settingsPath = PluginSettings.instance.scrcpyPath
+        if (settingsPath.isNotBlank()) {
+            val file = File(settingsPath)
+            
+            // Если это папка, ищем scrcpy внутри
+            if (file.isDirectory) {
+                val scrcpyInDir = File(file, scrcpyName)
+                if (scrcpyInDir.exists() && scrcpyInDir.canExecute()) {
+                    PluginLogger.debug(LogCategory.SCRCPY, "Found scrcpy in settings directory: %s", scrcpyInDir.absolutePath)
+                    return scrcpyInDir.absolutePath
+                }
+            }
+            // Если это файл, проверяем что он исполняемый
+            else if (file.isFile && file.canExecute()) {
+                PluginLogger.debug(LogCategory.SCRCPY, "Using scrcpy from settings: %s", file.absolutePath)
+                return file.absolutePath
+            }
+        }
+        
+        // 2. Проверяем старый сохраненный путь (для обратной совместимости)
         val savedPath = PresetStorageService.getScrcpyPath()
         if (savedPath != null && File(savedPath).canExecute()) {
+            // Мигрируем в новые настройки
+            PluginSettings.instance.scrcpyPath = savedPath
+            PluginLogger.debug(LogCategory.SCRCPY, "Migrated scrcpy path from old storage: %s", savedPath)
             return savedPath
         }
 
+        // 3. Ищем в системном PATH (при первом запуске или если путь не задан)
         val pathFromSystem = AdbPathResolver.findExecutableInSystemPath(scrcpyName)
         if (pathFromSystem != null) {
+            PluginLogger.debug(LogCategory.SCRCPY, "Found scrcpy in system PATH: %s", pathFromSystem)
+            // Сохраняем найденный путь в оба места для синхронизации
             PresetStorageService.saveScrcpyPath(pathFromSystem)
+            PluginSettings.instance.scrcpyPath = pathFromSystem
             return pathFromSystem
         }
 
+        // Если ничего не нашли - путь остаётся пустым в настройках
+        PluginLogger.warn(LogCategory.SCRCPY, "scrcpy executable not found")
         return null
     }
     

@@ -1,5 +1,7 @@
 package io.github.qavlad.adbrandomizer.settings
 
+import com.intellij.openapi.fileChooser.FileChooser
+import com.intellij.openapi.fileChooser.FileChooserDescriptor
 import com.intellij.openapi.options.Configurable
 import com.intellij.openapi.ui.VerticalFlowLayout
 import com.intellij.ui.JBColor
@@ -10,11 +12,13 @@ import com.intellij.util.ui.JBUI
 import io.github.qavlad.adbrandomizer.utils.AndroidStudioDetector
 import io.github.qavlad.adbrandomizer.utils.FileLogger
 import io.github.qavlad.adbrandomizer.services.PluginResetService
+import io.github.qavlad.adbrandomizer.services.PresetStorageService
 import java.awt.Cursor
 import java.awt.Desktop
 import java.awt.FlowLayout
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
+import java.io.File
 import java.net.URI
 import javax.swing.*
 import javax.swing.event.DocumentEvent
@@ -70,6 +74,21 @@ class PluginSettingsPanel : JBPanel<PluginSettingsPanel>(VerticalFlowLayout(Vert
         toolTipText = "When enabled, all plugin logs will be written to files in the plugin directory"
     }
     
+    private val scrcpyPathField = JBTextField().apply {
+        toolTipText = """<html>
+            Path to scrcpy executable or folder containing scrcpy.<br>
+            <b>Examples:</b><br>
+            • C:\scrcpy\scrcpy.exe (path to executable)<br>
+            • C:\scrcpy\ (path to folder)<br>
+            • /usr/local/bin/scrcpy (Linux/Mac)<br>
+            Leave empty to use scrcpy from system PATH.
+        </html>""".trimIndent()
+    }
+    
+    private val scrcpyPathButton = JButton("Browse...").apply {
+        toolTipText = "Select scrcpy executable or folder"
+    }
+    
     private val scrcpyFlagsField = JBTextField().apply {
         toolTipText = """<html>
             Command line flags for scrcpy.<br>
@@ -113,6 +132,23 @@ class PluginSettingsPanel : JBPanel<PluginSettingsPanel>(VerticalFlowLayout(Vert
         }
         
         mirroringPanel.add(restartActiveAppCheckBox)
+        
+        // scrcpy path settings
+        val scrcpyPathLabel = JLabel("scrcpy executable path:").apply {
+            border = JBUI.Borders.empty(10, 0, 5, 0)
+        }
+        mirroringPanel.add(scrcpyPathLabel)
+        
+        // Panel for path field and browse button
+        val scrcpyPathPanel = JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
+            isOpaque = false
+            add(scrcpyPathField.apply {
+                preferredSize = JBUI.size(400, 30)
+            })
+            add(Box.createHorizontalStrut(5))
+            add(scrcpyPathButton)
+        }
+        mirroringPanel.add(scrcpyPathPanel)
         
         // scrcpy flags settings
         val scrcpyFlagsLabel = JLabel("scrcpy command line flags:").apply {
@@ -293,7 +329,7 @@ class PluginSettingsPanel : JBPanel<PluginSettingsPanel>(VerticalFlowLayout(Vert
             override fun mousePressed(e: MouseEvent) {
                 // Если клик не на текстовом поле, снимаем с него фокус
                 val source = e.source
-                if (source != scrcpyFlagsField) {
+                if (source != scrcpyFlagsField && source != scrcpyPathField) {
                     // Переводим фокус на панель
                     this@PluginSettingsPanel.requestFocusInWindow()
                 }
@@ -325,6 +361,97 @@ class PluginSettingsPanel : JBPanel<PluginSettingsPanel>(VerticalFlowLayout(Vert
         // Enable/disable open logs button based on debug mode checkbox
         debugModeCheckBox.addChangeListener {
             openLogsButton.isEnabled = debugModeCheckBox.isSelected
+        }
+        
+        // Browse button for scrcpy path
+        scrcpyPathButton.addActionListener {
+            val isWindows = System.getProperty("os.name").startsWith("Windows")
+            val descriptor = FileChooserDescriptor(true, true, false, false, false, false).apply {
+                title = "Select Scrcpy Executable Or Folder"
+                description = "Select the scrcpy executable file or the folder containing it"
+                
+                // On Windows, filter for .exe files and folders
+                if (isWindows) {
+                    withFileFilter { virtualFile ->
+                        virtualFile.isDirectory || virtualFile.name.equals("scrcpy.exe", ignoreCase = true)
+                    }
+                }
+            }
+            
+            // Определяем начальную директорию для диалога
+            val initialDir = if (scrcpyPathField.text.isNotBlank()) {
+                val currentPath = File(scrcpyPathField.text)
+                when {
+                    currentPath.isFile && currentPath.parentFile != null -> {
+                        // Если это файл, берём родительскую директорию родительской директории (на уровень выше)
+                        currentPath.parentFile.parentFile ?: currentPath.parentFile
+                    }
+                    currentPath.isDirectory && currentPath.parentFile != null -> {
+                        // Если это директория, берём её родительскую директорию
+                        currentPath.parentFile
+                    }
+                    else -> null
+                }
+            } else {
+                null
+            }
+            
+            val initialVirtualFile = initialDir?.let { dir ->
+                if (dir.exists() && dir.isDirectory) {
+                    com.intellij.openapi.vfs.LocalFileSystem.getInstance().findFileByIoFile(dir)
+                } else {
+                    null
+                }
+            }
+            
+            val chosenFile = FileChooser.chooseFile(descriptor, null, initialVirtualFile)
+            if (chosenFile != null) {
+                val path = chosenFile.path
+                // Validate the selected path
+                val file = File(path)
+                when {
+                    file.isDirectory -> {
+                        // If it's a directory, check if it contains scrcpy
+                        val scrcpyExe = if (isWindows) {
+                            File(file, "scrcpy.exe")
+                        } else {
+                            File(file, "scrcpy")
+                        }
+                        
+                        if (scrcpyExe.exists() && scrcpyExe.canExecute()) {
+                            scrcpyPathField.text = path
+                        } else {
+                            JOptionPane.showMessageDialog(
+                                this,
+                                "The selected folder does not contain a valid scrcpy executable",
+                                "Invalid Path",
+                                JOptionPane.WARNING_MESSAGE
+                            )
+                        }
+                    }
+                    file.isFile -> {
+                        // If it's a file, check if it's an executable
+                        if (file.canExecute() || (isWindows && file.name.endsWith(".exe", ignoreCase = true))) {
+                            scrcpyPathField.text = path
+                        } else {
+                            JOptionPane.showMessageDialog(
+                                this,
+                                "The selected file is not an executable",
+                                "Invalid File",
+                                JOptionPane.WARNING_MESSAGE
+                            )
+                        }
+                    }
+                    else -> {
+                        JOptionPane.showMessageDialog(
+                            this,
+                            "The selected path does not exist",
+                            "Invalid Path",
+                            JOptionPane.WARNING_MESSAGE
+                        )
+                    }
+                }
+            }
         }
         
         // Open logs folder when button clicked
@@ -398,6 +525,7 @@ Are you sure you want to continue?""",
         modified = modified || restartActiveAppCheckBox.isSelected != settings.restartActiveAppOnResolutionChange
         modified = modified || autoSwitchWifiCheckBox.isSelected != settings.autoSwitchToHostWifi
         modified = modified || debugModeCheckBox.isSelected != settings.debugMode
+        modified = modified || scrcpyPathField.text != settings.scrcpyPath
         modified = modified || scrcpyFlagsField.text != settings.scrcpyCustomFlags
         return modified
     }
@@ -409,6 +537,7 @@ Are you sure you want to continue?""",
         }
         settings.restartActiveAppOnResolutionChange = restartActiveAppCheckBox.isSelected
         settings.autoSwitchToHostWifi = autoSwitchWifiCheckBox.isSelected
+        settings.scrcpyPath = scrcpyPathField.text
         settings.scrcpyCustomFlags = scrcpyFlagsField.text
         
         val debugModeChanged = settings.debugMode != debugModeCheckBox.isSelected
@@ -428,6 +557,16 @@ Are you sure you want to continue?""",
         restartActiveAppCheckBox.isSelected = settings.restartActiveAppOnResolutionChange
         autoSwitchWifiCheckBox.isSelected = settings.autoSwitchToHostWifi
         debugModeCheckBox.isSelected = settings.debugMode
+        
+        // Синхронизируем путь scrcpy из старого хранилища если нужно
+        if (settings.scrcpyPath.isBlank()) {
+            val oldPath = PresetStorageService.getScrcpyPath()
+            if (oldPath != null && File(oldPath).exists()) {
+                settings.scrcpyPath = oldPath
+            }
+        }
+        
+        scrcpyPathField.text = settings.scrcpyPath
         scrcpyFlagsField.text = settings.scrcpyCustomFlags
         openLogsButton.isEnabled = settings.debugMode
     }

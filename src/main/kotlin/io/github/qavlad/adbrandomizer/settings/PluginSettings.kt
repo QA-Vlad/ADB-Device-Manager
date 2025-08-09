@@ -28,6 +28,9 @@ class PluginSettings : PersistentStateComponent<PluginSettings> {
     // Пользовательские флаги для scrcpy
     var scrcpyCustomFlags: String = "--show-touches --stay-awake --always-on-top"
     
+    // Путь к scrcpy (может быть путь к exe файлу или к папке)
+    var scrcpyPath: String = ""
+    
     override fun getState(): PluginSettings = this
     
     override fun loadState(state: PluginSettings) {

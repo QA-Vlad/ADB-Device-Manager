@@ -12,6 +12,7 @@ import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.UIUtil
 import io.github.qavlad.adbrandomizer.config.PluginConfig
 import io.github.qavlad.adbrandomizer.services.PresetStorageService
+import io.github.qavlad.adbrandomizer.settings.PluginSettings
 import io.github.qavlad.adbrandomizer.utils.ButtonUtils
 import java.awt.*
 import java.io.File
@@ -280,10 +281,40 @@ class ScrcpyCompatibilityDialog(
 
     private fun selectScrcpyFileOrFolder(): String? {
         val descriptor = FileChooserDescriptor(true, true, false, false, false, false)
-            .withTitle("Select Scrcpy Executable or Its Containing Folder")
+            .withTitle("Select Scrcpy Executable Or Its Containing Folder")
             .withDescription("Please locate the '$scrcpyName' file or the folder where it resides.")
 
-        val chosenFile: VirtualFile? = FileChooser.chooseFile(descriptor, project, null)
+        // Определяем начальную директорию на основе текущего сохраненного пути
+        val currentPath = PluginSettings.instance.scrcpyPath.ifBlank {
+            PresetStorageService.getScrcpyPath()
+        }
+        
+        val initialDir = if (!currentPath.isNullOrBlank()) {
+            val path = File(currentPath)
+            when {
+                path.isFile && path.parentFile != null -> {
+                    // Если это файл, берём родительскую директорию родительской директории
+                    path.parentFile.parentFile ?: path.parentFile
+                }
+                path.isDirectory && path.parentFile != null -> {
+                    // Если это директория, берём её родительскую директорию
+                    path.parentFile
+                }
+                else -> null
+            }
+        } else {
+            null
+        }
+        
+        val initialVirtualFile = initialDir?.let { dir ->
+            if (dir.exists() && dir.isDirectory) {
+                com.intellij.openapi.vfs.LocalFileSystem.getInstance().findFileByIoFile(dir)
+            } else {
+                null
+            }
+        }
+
+        val chosenFile: VirtualFile? = FileChooser.chooseFile(descriptor, project, initialVirtualFile)
 
         if (chosenFile == null) return null
 
@@ -326,7 +357,9 @@ class ScrcpyCompatibilityDialog(
             }
 
             if (isValidScrcpyPath(resolvedScrcpyPath)) {
+                // Сохраняем путь в оба места для синхронизации
                 PresetStorageService.saveScrcpyPath(resolvedScrcpyPath)
+                PluginSettings.instance.scrcpyPath = resolvedScrcpyPath
                 SwingUtilities.invokeLater {
                     close(RETRY_EXIT_CODE)
                 }
