@@ -17,6 +17,7 @@ import io.github.qavlad.adbrandomizer.services.PluginResetService
 import io.github.qavlad.adbrandomizer.services.PresetStorageService
 import java.awt.Cursor
 import java.awt.Desktop
+import java.awt.Dimension
 import java.awt.FlowLayout
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
@@ -56,7 +57,7 @@ class PluginSettingsConfigurable : SearchableConfigurable {
     }
 }
 
-class PluginSettingsPanel() : JBPanel<PluginSettingsPanel>() {
+class PluginSettingsPanel : JBPanel<PluginSettingsPanel>(VerticalFlowLayout(VerticalFlowLayout.TOP, 0, 0, true, false)) {
     private val settings = PluginSettings.instance
     
     private val restartScrcpyCheckBox = JBCheckBox("Automatically restart scrcpy when screen resolution changes").apply {
@@ -124,6 +125,10 @@ class PluginSettingsPanel() : JBPanel<PluginSettingsPanel>() {
     }
     
     init {
+        // Set max width for the panel to prevent it from stretching too much
+        preferredSize = JBUI.size(600, -1)
+        maximumSize = Dimension(700, Integer.MAX_VALUE)
+        
         createUI()
         setupListeners()
         setupFocusHandling()
@@ -336,8 +341,10 @@ class PluginSettingsPanel() : JBPanel<PluginSettingsPanel>() {
         // Panel for path field and browse button
         val scrcpyPathPanel = JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
             isOpaque = false
+            maximumSize = Dimension(Integer.MAX_VALUE, 35)
             add(scrcpyPathField.apply {
-                preferredSize = JBUI.size(400, 30)
+                preferredSize = JBUI.size(300, 30)
+                maximumSize = JBUI.size(350, 30)
             })
             add(Box.createHorizontalStrut(5))
             add(scrcpyPathButton)
@@ -353,7 +360,10 @@ class PluginSettingsPanel() : JBPanel<PluginSettingsPanel>() {
         }
         mirroringPanel.add(scrcpyFlagsLabel)
         
-        mirroringPanel.add(scrcpyFlagsField)
+        mirroringPanel.add(scrcpyFlagsField.apply {
+            preferredSize = JBUI.size(350, 30)
+            maximumSize = JBUI.size(400, 30)
+        })
         
         // Validation label for flags
         val flagsValidationLabel = JLabel().apply {
