@@ -66,8 +66,8 @@ object PluginLogger {
         info(LogCategory.ADB_CONNECTION, "Wi-Fi connection successful: %s:%d", ipAddress, port)
     }
     
-    fun wifiConnectionFailed(ipAddress: String, port: Int, error: Exception? = null) {
-        error(LogCategory.ADB_CONNECTION, "Wi-Fi connection failed: %s:%d", error, ipAddress, port)
+    fun wifiConnectionFailed(ipAddress: String, port: Int, exception: Exception? = null) {
+        error(LogCategory.ADB_CONNECTION, "Wi-Fi connection failed: %s:%d", exception, ipAddress, port)
     }
     
     // Для обратной совместимости

@@ -540,7 +540,7 @@ object AdbService {
             if (completed) {
                 val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
                 val exitCode = process.exitValue()
-                PluginLogger.debug("Connect output: %s (exit code: %d)", output, exitCode)
+                PluginLogger.info("ADB connect output: '%s' (exit code: %d)", output, exitCode)
 
                 // Проверяем разные варианты успешного подключения
                 // ADB может возвращать успешный код выхода даже при неудачном подключении
@@ -567,17 +567,85 @@ object AdbService {
                     if (verified) {
                         PluginLogger.wifiConnectionSuccess(ipAddress, port)
                     } else {
-                        PluginLogger.wifiConnectionFailed(ipAddress, port)
+                        PluginLogger.wifiConnectionFailed(ipAddress, port, Exception("Device not found in 'adb devices' list after connection"))
                     }
                     
                     return@runAdbOperation verified
                 }
 
-                PluginLogger.wifiConnectionFailed(ipAddress, port)
+                // Логируем вывод для отладки
+                PluginLogger.debug("Connect command output: %s", output)
+                
+                // Если подключение не удалось и есть ошибка "Connection refused" или код 10061
+                if (output.contains("10061") || output.contains("Connection refused") || 
+                    output.contains("отверг запрос на подключение")) {
+                    
+                    PluginLogger.info("Connection refused detected in output, trying to enable TCP/IP mode on USB-connected device...")
+                    
+                    // Проверяем, есть ли устройство подключенное по USB
+                    val devicesCmd = ProcessBuilder(adbPath, "devices")
+                    val devicesProcess = devicesCmd.start()
+                    val devicesOutput = devicesProcess.inputStream.bufferedReader().use { it.readText() }
+                    
+                    // Парсим список устройств
+                    val usbDevices = devicesOutput.lines()
+                        .filter { it.contains("\tdevice") && !it.contains(":5555") }
+                        .map { it.split("\t")[0] }
+                    
+                    if (usbDevices.isNotEmpty()) {
+                        val usbDevice = usbDevices.first()
+                        PluginLogger.info("Found USB device: %s, enabling TCP/IP mode...", usbDevice)
+                        
+                        // Включаем TCP/IP режим на порту 5555
+                        val tcpipCmd = ProcessBuilder(adbPath, "-s", usbDevice, "tcpip", port.toString())
+                        val tcpipProcess = tcpipCmd.start()
+                        val tcpipCompleted = tcpipProcess.waitFor(5, TimeUnit.SECONDS)
+                        
+                        if (tcpipCompleted && tcpipProcess.exitValue() == 0) {
+                            val tcpipOutput = tcpipProcess.inputStream.bufferedReader().use { it.readText() }
+                            PluginLogger.info("TCP/IP mode enabled: %s", tcpipOutput.trim())
+                            
+                            // Ждем немного, чтобы устройство перезапустило ADB
+                            Thread.sleep(2000)
+                            
+                            // Пробуем подключиться снова
+                            PluginLogger.info("Retrying connection to %s...", target)
+                            val retryCmd = ProcessBuilder(adbPath, "connect", target)
+                            retryCmd.redirectErrorStream(true)
+                            val retryProcess = retryCmd.start()
+                            val retryCompleted = retryProcess.waitFor(PluginConfig.Adb.CONNECTION_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+                            
+                            if (retryCompleted) {
+                                val retryOutput = retryProcess.inputStream.bufferedReader().use { it.readText() }.trim()
+                                val retrySuccess = retryOutput.contains("connected to") || 
+                                                  (retryProcess.exitValue() == 0 && !retryOutput.contains("failed"))
+                                
+                                if (retrySuccess) {
+                                    // Финальная проверка
+                                    Thread.sleep(500)
+                                    val finalCheck = ProcessBuilder(adbPath, "devices").start()
+                                    val finalOutput = finalCheck.inputStream.bufferedReader().use { it.readText() }
+                                    
+                                    if (finalOutput.contains(target)) {
+                                        PluginLogger.wifiConnectionSuccess(actualIpAddress, port)
+                                        return@runAdbOperation true
+                                    }
+                                }
+                            }
+                        } else {
+                            PluginLogger.warn("Failed to enable TCP/IP mode on device %s", usbDevice)
+                        }
+                    } else {
+                        PluginLogger.info("No USB devices found to enable TCP/IP mode")
+                    }
+                }
+
+                PluginLogger.wifiConnectionFailed(ipAddress, port, Exception("ADB connect command failed: $output"))
                 return@runAdbOperation false
             } else {
                 process.destroyForcibly()
                 PluginLogger.warn("Connection timed out for %s", target)
+                PluginLogger.wifiConnectionFailed(ipAddress, port, Exception("Connection timed out after ${PluginConfig.Adb.CONNECTION_TIMEOUT_MS}ms"))
                 return@runAdbOperation false
             }
         }
