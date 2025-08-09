@@ -6,18 +6,27 @@ import com.intellij.openapi.fileChooser.FileChooserDescriptor
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.openapi.vfs.VirtualFile
+import com.intellij.ui.JBColor
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBTextArea
+import com.intellij.ui.components.JBTextField
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.UIUtil
 import io.github.qavlad.adbrandomizer.config.PluginConfig
 import io.github.qavlad.adbrandomizer.services.PresetStorageService
 import io.github.qavlad.adbrandomizer.settings.PluginSettings
 import io.github.qavlad.adbrandomizer.utils.ButtonUtils
+import io.github.qavlad.adbrandomizer.utils.PluginLogger
+import io.github.qavlad.adbrandomizer.utils.logging.LogCategory
 import java.awt.*
+import java.awt.event.MouseAdapter
+import java.awt.event.MouseEvent
 import java.io.File
 import java.util.concurrent.TimeUnit
+import java.util.zip.ZipFile
 import javax.swing.*
+import javax.swing.event.DocumentEvent
+import javax.swing.event.DocumentListener
 
 class ScrcpyCompatibilityDialog(
     private val project: Project?,
@@ -38,6 +47,23 @@ class ScrcpyCompatibilityDialog(
         PluginConfig.Scrcpy.SCRCPY_NAMES["windows"]!! 
     else 
         PluginConfig.Scrcpy.SCRCPY_NAMES["default"]!!
+    
+    private val scrcpyPathField = JBTextField().apply {
+        toolTipText = """<html>
+            Path to scrcpy executable or folder containing scrcpy.<br>
+            <b>Examples:</b><br>
+            • C:\scrcpy\scrcpy.exe (path to executable)<br>
+            • C:\scrcpy\ (path to folder)<br>
+            • /usr/local/bin/scrcpy (Linux/Mac)<br>
+            • C:\downloads\scrcpy-win64-v3.1.zip (ZIP archive - will be extracted)<br>
+        </html>""".trimIndent()
+    }
+    
+    private val scrcpyPathValidationLabel = JLabel().apply {
+        foreground = JBColor.GREEN
+        border = JBUI.Borders.empty(2, 0, 5, 0)
+        isVisible = false
+    }
 
     companion object {
         const val RETRY_EXIT_CODE = PluginConfig.UIConstants.RETRY_EXIT_CODE
@@ -92,14 +118,8 @@ class ScrcpyCompatibilityDialog(
         contentPanel.add(solutionsLabel)
         contentPanel.add(Box.createVerticalStrut(15))
 
-        // Решение 1: Указать путь к scrcpy
-        val solution1Panel = createSolutionPanel(
-            "1. Use a different scrcpy version",
-            "If you have another version of scrcpy installed, you can specify its path directly.",
-            "Select scrcpy Path"
-        ) {
-            promptForScrcpyPathWithRetry()
-        }
+        // Решение 1: Указать путь к scrcpy с полем ввода
+        val solution1Panel = createSolutionPanelWithInput()
         contentPanel.add(solution1Panel)
         contentPanel.add(Box.createVerticalStrut(15))
 
@@ -238,6 +258,311 @@ class ScrcpyCompatibilityDialog(
         clipboard.setContents(selection, selection)
     }
 
+    private fun createSolutionPanelWithInput(): JPanel {
+        val panel = JPanel()
+        panel.layout = BoxLayout(panel, BoxLayout.Y_AXIS)
+        panel.border = JBUI.Borders.empty(5)
+        panel.background = UIUtil.getPanelBackground()
+        
+        // Title
+        val titleLabel = JBLabel("1. Use a different scrcpy version").apply {
+            font = font.deriveFont(Font.BOLD)
+        }
+        panel.add(titleLabel)
+        
+        // Description
+        val descArea = JBTextArea().apply {
+            text = "If you have another version of scrcpy installed, you can specify its path directly."
+            isEditable = false
+            isOpaque = false
+            lineWrap = true
+            wrapStyleWord = true
+            font = UIUtil.getLabelFont()
+            foreground = UIUtil.getLabelForeground()
+        }
+        panel.add(descArea)
+        panel.add(Box.createVerticalStrut(5))
+        
+        // Path input panel
+        val pathPanel = JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
+            isOpaque = false
+            maximumSize = Dimension(Integer.MAX_VALUE, 35)
+            
+            // Инициализируем поле текущим путём
+            val currentPath = PluginSettings.instance.scrcpyPath.ifBlank {
+                PresetStorageService.getScrcpyPath() ?: ""
+            }
+            scrcpyPathField.text = currentPath
+            
+            add(scrcpyPathField.apply {
+                preferredSize = JBUI.size(300, 30)
+            })
+            add(Box.createHorizontalStrut(5))
+            
+            val browseButton = JButton("Browse...").apply {
+                addActionListener {
+                    val resolvedPath = selectScrcpyFileOrFolder()
+                    if (resolvedPath != null) {
+                        scrcpyPathField.text = resolvedPath
+                    }
+                }
+            }
+            ButtonUtils.addHoverEffect(browseButton)
+            add(browseButton)
+            
+            add(Box.createHorizontalStrut(5))
+            
+            val applyButton = JButton("Apply").apply {
+                addActionListener {
+                    applyScrcpyPath()
+                }
+            }
+            ButtonUtils.addHoverEffect(applyButton)
+            add(applyButton)
+        }
+        panel.add(pathPanel)
+        
+        // Validation label
+        panel.add(scrcpyPathValidationLabel)
+        
+        // Setup validation listener
+        setupValidationListener()
+        
+        return panel
+    }
+    
+    private fun setupValidationListener() {
+        scrcpyPathField.document.addDocumentListener(object : DocumentListener {
+            override fun insertUpdate(e: DocumentEvent) = validateScrcpyPath()
+            override fun removeUpdate(e: DocumentEvent) = validateScrcpyPath()
+            override fun changedUpdate(e: DocumentEvent) = validateScrcpyPath()
+            
+            fun validateScrcpyPath() {
+                var path = scrcpyPathField.text.trim()
+                
+                if (path.isBlank()) {
+                    scrcpyPathValidationLabel.isVisible = false
+                    return
+                }
+                
+                // Удаляем кавычки, если путь обёрнут в них
+                if ((path.startsWith("\"") && path.endsWith("\"")) || 
+                    (path.startsWith("'") && path.endsWith("'"))) {
+                    path = path.substring(1, path.length - 1).trim()
+                    // Обновляем поле без кавычек
+                    SwingUtilities.invokeLater {
+                        scrcpyPathField.text = path
+                    }
+                    return // Валидация произойдёт автоматически после обновления текста
+                }
+                
+                val file = File(path)
+                val isWindows = System.getProperty("os.name").startsWith("Windows")
+                
+                when {
+                    // Check if it's a ZIP archive
+                    file.isFile && file.name.endsWith(".zip", ignoreCase = true) -> {
+                        if (file.exists()) {
+                            scrcpyPathValidationLabel.text = "⚠ ZIP archive detected - click here to extract"
+                            scrcpyPathValidationLabel.foreground = JBColor.YELLOW
+                            scrcpyPathValidationLabel.isVisible = true
+                            
+                            // Удаляем старые слушатели мыши
+                            for (listener in scrcpyPathValidationLabel.mouseListeners) {
+                                scrcpyPathValidationLabel.removeMouseListener(listener)
+                            }
+                            
+                            // Добавляем кликабельность для извлечения архива
+                            scrcpyPathValidationLabel.cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+                            scrcpyPathValidationLabel.addMouseListener(object : MouseAdapter() {
+                                override fun mouseClicked(e: MouseEvent) {
+                                    if (file.exists() && file.name.endsWith(".zip", ignoreCase = true)) {
+                                        val extractedPath = handleZipArchive(file, isWindows)
+                                        if (extractedPath != null) {
+                                            scrcpyPathField.text = extractedPath
+                                        }
+                                    }
+                                }
+                            })
+                            
+                            // Также предлагаем извлечь архив автоматически
+                            SwingUtilities.invokeLater {
+                                val result = JOptionPane.showConfirmDialog(
+                                    this@ScrcpyCompatibilityDialog.contentPane,
+                                    "You've entered a path to a ZIP archive.\nWould you like to extract it now?",
+                                    "Extract Archive",
+                                    JOptionPane.YES_NO_OPTION,
+                                    JOptionPane.QUESTION_MESSAGE
+                                )
+                                
+                                if (result == JOptionPane.YES_OPTION) {
+                                    val extractedPath = handleZipArchive(file, isWindows)
+                                    if (extractedPath != null) {
+                                        scrcpyPathField.text = extractedPath
+                                    }
+                                }
+                            }
+                        } else {
+                            scrcpyPathValidationLabel.text = "✗ ZIP archive not found"
+                            scrcpyPathValidationLabel.foreground = JBColor.RED
+                            scrcpyPathValidationLabel.isVisible = true
+                            scrcpyPathValidationLabel.cursor = Cursor.getDefaultCursor()
+                            
+                            // Удаляем слушатели мыши
+                            for (listener in scrcpyPathValidationLabel.mouseListeners) {
+                                scrcpyPathValidationLabel.removeMouseListener(listener)
+                            }
+                        }
+                    }
+                    // Check if it's a valid scrcpy executable
+                    file.isFile -> {
+                        val expectedName = if (isWindows) "scrcpy.exe" else "scrcpy"
+                        when {
+                            !file.exists() -> {
+                                scrcpyPathValidationLabel.text = "✗ File not found"
+                                scrcpyPathValidationLabel.foreground = JBColor.RED
+                            }
+                            !file.name.equals(expectedName, ignoreCase = true) -> {
+                                scrcpyPathValidationLabel.text = "✗ File should be named '$expectedName'"
+                                scrcpyPathValidationLabel.foreground = JBColor.RED
+                            }
+                            !file.canExecute() && !isWindows -> {
+                                scrcpyPathValidationLabel.text = "✗ File is not executable"
+                                scrcpyPathValidationLabel.foreground = JBColor.RED
+                            }
+                            else -> {
+                                scrcpyPathValidationLabel.text = "✓ Valid scrcpy executable"
+                                scrcpyPathValidationLabel.foreground = JBColor.GREEN
+                            }
+                        }
+                        scrcpyPathValidationLabel.isVisible = true
+                        scrcpyPathValidationLabel.cursor = Cursor.getDefaultCursor()
+                        
+                        // Удаляем слушатели мыши для не-архивов
+                        for (listener in scrcpyPathValidationLabel.mouseListeners) {
+                            scrcpyPathValidationLabel.removeMouseListener(listener)
+                        }
+                    }
+                    // Check if it's a valid directory containing scrcpy
+                    file.isDirectory || path.endsWith("/") || path.endsWith("\\") -> {
+                        val dir = if (file.isDirectory) file else File(path.trimEnd('/', '\\'))
+                        val scrcpyExe = if (isWindows) {
+                            File(dir, "scrcpy.exe")
+                        } else {
+                            File(dir, "scrcpy")
+                        }
+                        
+                        when {
+                            !dir.exists() -> {
+                                scrcpyPathValidationLabel.text = "✗ Directory not found"
+                                scrcpyPathValidationLabel.foreground = JBColor.RED
+                            }
+                            !scrcpyExe.exists() -> {
+                                scrcpyPathValidationLabel.text = "✗ Directory does not contain scrcpy"
+                                scrcpyPathValidationLabel.foreground = JBColor.RED
+                            }
+                            !scrcpyExe.canExecute() && !isWindows -> {
+                                scrcpyPathValidationLabel.text = "✗ scrcpy in directory is not executable"
+                                scrcpyPathValidationLabel.foreground = JBColor.RED
+                            }
+                            else -> {
+                                scrcpyPathValidationLabel.text = "✓ Valid scrcpy directory"
+                                scrcpyPathValidationLabel.foreground = JBColor.GREEN
+                            }
+                        }
+                        scrcpyPathValidationLabel.isVisible = true
+                        scrcpyPathValidationLabel.cursor = Cursor.getDefaultCursor()
+                        
+                        // Удаляем слушатели мыши для не-архивов
+                        for (listener in scrcpyPathValidationLabel.mouseListeners) {
+                            scrcpyPathValidationLabel.removeMouseListener(listener)
+                        }
+                    }
+                    else -> {
+                        scrcpyPathValidationLabel.text = "✗ Invalid path"
+                        scrcpyPathValidationLabel.foreground = JBColor.RED
+                        scrcpyPathValidationLabel.isVisible = true
+                        scrcpyPathValidationLabel.cursor = Cursor.getDefaultCursor()
+                        
+                        // Удаляем слушатели мыши для невалидных путей
+                        for (listener in scrcpyPathValidationLabel.mouseListeners) {
+                            scrcpyPathValidationLabel.removeMouseListener(listener)
+                        }
+                    }
+                }
+            }
+        })
+    }
+    
+    private fun applyScrcpyPath() {
+        var path = scrcpyPathField.text.trim()
+        
+        if (path.isBlank()) {
+            JOptionPane.showMessageDialog(
+                this.contentPane,
+                "Please enter a path to scrcpy",
+                "Empty Path",
+                JOptionPane.WARNING_MESSAGE
+            )
+            return
+        }
+        
+        // Удаляем кавычки, если есть
+        if ((path.startsWith("\"") && path.endsWith("\"")) || 
+            (path.startsWith("'") && path.endsWith("'"))) {
+            path = path.substring(1, path.length - 1).trim()
+        }
+        
+        val file = File(path)
+        
+        // Проверяем, является ли это ZIP архивом
+        if (file.isFile && file.name.endsWith(".zip", ignoreCase = true) && file.exists()) {
+            val isWindows = System.getProperty("os.name").startsWith("Windows")
+            val extractedPath = handleZipArchive(file, isWindows)
+            if (extractedPath != null) {
+                path = extractedPath
+                scrcpyPathField.text = path
+            } else {
+                return
+            }
+        }
+        
+        // Валидируем путь
+        var pathToSave: String? = null
+        
+        when {
+            File(path).isFile && isValidScrcpyPath(path) -> {
+                // Это валидный exe файл, сохраняем путь к директории
+                val f = File(path)
+                pathToSave = if (f.parentFile != null) f.parentFile.absolutePath else path
+            }
+            File(path).isDirectory -> {
+                // Это директория, проверяем есть ли внутри scrcpy
+                val scrcpyFile = File(path, scrcpyName)
+                if (scrcpyFile.exists() && isValidScrcpyPath(scrcpyFile.absolutePath)) {
+                    pathToSave = path
+                }
+            }
+        }
+        
+        if (pathToSave != null) {
+            // Сохраняем путь
+            PresetStorageService.saveScrcpyPath(pathToSave)
+            PluginSettings.instance.scrcpyPath = pathToSave
+            
+            SwingUtilities.invokeLater {
+                close(RETRY_EXIT_CODE)
+            }
+        } else {
+            JOptionPane.showMessageDialog(
+                this.contentPane,
+                "Could not find a valid '$scrcpyName' executable at the specified location",
+                "Invalid Path",
+                JOptionPane.ERROR_MESSAGE
+            )
+        }
+    }
+
     private fun createSolutionPanel(
         title: String,
         description: String,
@@ -280,9 +605,23 @@ class ScrcpyCompatibilityDialog(
     }
 
     private fun selectScrcpyFileOrFolder(): String? {
-        val descriptor = FileChooserDescriptor(true, true, false, false, false, false)
-            .withTitle("Select Scrcpy Executable Or Its Containing Folder")
-            .withDescription("Please locate the '$scrcpyName' file or the folder where it resides.")
+        val isWindows = System.getProperty("os.name").startsWith("Windows")
+        // FileChooserDescriptor(chooseFiles, chooseFolders, chooseJars, chooseJarsAsFiles, chooseJarContents, chooseMultiple)
+        val descriptor = FileChooserDescriptor(true, true, true, true, false, false).apply {
+            title = "Select Scrcpy Executable, Folder Or Archive"
+            description = "Select the scrcpy executable file, the folder containing it, or a ZIP archive"
+            
+            // Filter to show only relevant files
+            withFileFilter { virtualFile ->
+                when {
+                    virtualFile.isDirectory -> true
+                    virtualFile.extension?.equals("zip", ignoreCase = true) == true -> true
+                    isWindows && virtualFile.extension?.equals("exe", ignoreCase = true) == true -> true
+                    !isWindows && virtualFile.name.equals("scrcpy", ignoreCase = true) -> true
+                    else -> false
+                }
+            }
+        }
 
         // Определяем начальную директорию на основе текущего сохраненного пути
         val currentPath = PluginSettings.instance.scrcpyPath.ifBlank {
@@ -293,12 +632,12 @@ class ScrcpyCompatibilityDialog(
             val path = File(currentPath)
             when {
                 path.isFile && path.parentFile != null -> {
-                    // Если это файл, берём родительскую директорию родительской директории
-                    path.parentFile.parentFile ?: path.parentFile
-                }
-                path.isDirectory && path.parentFile != null -> {
-                    // Если это директория, берём её родительскую директорию
+                    // Если это файл, открываем папку где он находится
                     path.parentFile
+                }
+                path.isDirectory -> {
+                    // Если это директория, открываем её саму
+                    path
                 }
                 else -> null
             }
@@ -319,6 +658,16 @@ class ScrcpyCompatibilityDialog(
         if (chosenFile == null) return null
 
         val selectedIoFile = File(chosenFile.path)
+        
+        // Handle ZIP archives
+        if (selectedIoFile.isFile && selectedIoFile.name.endsWith(".zip", ignoreCase = true)) {
+            PluginLogger.info(LogCategory.GENERAL, "User selected ZIP archive: %s", selectedIoFile.absolutePath)
+            val extractedPath = handleZipArchive(selectedIoFile, isWindows)
+            if (extractedPath != null) {
+                return extractedPath
+            }
+            return null
+        }
 
         if (selectedIoFile.isFile && selectedIoFile.name.equals(scrcpyName, ignoreCase = true)) {
             return selectedIoFile.absolutePath
@@ -332,6 +681,187 @@ class ScrcpyCompatibilityDialog(
         }
 
         return selectedIoFile.absolutePath
+    }
+
+    private fun handleZipArchive(zipFile: File, isWindows: Boolean): String? {
+        PluginLogger.info(LogCategory.GENERAL, "Processing ZIP archive: %s", zipFile.absolutePath)
+        
+        // Check file size (should be less than 50 MB)
+        val fileSizeMB = zipFile.length() / (1024 * 1024)
+        PluginLogger.info(LogCategory.GENERAL, "Archive size: %s MB", fileSizeMB.toString())
+        
+        if (fileSizeMB > 50) {
+            JOptionPane.showMessageDialog(
+                this.contentPane,
+                "The selected archive is too large (${fileSizeMB} MB).\nScrcpy archives are typically less than 50 MB.\nPlease select a valid scrcpy archive.",
+                "Invalid Archive",
+                JOptionPane.ERROR_MESSAGE
+            )
+            return null
+        }
+        
+        // Check if archive contains scrcpy.exe (for Windows) or scrcpy
+        val scrcpyFileName = if (isWindows) "scrcpy.exe" else "scrcpy"
+        var containsScrcpy = false
+        var scrcpyPathInArchive: String? = null
+        
+        try {
+            ZipFile(zipFile).use { zip ->
+                val entries = zip.entries()
+                while (entries.hasMoreElements()) {
+                    val entry = entries.nextElement()
+                    val entryName = entry.name
+                    
+                    // Check if this entry is scrcpy executable
+                    if (entryName.endsWith(scrcpyFileName, ignoreCase = true)) {
+                        containsScrcpy = true
+                        scrcpyPathInArchive = entryName
+                        break
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            JOptionPane.showMessageDialog(
+                this.contentPane,
+                "Failed to read the archive: ${e.message}",
+                "Error Reading Archive",
+                JOptionPane.ERROR_MESSAGE
+            )
+            return null
+        }
+        
+        if (!containsScrcpy) {
+            JOptionPane.showMessageDialog(
+                this.contentPane,
+                "The selected archive does not contain $scrcpyFileName.\nPlease select a valid scrcpy archive.",
+                "Invalid Archive",
+                JOptionPane.ERROR_MESSAGE
+            )
+            return null
+        }
+        
+        // Show dialog asking if user wants to extract
+        val message = """
+            You have selected a ZIP archive containing scrcpy.
+            
+            The archive needs to be extracted before scrcpy can be used.
+            
+            Would you like to extract it automatically to:
+            ${zipFile.parentFile.absolutePath}?
+        """.trimIndent()
+        
+        val result = JOptionPane.showConfirmDialog(
+            this.contentPane,
+            message,
+            "Extract Archive",
+            JOptionPane.YES_NO_OPTION,
+            JOptionPane.QUESTION_MESSAGE
+        )
+        
+        if (result == JOptionPane.YES_OPTION) {
+            return extractArchiveAndGetPath(zipFile, scrcpyPathInArchive!!, isWindows)
+        }
+        
+        return null
+    }
+    
+    private fun extractArchiveAndGetPath(zipFile: File, scrcpyPathInArchive: String, isWindows: Boolean): String? {
+        try {
+            val targetDir = zipFile.parentFile
+            
+            // Check if archive has a single root directory
+            var commonPrefix: String? = null
+            var hasMultipleRoots = false
+            
+            ZipFile(zipFile).use { zip ->
+                val entries = zip.entries()
+                while (entries.hasMoreElements()) {
+                    val entry = entries.nextElement()
+                    if (!entry.isDirectory) {
+                        val firstSlash = entry.name.indexOf('/')
+                        val rootDir = if (firstSlash > 0) entry.name.substring(0, firstSlash) else null
+                        
+                        if (commonPrefix == null) {
+                            commonPrefix = rootDir
+                        } else if (commonPrefix != rootDir) {
+                            hasMultipleRoots = true
+                            break
+                        }
+                    }
+                }
+            }
+            
+            // Determine extraction directory
+            val extractedDir = if (!hasMultipleRoots && commonPrefix != null) {
+                // Archive has single root directory - extract directly to parent
+                targetDir
+            } else {
+                // Archive has multiple roots or no common root - create subdirectory
+                File(targetDir, zipFile.nameWithoutExtension).also {
+                    if (!it.exists()) it.mkdirs()
+                }
+            }
+            
+            PluginLogger.info(LogCategory.GENERAL, "Extracting to: %s, single root: %s, common prefix: %s", 
+                extractedDir.absolutePath, (!hasMultipleRoots).toString(), commonPrefix ?: "none")
+            
+            // Extract the archive
+            ZipFile(zipFile).use { zip ->
+                val entries = zip.entries()
+                while (entries.hasMoreElements()) {
+                    val entry = entries.nextElement()
+                    val entryFile = File(extractedDir, entry.name)
+                    
+                    if (entry.isDirectory) {
+                        entryFile.mkdirs()
+                    } else {
+                        // Create parent directories if needed
+                        entryFile.parentFile?.mkdirs()
+                        
+                        // Extract file
+                        zip.getInputStream(entry).use { input ->
+                            entryFile.outputStream().use { output ->
+                                input.copyTo(output)
+                            }
+                        }
+                        
+                        // Make executable if it's scrcpy
+                        if (entry.name.endsWith(if (isWindows) "scrcpy.exe" else "scrcpy", ignoreCase = true)) {
+                            entryFile.setExecutable(true)
+                        }
+                    }
+                }
+            }
+            
+            // Find the extracted scrcpy executable
+            val extractedScrcpy = File(extractedDir, scrcpyPathInArchive)
+            
+            if (extractedScrcpy.exists()) {
+                // Возвращаем путь к директории, содержащей scrcpy
+                val pathToReturn = extractedScrcpy.parentFile.absolutePath
+                
+                JOptionPane.showMessageDialog(
+                    this.contentPane,
+                    "Archive extracted successfully!\nScrcpy path has been set to:\n$pathToReturn",
+                    "Extraction Complete",
+                    JOptionPane.INFORMATION_MESSAGE
+                )
+                
+                return pathToReturn
+            } else {
+                // Fallback - shouldn't happen but just in case
+                return extractedDir.absolutePath
+            }
+            
+        } catch (e: Exception) {
+            JOptionPane.showMessageDialog(
+                this.contentPane,
+                "Failed to extract archive: ${e.message}",
+                "Extraction Failed",
+                JOptionPane.ERROR_MESSAGE
+            )
+            return null
+        }
     }
 
     private fun isValidScrcpyPath(path: String): Boolean {
@@ -348,42 +878,4 @@ class ScrcpyCompatibilityDialog(
         }
     }
 
-    private fun promptForScrcpyPathWithRetry() {
-        while (true) {
-            val resolvedScrcpyPath = selectScrcpyFileOrFolder()
-
-            if (resolvedScrcpyPath == null) {
-                return
-            }
-
-            if (isValidScrcpyPath(resolvedScrcpyPath)) {
-                // Сохраняем путь в оба места для синхронизации
-                PresetStorageService.saveScrcpyPath(resolvedScrcpyPath)
-                PluginSettings.instance.scrcpyPath = resolvedScrcpyPath
-                SwingUtilities.invokeLater {
-                    close(RETRY_EXIT_CODE)
-                }
-                return
-            } else {
-                val message = """
-                    Could not find a valid '$scrcpyName' executable at the selected location.
-
-                    Please make sure you select either:
-                    • The actual '$scrcpyName' executable file.
-                    • The folder that contains the '$scrcpyName' file.
-
-                    Would you like to try again?
-                """.trimIndent()
-
-                val result = JOptionPane.showConfirmDialog(
-                    this.contentPane, message, "Invalid Scrcpy Path",
-                    JOptionPane.YES_NO_OPTION, JOptionPane.ERROR_MESSAGE
-                )
-
-                if (result != JOptionPane.YES_OPTION) {
-                    return
-                }
-            }
-        }
-    }
 }
