@@ -2,7 +2,7 @@ package io.github.qavlad.adbrandomizer.settings
 
 import com.intellij.openapi.fileChooser.FileChooser
 import com.intellij.openapi.fileChooser.FileChooserDescriptor
-import com.intellij.openapi.options.Configurable
+import com.intellij.openapi.options.SearchableConfigurable
 import com.intellij.openapi.ui.VerticalFlowLayout
 import com.intellij.ui.JBColor
 import com.intellij.ui.components.JBCheckBox
@@ -27,7 +27,7 @@ import javax.swing.*
 import javax.swing.event.DocumentEvent
 import javax.swing.event.DocumentListener
 
-class PluginSettingsConfigurable : Configurable {
+class PluginSettingsConfigurable : SearchableConfigurable {
     private var settingsPanel: PluginSettingsPanel? = null
     
     override fun createComponent(): JComponent {
@@ -49,12 +49,14 @@ class PluginSettingsConfigurable : Configurable {
     
     override fun getDisplayName(): String = "ADB Screen Randomizer"
     
+    override fun getId(): String = "adb.screen.randomizer.settings"
+    
     override fun disposeUIResources() {
         settingsPanel = null
     }
 }
 
-class PluginSettingsPanel : JBPanel<PluginSettingsPanel>(VerticalFlowLayout(VerticalFlowLayout.TOP, 0, 0, true, false)) {
+class PluginSettingsPanel() : JBPanel<PluginSettingsPanel>() {
     private val settings = PluginSettings.instance
     
     private val restartScrcpyCheckBox = JBCheckBox("Automatically restart scrcpy when screen resolution changes").apply {
@@ -557,6 +559,21 @@ class PluginSettingsPanel : JBPanel<PluginSettingsPanel>(VerticalFlowLayout(Vert
         debugModeCheckBox.addChangeListener {
             openLogsButton.isEnabled = debugModeCheckBox.isSelected
         }
+        
+        // Add listeners to all checkboxes to trigger Apply button state update
+        // Use ActionListener and firePropertyChange to notify parent about changes
+        val stateChangeListener = java.awt.event.ActionListener { 
+            // Fire property change event that IntelliJ Settings dialog listens to
+            firePropertyChange("modified", false, true)
+        }
+        
+        restartScrcpyCheckBox.addActionListener(stateChangeListener)
+        if (AndroidStudioDetector.isAndroidStudio()) {
+            restartRunningDevicesCheckBox.addActionListener(stateChangeListener)
+        }
+        restartActiveAppCheckBox.addActionListener(stateChangeListener)
+        autoSwitchWifiCheckBox.addActionListener(stateChangeListener)
+        debugModeCheckBox.addActionListener(stateChangeListener)
         
         // Browse button for scrcpy path
         scrcpyPathButton.addActionListener {
