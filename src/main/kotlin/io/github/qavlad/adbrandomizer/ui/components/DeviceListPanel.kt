@@ -13,6 +13,8 @@ import io.github.qavlad.adbrandomizer.utils.DeviceConnectionUtils
 import java.awt.BorderLayout
 import java.awt.Cursor
 import java.awt.Dimension
+import java.awt.Point
+import java.awt.Rectangle
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import java.awt.event.MouseMotionAdapter
@@ -51,7 +53,28 @@ class DeviceListPanel(
     }
 
     private val deviceListModel = DefaultListModel<DeviceListItem>()
-    private val deviceList = JBList(deviceListModel)
+    private val deviceList = object : JBList<DeviceListItem>(deviceListModel) {
+        override fun getToolTipText(event: MouseEvent): String? {
+            val index = locationToIndex(event.point)
+            if (index == -1 || index >= deviceListModel.size()) return null
+            
+            val item = deviceListModel.getElementAt(index)
+            val bounds = getCellBounds(index, index) ?: return null
+            
+            return when (item) {
+                is DeviceListItem.CombinedDevice -> {
+                    getTooltipForCombinedDevice(item.info, event.point, bounds)
+                }
+                is DeviceListItem.WifiHistoryDevice -> {
+                    val deleteButtonRect = getDeleteButtonRect(bounds)
+                    if (deleteButtonRect.contains(event.point)) {
+                        "Remove this device from Wi-Fi connection history"
+                    } else null
+                }
+                else -> null
+            }
+        }
+    }
     private val properties = PropertiesComponent.getInstance()
     private val deviceInfoRenderer = DeviceInfoPanelRenderer()
     
@@ -62,6 +85,8 @@ class DeviceListPanel(
     init {
         setupUI()
         setupDeviceListInteractions()
+        // Включаем подсказки для JList
+        ToolTipManager.sharedInstance().registerComponent(deviceList)
     }
 
     private fun setupUI() {
@@ -137,7 +162,7 @@ class DeviceListPanel(
                             isContentAreaFilled = isHovered
                             isBorderPainted = isHovered
                             isRolloverEnabled = true
-                            toolTipText = "Delete from history"
+                            toolTipText = "Remove this device from Wi-Fi connection history"
                             preferredSize = Dimension(DELETE_BUTTON_WIDTH, DELETE_BUTTON_HEIGHT)
                             if (isHovered) {
                                 background = JBUI.CurrentTheme.ActionButton.hoverBackground()
@@ -382,12 +407,47 @@ class DeviceListPanel(
     fun getDeviceListModel(): DefaultListModel<DeviceListItem> = deviceListModel
 
     /**
+     * Получает подсказку для комбинированного устройства в зависимости от позиции мыши
+     */
+    private fun getTooltipForCombinedDevice(device: CombinedDeviceInfo, point: Point, bounds: Rectangle): String? {
+        val buttonRects = combinedDeviceRenderer.calculateButtonRects(device, bounds)
+        
+        // Проверяем позиции иконок и текста рядом с ними (увеличенная зона)
+        // USB секция: иконка + текст "USB"
+        val usbIconRect = Rectangle(bounds.x + 8, bounds.y + bounds.height - 35, 70, 30)
+        // Wi-Fi секция: иконка + текст "Wi-Fi" или IP адрес
+        val wifiIconRect = Rectangle(bounds.x + 135, bounds.y + bounds.height - 35, 60, 30)
+        
+        return when {
+            // Кнопки
+            buttonRects.usbMirrorRect?.contains(point) == true -> "Mirror screen via USB"
+            buttonRects.wifiConnectRect?.contains(point) == true -> "Connect to this device via Wi-Fi"
+            buttonRects.wifiMirrorRect?.contains(point) == true -> "Mirror screen via Wi-Fi"
+            buttonRects.wifiDisconnectRect?.contains(point) == true -> "Disconnect Wi-Fi connection"
+            
+            // Иконки статуса
+            usbIconRect.contains(point) -> {
+                if (device.hasUsbConnection) "Connected via USB" else "USB not connected"
+            }
+            wifiIconRect.contains(point) -> {
+                when {
+                    device.hasWifiConnection -> "Connected via Wi-Fi at ${device.wifiDevice?.ipAddress ?: device.ipAddress}"
+                    device.hasUsbConnection -> "Wi-Fi not connected. Click 'Connect' button to connect via Wi-Fi"
+                    else -> "Wi-Fi not connected"
+                }
+            }
+            
+            else -> null
+        }
+    }
+    
+    /**
      * Вычисляет прямоугольник кнопки удаления
      */
-    private fun getDeleteButtonRect(bounds: java.awt.Rectangle): java.awt.Rectangle {
+    private fun getDeleteButtonRect(bounds: Rectangle): Rectangle {
         val deleteButtonX = bounds.x + bounds.width - DELETE_BUTTON_WIDTH - DELETE_BUTTON_RIGHT_MARGIN
         val deleteButtonY = bounds.y + (bounds.height - DELETE_BUTTON_HEIGHT) / 2
-        return java.awt.Rectangle(deleteButtonX, deleteButtonY, DELETE_BUTTON_WIDTH, DELETE_BUTTON_HEIGHT)
+        return Rectangle(deleteButtonX, deleteButtonY, DELETE_BUTTON_WIDTH, DELETE_BUTTON_HEIGHT)
     }
 
     private fun handleDeleteHistoryDevice(entry: WifiDeviceHistoryService.WifiDeviceHistoryEntry) {

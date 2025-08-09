@@ -1,6 +1,5 @@
 package io.github.qavlad.adbrandomizer.ui.renderers
 
-import com.intellij.icons.AllIcons
 import com.intellij.openapi.util.IconLoader
 import com.intellij.ui.JBColor
 import com.intellij.util.ui.JBFont
@@ -24,7 +23,6 @@ class CombinedDeviceRenderer(
     private val usbIcon: Icon = IconLoader.getIcon("/icons/usb.svg", javaClass)
     private val wifiIcon: Icon = IconLoader.getIcon("/icons/wifi.svg", javaClass)
     private val mirrorIcon = IconLoader.getIcon("/icons/scrcpy.svg", javaClass)
-    private val disconnectIcon = AllIcons.Actions.Exit
 
     fun createComponent(
         device: CombinedDeviceInfo,
@@ -185,6 +183,13 @@ class CombinedDeviceRenderer(
         // Иконка подключения
         val iconLabel = JLabel(icon).apply {
             isEnabled = isActive
+            toolTipText = when {
+                icon == usbIcon && isActive -> "Connected via USB"
+                icon == usbIcon && !isActive -> "USB not connected"
+                icon == wifiIcon && isActive -> "Connected via Wi-Fi at $text"
+                icon == wifiIcon && !isActive -> "Wi-Fi not connected"
+                else -> null
+            }
         }
         panel.add(iconLabel)
 
@@ -197,7 +202,8 @@ class CombinedDeviceRenderer(
 
         // Кнопка Mirror
         if (showMirror) {
-            val mirrorButton = createIconButton(mirrorIcon, "Mirror", isMirrorHovered)
+            val connectionType = if (icon == usbIcon) "USB" else "Wi-Fi"
+            val mirrorButton = createIconButton(mirrorIcon, "Mirror screen via $connectionType", isMirrorHovered)
             panel.add(mirrorButton)
         }
 
@@ -209,7 +215,7 @@ class CombinedDeviceRenderer(
 
         // Кнопка Disconnect (только для Wi-Fi)
         if (showDisconnect) {
-            val disconnectButton = createIconButton(disconnectIcon, "Disconnect", isDisconnectHovered)
+            val disconnectButton = createDisconnectButton(isDisconnectHovered)
             panel.add(disconnectButton)
         }
 
@@ -235,18 +241,54 @@ class CombinedDeviceRenderer(
     
     private fun createConnectButton(isHovered: Boolean): JButton {
         return JButton("Connect").apply {
-            toolTipText = "Connect via Wi-Fi"
+            toolTipText = "Connect to this device via Wi-Fi"
             font = JBFont.small()
-            preferredSize = Dimension(55, BUTTON_HEIGHT)
+            preferredSize = Dimension(65, BUTTON_HEIGHT) // Увеличиваем ширину с 55 до 65
             minimumSize = preferredSize
             maximumSize = preferredSize
             isFocusable = false
             isContentAreaFilled = true
-            isBorderPainted = true
             cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
             
+            // Зелёная рамка с эффектом при наведении
+            border = if (isHovered) {
+                BorderFactory.createCompoundBorder(
+                    BorderFactory.createLineBorder(JBColor(Color(100, 200, 100), Color(120, 220, 120)), 2),
+                    BorderFactory.createEmptyBorder(0, 0, 0, 0)
+                )
+            } else {
+                BorderFactory.createLineBorder(JBColor(Color(50, 150, 50), Color(60, 180, 60)), 1)
+            }
+            
             if (isHovered) {
-                background = JBUI.CurrentTheme.ActionButton.hoverBackground()
+                background = JBColor(Color(230, 255, 230), Color(30, 80, 30))
+            }
+        }
+    }
+    
+    private fun createDisconnectButton(isHovered: Boolean): JButton {
+        return JButton("Disconnect").apply {
+            toolTipText = "Disconnect Wi-Fi connection"
+            font = JBFont.small()
+            preferredSize = Dimension(70, BUTTON_HEIGHT)
+            minimumSize = preferredSize
+            maximumSize = preferredSize
+            isFocusable = false
+            isContentAreaFilled = true
+            cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+            
+            // Красная рамка с эффектом при наведении
+            border = if (isHovered) {
+                BorderFactory.createCompoundBorder(
+                    BorderFactory.createLineBorder(JBColor(Color(250, 100, 100), Color(220, 80, 80)), 2),
+                    BorderFactory.createEmptyBorder(0, 0, 0, 0)
+                )
+            } else {
+                BorderFactory.createLineBorder(JBColor(Color(200, 50, 50), Color(180, 40, 40)), 1)
+            }
+            
+            if (isHovered) {
+                background = JBColor(Color(255, 230, 230), Color(80, 30, 30))
             }
         }
     }
@@ -284,10 +326,11 @@ class CombinedDeviceRenderer(
         
         if (device.hasWifiConnection) {
             rects.wifiMirrorRect = Rectangle(204 + xCorrectionWifi, yOffset, BUTTON_HEIGHT, BUTTON_HEIGHT)
-            rects.wifiDisconnectRect = Rectangle(230 + xCorrectionWifi, yOffset, BUTTON_HEIGHT, BUTTON_HEIGHT)
+            // Кнопка Disconnect теперь текстовая и шире (70px)
+            rects.wifiDisconnectRect = Rectangle(230 + xCorrectionWifi, yOffset, 70, BUTTON_HEIGHT)
         } else if (device.hasUsbConnection) {
-            // Wi-Fi Connect: измерено 165, добавляем корректировку
-            rects.wifiConnectRect = Rectangle(165 + xCorrectionUsb, yOffset, 55, BUTTON_HEIGHT)
+            // Wi-Fi Connect: измерено 165, добавляем корректировку, ширина теперь 65
+            rects.wifiConnectRect = Rectangle(165 + xCorrectionUsb, yOffset, 65, BUTTON_HEIGHT)
         }
         
         return rects
