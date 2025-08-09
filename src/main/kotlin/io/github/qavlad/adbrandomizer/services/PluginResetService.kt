@@ -66,7 +66,7 @@ object PluginResetService {
     }
     
     /**
-     * Удаляет все сохранённые пресеты
+     * Удаляет все сохранённые пресеты и восстанавливает дефолтные
      */
     private fun clearAllPresets() {
         val properties = PropertiesComponent.getInstance()
@@ -94,6 +94,14 @@ object PluginResetService {
         properties.unsetValue("ADB_RANDOMIZER_HIDE_DUPLICATES_MODE")
         
         PluginLogger.info(LogCategory.GENERAL, "All presets cleared")
+        
+        // Восстанавливаем дефолтные пресеты
+        try {
+            PresetListService.initializeDefaultLists()
+            PluginLogger.info(LogCategory.GENERAL, "Default presets restored")
+        } catch (e: Exception) {
+            PluginLogger.error(LogCategory.GENERAL, "Failed to restore default presets", e)
+        }
     }
     
     /**

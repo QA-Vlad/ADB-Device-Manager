@@ -126,7 +126,7 @@ object PresetListService {
     /**
      * Инициализирует дефолтные списки пресетов из JSON файлов
      */
-    private fun initializeDefaultLists(): List<ListMetadata> {
+    fun initializeDefaultLists(): List<ListMetadata> {
         val defaultLists = mutableListOf<PresetList>()
         
         // Сначала пытаемся загрузить из ресурсов
@@ -707,30 +707,33 @@ object PresetListService {
     }
 
     /**
-     * Проверяет что есть хотя бы один список, если нет - создает пустой
+     * Проверяет что есть хотя бы один список, если нет - восстанавливает дефолтные
      */
     fun ensureDefaultListsExist() {
         val metadata = getAllListsMetadata()
         if (metadata.isEmpty()) {
-            PluginLogger.warn(LogCategory.PRESET_SERVICE, "No lists found, creating minimal empty list")
-            // Создаем только один пустой список
-            val emptyList = PresetList(
-                name = "My Presets",
-                presets = mutableListOf(),
-                isDefault = false
-            )
+            PluginLogger.warn(LogCategory.PRESET_SERVICE, "No lists found, restoring default presets")
+            // Восстанавливаем дефолтные пресеты из ресурсов
+            initializeDefaultLists()
+        } else {
+            // Проверяем, что файлы существуют для всех метаданных
+            var hasValidLists = false
+            metadata.forEach { listMeta ->
+                val file = getFileForListId(listMeta.id)
+                if (file != null && file.exists()) {
+                    hasValidLists = true
+                }
+            }
             
-            // Сохраняем метаданные
-            val newMetadata = listOf(ListMetadata(emptyList.id, emptyList.name, emptyList.isDefault))
-            saveListsMetadata(newMetadata)
-            
-            // Сохраняем сам список
-            savePresetList(emptyList)
-            
-            // Устанавливаем как активный
-            setActiveListId(emptyList.id)
+            // Если ни одного валидного файла нет, восстанавливаем дефолтные
+            if (!hasValidLists) {
+                PluginLogger.warn(LogCategory.PRESET_SERVICE, "No valid preset files found, restoring defaults")
+                // Очищаем невалидные метаданные
+                saveListsMetadata(emptyList())
+                // Восстанавливаем дефолтные пресеты
+                initializeDefaultLists()
+            }
         }
-        // Больше не проверяем наличие файлов и не восстанавливаем удаленные
     }
     
     /**
