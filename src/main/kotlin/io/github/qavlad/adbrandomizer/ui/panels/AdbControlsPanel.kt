@@ -60,8 +60,9 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
             getAllDevices = { getAllDevicesFromModel() },
             onMirrorClick = { deviceInfo -> startScreenMirroring(deviceInfo) },
             onWifiClick = { device -> connectDeviceViaWifi(device) },
+            onWifiDisconnect = { ipAddress -> disconnectWifiDevice(ipAddress) },
             compactActionPanel = compactActionPanel,
-            onForceUpdate = { devicePollingService.forceUpdate() }
+            onForceUpdate = { devicePollingService.forceCombinedUpdate() }
         )
         
         val splitPane = JSplitPane(JSplitPane.VERTICAL_SPLIT, buttonPanel, deviceListPanel).apply {
@@ -74,8 +75,8 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
     }
 
     private fun startDevicePolling() {
-        devicePollingService.startDevicePolling { devices ->
-            deviceListPanel.updateDeviceList(devices)
+        devicePollingService.startCombinedDevicePolling { combinedDevices ->
+            deviceListPanel.updateCombinedDeviceList(combinedDevices)
         }
     }
 
@@ -370,6 +371,28 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
     }
 
     // ==================== CONNECTION ACTIONS ====================
+    
+    private fun disconnectWifiDevice(ipAddress: String) {
+        object : Task.Backgroundable(project, "Disconnecting Wi-Fi device") {
+            override fun run(indicator: ProgressIndicator) {
+                indicator.isIndeterminate = true
+                indicator.text = "Disconnecting from $ipAddress..."
+                
+                val result = AdbService.disconnectWifi(ipAddress)
+                val success = result.getOrNull() ?: false
+                
+                ApplicationManager.getApplication().invokeLater {
+                    if (success) {
+                        NotificationUtils.showSuccess(project, "Disconnected from $ipAddress")
+                        // Форсируем обновление списка устройств
+                        devicePollingService.forceCombinedUpdate()
+                    } else {
+                        NotificationUtils.showError(project, "Failed to disconnect from $ipAddress")
+                    }
+                }
+            }
+        }.queue()
+    }
 
     private fun executeKillAdbServer() {
         object : Task.Backgroundable(project, "Killing ADB Server") {
@@ -384,7 +407,7 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                         NotificationUtils.showSuccess(project, "ADB server killed successfully")
                         // Форсируем обновление списка устройств через небольшую задержку
                         Timer(500) {
-                            devicePollingService.forceUpdate()
+                            devicePollingService.forceCombinedUpdate()
                         }.apply {
                             isRepeats = false
                             start()
@@ -477,7 +500,7 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
             ApplicationManager.getApplication().invokeLater {
                 NotificationUtils.showSuccess(project, "Successfully connected to device at $ipAddress:$port")
                 // Форсируем обновление списка устройств
-                devicePollingService.forceUpdate()
+                devicePollingService.forceCombinedUpdate()
             }
         } else {
             ApplicationManager.getApplication().invokeLater {
@@ -599,7 +622,7 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
             }
             NotificationUtils.showSuccess(project, "Successfully connected to $deviceName at $ipAddress.")
             // Форсируем обновление списка устройств
-            devicePollingService.forceUpdate()
+            devicePollingService.forceCombinedUpdate()
         } else {
             val message = """Failed to connect to $deviceName via Wi-Fi.
                 |Possible solutions:

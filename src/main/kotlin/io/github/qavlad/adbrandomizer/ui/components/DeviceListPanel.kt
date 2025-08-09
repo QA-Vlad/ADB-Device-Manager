@@ -6,6 +6,7 @@ import com.intellij.ui.components.JBScrollPane
 import com.intellij.util.ui.JBUI
 import io.github.qavlad.adbrandomizer.services.DeviceInfo
 import io.github.qavlad.adbrandomizer.services.WifiDeviceHistoryService
+import io.github.qavlad.adbrandomizer.ui.models.CombinedDeviceInfo
 import io.github.qavlad.adbrandomizer.ui.renderers.DeviceListRenderer
 import io.github.qavlad.adbrandomizer.ui.renderers.DeviceInfoPanelRenderer
 import io.github.qavlad.adbrandomizer.utils.DeviceConnectionUtils
@@ -26,6 +27,7 @@ import com.intellij.icons.AllIcons
 sealed class DeviceListItem {
     data class SectionHeader(val title: String) : DeviceListItem()
     data class Device(val info: DeviceInfo, val isConnected: Boolean) : DeviceListItem()
+    data class CombinedDevice(val info: CombinedDeviceInfo) : DeviceListItem()
     data class WifiHistoryDevice(val entry: WifiDeviceHistoryService.WifiDeviceHistoryEntry) : DeviceListItem()
 }
 
@@ -35,6 +37,7 @@ class DeviceListPanel(
     private val getAllDevices: () -> List<DeviceInfo>,
     private val onMirrorClick: (DeviceInfo) -> Unit,
     private val onWifiClick: (IDevice) -> Unit,
+    private val onWifiDisconnect: (String) -> Unit, // Новый callback для disconnect Wi-Fi
     private val compactActionPanel: CompactActionPanel,
     private val onForceUpdate: () -> Unit  // Новый callback для форсированного обновления
 ) : JPanel(BorderLayout()) {
@@ -51,6 +54,10 @@ class DeviceListPanel(
     private val deviceList = JBList(deviceListModel)
     private val properties = PropertiesComponent.getInstance()
     private val deviceInfoRenderer = DeviceInfoPanelRenderer()
+    
+    private val combinedDeviceRenderer = io.github.qavlad.adbrandomizer.ui.renderers.CombinedDeviceRenderer(
+        getHoverState = getHoverState
+    )
 
     init {
         setupUI()
@@ -91,6 +98,12 @@ class DeviceListPanel(
                         @Suppress("UNCHECKED_CAST")
                         defaultRenderer.getListCellRendererComponent(
                             list as JList<DeviceInfo>, value.info, index, selected, focused
+                        )
+                    }
+                    is DeviceListItem.CombinedDevice -> {
+                        @Suppress("UNCHECKED_CAST")
+                        combinedDeviceRenderer.createComponent(
+                            value.info, index, selected, list as JList<DeviceListItem>
                         )
                     }
                     is DeviceListItem.WifiHistoryDevice -> {
@@ -141,10 +154,16 @@ class DeviceListPanel(
                 }
             }
         }
-        deviceList.selectionMode = ListSelectionModel.SINGLE_SELECTION
+        // Полностью отключаем выделение элементов
+        deviceList.selectionModel = object : DefaultListSelectionModel() {
+            override fun setSelectionInterval(index0: Int, index1: Int) {
+                // Не делаем ничего - блокируем выделение
+            }
+            override fun addSelectionInterval(index0: Int, index1: Int) {
+                // Не делаем ничего - блокируем выделение
+            }
+        }
         deviceList.emptyText.text = "No devices found"
-        deviceList.clearSelection()
-        deviceList.selectionModel.clearSelection()
         val scrollPane = JBScrollPane(deviceList)
         scrollPane.border = BorderFactory.createEmptyBorder()
         add(headerPanel, BorderLayout.NORTH)
@@ -183,6 +202,18 @@ class DeviceListPanel(
                 val newButtonType = when {
                     buttonLayout.mirrorButtonRect.contains(e.point) -> HoverState.BUTTON_TYPE_MIRROR
                     buttonLayout.wifiButtonRect?.contains(e.point) == true -> HoverState.BUTTON_TYPE_WIFI
+                    else -> null
+                }
+                updateCursorAndHoverState(index, newButtonType)
+            }
+            is DeviceListItem.CombinedDevice -> {
+                val bounds = deviceList.getCellBounds(index, index)
+                val buttonRects = combinedDeviceRenderer.calculateButtonRects(item.info, bounds)
+                val newButtonType = when {
+                    buttonRects.usbMirrorRect?.contains(e.point) == true -> "USB_MIRROR"
+                    buttonRects.wifiConnectRect?.contains(e.point) == true -> "WIFI_CONNECT"
+                    buttonRects.wifiMirrorRect?.contains(e.point) == true -> "WIFI_MIRROR"
+                    buttonRects.wifiDisconnectRect?.contains(e.point) == true -> "WIFI_DISCONNECT"
                     else -> null
                 }
                 updateCursorAndHoverState(index, newButtonType)
@@ -248,6 +279,25 @@ class DeviceListPanel(
                     buttonLayout.wifiButtonRect?.contains(e.point) == true -> deviceInfo.device?.let { onWifiClick(it) }
                 }
             }
+            is DeviceListItem.CombinedDevice -> {
+                val bounds = deviceList.getCellBounds(index, index)
+                val buttonRects = combinedDeviceRenderer.calculateButtonRects(item.info, bounds)
+                when {
+                    buttonRects.usbMirrorRect?.contains(e.point) == true -> {
+                        item.info.usbDevice?.let { onMirrorClick(it) }
+                    }
+                    buttonRects.wifiConnectRect?.contains(e.point) == true -> {
+                        item.info.usbDevice?.device?.let { onWifiClick(it) }
+                    }
+                    buttonRects.wifiMirrorRect?.contains(e.point) == true -> {
+                        item.info.wifiDevice?.let { onMirrorClick(it) }
+                    }
+                    buttonRects.wifiDisconnectRect?.contains(e.point) == true -> {
+                        val ip = item.info.wifiDevice?.ipAddress ?: item.info.ipAddress
+                        ip?.let { onWifiDisconnect(it) }
+                    }
+                }
+            }
             is DeviceListItem.WifiHistoryDevice -> {
                 val bounds = deviceList.getCellBounds(index, index)
                 val deleteButtonRect = getDeleteButtonRect(bounds)
@@ -269,6 +319,43 @@ class DeviceListPanel(
         }
     }
 
+    /**
+     * Обновляет список объединёнными устройствами (USB + Wi-Fi в одном элементе)
+     */
+    fun updateCombinedDeviceList(devices: List<CombinedDeviceInfo>) {
+        SwingUtilities.invokeLater {
+            deviceListModel.clear()
+            // 1. Подключённые устройства
+            if (devices.isNotEmpty()) {
+                deviceListModel.addElement(DeviceListItem.SectionHeader("Connected devices"))
+                devices.forEach { device ->
+                    deviceListModel.addElement(DeviceListItem.CombinedDevice(device))
+                }
+            }
+            
+            // 2. История Wi-Fi устройств (которые сейчас не подключены)
+            val historyDevices = WifiDeviceHistoryService.getHistory()
+                .filter { historyEntry ->
+                    // Показываем только те, которые сейчас не подключены по Wi-Fi
+                    devices.none { combined ->
+                        // Проверяем только Wi-Fi подключения
+                        combined.hasWifiConnection && 
+                        combined.wifiDevice?.ipAddress == historyEntry.ipAddress
+                    }
+                }
+            
+            if (historyDevices.isNotEmpty()) {
+                deviceListModel.addElement(DeviceListItem.SectionHeader("Previously connected devices"))
+                historyDevices.forEach { entry ->
+                    deviceListModel.addElement(DeviceListItem.WifiHistoryDevice(entry))
+                }
+            }
+            
+            deviceList.revalidate()
+            deviceList.repaint()
+        }
+    }
+    
     fun updateDeviceList(devices: List<DeviceInfo>) {
         SwingUtilities.invokeLater {
             deviceListModel.clear()

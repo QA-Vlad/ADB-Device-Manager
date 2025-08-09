@@ -872,4 +872,92 @@ object AdbService {
         }
         return null
     }
+    
+    /**
+     * Получает дефолтный DPI устройства
+     * 
+     * @param device устройство
+     * @return Result с дефолтным DPI или ошибкой
+     */
+    fun getDefaultDpi(device: IDevice): Result<Int> {
+        return runDeviceOperation(device.name, "get default DPI") {
+            val receiver = CollectingOutputReceiver()
+            device.executeShellCommand("wm density", receiver, PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            
+            val output = receiver.output.trim()
+            // Вывод обычно выглядит как:
+            // Physical density: 420
+            // Override density: 480
+            // Ищем физическую плотность (это дефолтная)
+            val physicalDensityPattern = Pattern.compile("Physical density: (\\d+)")
+            val matcher = physicalDensityPattern.matcher(output)
+            
+            if (matcher.find()) {
+                val dpi = matcher.group(1).toInt()
+                PluginLogger.debug("Default (physical) DPI for device %s: %d", device.name, dpi)
+                dpi
+            } else {
+                // Если нет физической плотности, пробуем найти просто плотность
+                val simpleDensityPattern = Pattern.compile("(\\d+)")
+                val simpleMatcher = simpleDensityPattern.matcher(output)
+                if (simpleMatcher.find()) {
+                    val dpi = simpleMatcher.group(0).toInt()
+                    PluginLogger.debug("Default DPI for device %s (fallback): %d", device.name, dpi)
+                    dpi
+                } else {
+                    throw Exception("Could not parse default DPI from output: $output")
+                }
+            }
+        }
+    }
+    
+    /**
+     * Отключает Wi-Fi устройство
+     * 
+     * @param ipAddress IP адрес устройства (без порта)
+     * @return Result успешности отключения
+     */
+    fun disconnectWifi(ipAddress: String): Result<Boolean> {
+        return runAdbOperation("Disconnect Wi-Fi") {
+            val adbPath = AdbPathResolver.findAdbExecutable()
+            if (adbPath == null) {
+                PluginLogger.error("ADB executable not found")
+                return@runAdbOperation false
+            }
+            
+            // Формируем полный адрес с портом
+            val target = if (ipAddress.contains(":")) ipAddress else "$ipAddress:5555"
+            
+            PluginLogger.info("Disconnecting from %s", target)
+            
+            val disconnectCmd = ProcessBuilder(adbPath, "disconnect", target)
+            disconnectCmd.redirectErrorStream(true)
+            
+            val process = disconnectCmd.start()
+            val completed = process.waitFor(5, TimeUnit.SECONDS)
+            
+            if (completed) {
+                val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
+                val exitCode = process.exitValue()
+                PluginLogger.info("ADB disconnect output: '%s' (exit code: %d)", output, exitCode)
+                
+                // Проверяем результат
+                val success = output.contains("disconnected") || 
+                             output.contains("no such device") || // Уже отключено
+                             exitCode == 0
+                
+                if (success) {
+                    PluginLogger.info("Successfully disconnected from %s", target)
+                } else {
+                    PluginLogger.warn("Failed to disconnect from %s", target)
+                }
+                
+                return@runAdbOperation success
+            } else {
+                process.destroyForcibly()
+                PluginLogger.error("Disconnect command timed out")
+                return@runAdbOperation false
+            }
+        }
+    }
 }
