@@ -17,7 +17,8 @@ data class CombinedDeviceInfo(
     val currentResolution: Pair<Int, Int>? = null, // width x height
     val currentDpi: Int? = null,
     val defaultResolution: Pair<Int, Int>? = null,
-    val defaultDpi: Int? = null
+    val defaultDpi: Int? = null,
+    var isSelectedForAdb: Boolean = true // По умолчанию выбрано для ADB команд
 ) {
 
     /**
@@ -45,27 +46,4 @@ data class CombinedDeviceInfo(
     val hasModifiedDpi: Boolean
         get() = currentDpi != null && defaultDpi != null && 
                 currentDpi != defaultDpi
-    
-    /**
-     * Форматирует текущее разрешение для отображения
-     */
-    fun getFormattedResolution(): String? {
-        return currentResolution?.let { "${it.first}x${it.second}" }
-    }
-    
-    /**
-     * Форматирует текущие параметры экрана для отображения
-     */
-    fun getFormattedScreenParams(): String? {
-        val resolution = getFormattedResolution()
-        val dpi = currentDpi?.toString()
-        
-        return when {
-            resolution != null && dpi != null -> "$resolution • ${dpi}dpi"
-            resolution != null -> resolution
-            dpi != null -> "${dpi}dpi"
-            else -> null
-        }
-    }
-
 }

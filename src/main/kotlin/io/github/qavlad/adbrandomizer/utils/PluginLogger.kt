@@ -22,6 +22,10 @@ object PluginLogger {
         log(LogLevel.WARN, category, message, null, *args)
     }
     
+    fun warn(category: LogCategory, message: String, throwable: Throwable?, vararg args: Any?) {
+        log(LogLevel.WARN, category, message, throwable, *args)
+    }
+    
     fun error(category: LogCategory, message: String, throwable: Throwable? = null, vararg args: Any?) {
         log(LogLevel.ERROR, category, message, throwable, *args)
     }
@@ -67,7 +71,7 @@ object PluginLogger {
     }
     
     fun wifiConnectionFailed(ipAddress: String, port: Int, exception: Exception? = null) {
-        error(LogCategory.ADB_CONNECTION, "Wi-Fi connection failed: %s:%d", exception, ipAddress, port)
+        warn(LogCategory.ADB_CONNECTION, "Wi-Fi connection failed: %s:%d", exception, ipAddress, port)
     }
     
     // Для обратной совместимости

@@ -62,7 +62,16 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
             onWifiClick = { device -> connectDeviceViaWifi(device) },
             onWifiDisconnect = { ipAddress -> disconnectWifiDevice(ipAddress) },
             compactActionPanel = compactActionPanel,
-            onForceUpdate = { devicePollingService.forceCombinedUpdate() }
+            onForceUpdate = { devicePollingService.forceCombinedUpdate() },
+            onResetSize = { device -> resetDeviceSize(device) },
+            onResetDpi = { device -> resetDeviceDpi(device) },
+            onApplyChanges = { device, newSize, newDpi -> applyDeviceChanges(device, newSize, newDpi) },
+            onAdbCheckboxChanged = { device, isSelected -> 
+                device.isSelectedForAdb = isSelected
+                // Сохраняем состояние чекбокса чтобы оно не сбрасывалось при обновлении
+                devicePollingService.updateDeviceSelection(device.baseSerialNumber, isSelected)
+            },
+            onWifiConnectByIp = { ipAddress, port -> connectDeviceViaWifiByIp(ipAddress, port) }
         )
         
         val splitPane = JSplitPane(JSplitPane.VERTICAL_SPLIT, buttonPanel, deviceListPanel).apply {
@@ -87,6 +96,30 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                 .map { it.info }
         }
     }
+    
+    private fun getSelectedDevicesForAdb(): List<IDevice> {
+        val model = deviceListPanel.getDeviceListModel()
+        val selectedDevices = mutableListOf<IDevice>()
+        
+        for (i in 0 until model.size()) {
+            when (val item = model.getElementAt(i)) {
+                is DeviceListItem.CombinedDevice -> {
+                    if (item.info.isSelectedForAdb) {
+                        // Добавляем активное устройство (USB или Wi-Fi)
+                        val device = item.info.usbDevice?.device ?: item.info.wifiDevice?.device
+                        device?.let { selectedDevices.add(it) }
+                    }
+                }
+                is DeviceListItem.Device -> {
+                    // Для старого формата - считаем все подключенные устройства выбранными
+                    item.info.device?.let { selectedDevices.add(it) }
+                }
+                else -> {} // Игнорируем другие типы элементов
+            }
+        }
+        
+        return selectedDevices
+    }
 
     // ==================== VALIDATION AND HELPERS ====================
 
@@ -94,7 +127,7 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
         val devicesResult = AdbService.getConnectedDevices()
         val devices = devicesResult.getOrNull() ?: run {
             devicesResult.onError { exception, message ->
-                PluginLogger.error("Failed to get connected devices", exception, message ?: "")
+                PluginLogger.warn(LogCategory.ADB_CONNECTION, "Failed to get connected devices: %s", exception.message)
             }
             emptyList()
         }
@@ -118,12 +151,17 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
 
     private fun executeRandomAction(setSize: Boolean, setDpi: Boolean) {
         println("ADB_DEBUG: executeRandomAction called - setSize: $setSize, setDpi: $setDpi")
-        if (!validateDevicesAvailable()) return
+        
+        val selectedDevices = getSelectedDevicesForAdb()
+        if (selectedDevices.isEmpty()) {
+            NotificationUtils.showWarning(project, "No devices selected for ADB commands. Please check the ADB checkboxes.")
+            return
+        }
 
         val randomPreset = selectRandomPreset(setSize, setDpi) ?: return
         
         // Позиция будет вычислена динамически после обновления счетчиков
-        applyPresetToDevices(randomPreset, setSize, setDpi)
+        applyPresetToSelectedDevices(randomPreset, setSize, setDpi, selectedDevices)
     }
 
     private fun selectRandomPreset(setSize: Boolean, setDpi: Boolean): DevicePreset? {
@@ -196,18 +234,72 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
 
         val preset = presets[index]
         // Позиция будет вычислена динамически после обновления счетчиков
-        applyPresetToDevices(preset, setSize = true, setDpi = true)
+        applyPresetToDevices(preset)
     }
 
-    private fun applyPresetToDevices(preset: DevicePreset, setSize: Boolean, setDpi: Boolean) {
+    private fun applyPresetToSelectedDevices(preset: DevicePreset, setSize: Boolean, setDpi: Boolean, selectedDevices: List<IDevice>) {
         lastUsedPreset = preset
-        PresetApplicationService.applyPreset(project, preset, setSize, setDpi)
+        
+        val taskDescription = buildString {
+            append("Applying ")
+            when {
+                setSize && setDpi -> append("${preset.size} and ${preset.dpi} DPI")
+                setSize -> append(preset.size)
+                setDpi -> append("${preset.dpi} DPI")
+            }
+        }
+        
+        object : Task.Backgroundable(project, taskDescription) {
+            override fun run(indicator: ProgressIndicator) {
+                selectedDevices.forEach { device ->
+                    indicator.text = "Applying to ${device.name}..."
+                    
+                    if (setSize) {
+                        ValidationUtils.parseSize(preset.size)?.let { (width, height) ->
+                            AdbService.setSize(device, width, height)
+                        }
+                    }
+                    
+                    if (setDpi) {
+                        ValidationUtils.parseDpi(preset.dpi)?.let { dpi ->
+                            AdbService.setDpi(device, dpi)
+                        }
+                    }
+                }
+                
+                // Сохраняем информацию о последнем примененном пресете
+                DeviceStateService.setLastAppliedPresets(
+                    if (setSize) preset else null,
+                    if (setDpi) preset else null
+                )
+                
+                ApplicationManager.getApplication().invokeLater {
+                    val message = buildString {
+                        append("Applied ")
+                        when {
+                            setSize && setDpi -> append("${preset.size} and ${preset.dpi} DPI")
+                            setSize -> append(preset.size)
+                            setDpi -> append("${preset.dpi} DPI")
+                        }
+                        append(" to ${selectedDevices.size} device(s)")
+                    }
+                    NotificationUtils.showSuccess(project, message)
+                }
+            }
+        }.queue()
+    }
+    
+    private fun applyPresetToDevices(preset: DevicePreset) {
+        lastUsedPreset = preset
+        PresetApplicationService.applyPreset(project, preset, setSize = true, setDpi = true)
     }
 
     // ==================== RESET ACTIONS ====================
 
     private fun executeResetAction(resetSize: Boolean, resetDpi: Boolean) {
-        if (!validateDevicesAvailable()) {
+        val selectedDevices = getSelectedDevicesForAdb()
+        if (selectedDevices.isEmpty()) {
+            NotificationUtils.showWarning(project, "No devices selected for ADB commands. Please check the ADB checkboxes.")
             return
         }
 
@@ -215,14 +307,7 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
 
         object : Task.Backgroundable(project, actionDescription) {
             override fun run(indicator: ProgressIndicator) {
-                val devicesResult = AdbService.getConnectedDevices()
-                val devices = devicesResult.getOrNull() ?: run {
-                    devicesResult.onError { exception, message ->
-                        PluginLogger.error("Failed to get devices for reset", exception, message ?: "")
-                    }
-                    emptyList()
-                }
-                resetAllDevices(devices, resetSize, resetDpi, indicator)
+                resetAllDevices(selectedDevices, resetSize, resetDpi, indicator)
                 
                 DeviceStateService.handleReset(resetSize, resetDpi)
                 
@@ -230,7 +315,7 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                 PresetsDialogUpdateNotifier.notifyUpdate()
                 
                 ApplicationManager.getApplication().invokeLater {
-                    showResetResult(devices.size, resetSize, resetDpi)
+                    showResetResult(selectedDevices.size, resetSize, resetDpi)
                 }
             }
         }.queue()
@@ -370,6 +455,115 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
         NotificationUtils.showSuccess(project, "$resetDescription reset for $deviceCount device(s).")
     }
 
+    // ==================== DEVICE PARAMETER ACTIONS ====================
+    
+    private fun resetDeviceSize(device: io.github.qavlad.adbrandomizer.ui.models.CombinedDeviceInfo) {
+        // Проверяем, изменено ли разрешение
+        if (!device.hasModifiedResolution) {
+            NotificationUtils.showInfo(project, "Screen size is already at default")
+            return
+        }
+        
+        val activeDevice = device.usbDevice?.device ?: device.wifiDevice?.device
+        if (activeDevice != null) {
+            object : Task.Backgroundable(project, "Resetting screen size") {
+                override fun run(indicator: ProgressIndicator) {
+                    AdbService.resetSize(activeDevice)
+                    DeviceStateService.handleReset(resetSize = true, resetDpi = false)
+                    PresetsDialogUpdateNotifier.notifyUpdate()
+                    
+                    ApplicationManager.getApplication().invokeLater {
+                        NotificationUtils.showSuccess(project, "Screen size reset to default")
+                        devicePollingService.forceCombinedUpdate()
+                    }
+                }
+            }.queue()
+        }
+    }
+    
+    private fun resetDeviceDpi(device: io.github.qavlad.adbrandomizer.ui.models.CombinedDeviceInfo) {
+        // Проверяем, изменено ли DPI
+        if (!device.hasModifiedDpi) {
+            NotificationUtils.showInfo(project, "DPI is already at default")
+            return
+        }
+        
+        val activeDevice = device.usbDevice?.device ?: device.wifiDevice?.device
+        if (activeDevice != null) {
+            object : Task.Backgroundable(project, "Resetting DPI") {
+                override fun run(indicator: ProgressIndicator) {
+                    AdbService.resetDpi(activeDevice)
+                    DeviceStateService.handleReset(resetSize = false, resetDpi = true)
+                    PresetsDialogUpdateNotifier.notifyUpdate()
+                    
+                    ApplicationManager.getApplication().invokeLater {
+                        NotificationUtils.showSuccess(project, "DPI reset to default")
+                        devicePollingService.forceCombinedUpdate()
+                    }
+                }
+            }.queue()
+        }
+    }
+    
+    private fun applyDeviceChanges(device: io.github.qavlad.adbrandomizer.ui.models.CombinedDeviceInfo, newSize: String?, newDpi: String?) {
+        val activeDevice = device.usbDevice?.device ?: device.wifiDevice?.device
+        if (activeDevice != null) {
+            object : Task.Backgroundable(project, "Applying device changes") {
+                override fun run(indicator: ProgressIndicator) {
+                    var success = true
+                    val messages = mutableListOf<String>()
+                    
+                    // Применяем изменения размера
+                    newSize?.let { sizeStr ->
+                        if (ValidationUtils.isValidScreenSize(sizeStr)) {
+                            val parts = sizeStr.split("x")
+                            val width = parts[0].toInt()
+                            val height = parts[1].toInt()
+                            val result = AdbService.setSize(activeDevice, width, height)
+                            if (result.isSuccess()) {
+                                messages.add("Size set to $sizeStr")
+                            } else {
+                                success = false
+                                messages.add("Failed to set size")
+                            }
+                        } else {
+                            success = false
+                            messages.add("Invalid size format")
+                        }
+                    }
+                    
+                    // Применяем изменения DPI
+                    newDpi?.let { dpiStr ->
+                        val dpiValue = dpiStr.replace("dpi", "").trim().toIntOrNull()
+                        if (dpiValue != null && ValidationUtils.isValidDpi(dpiValue)) {
+                            val result = AdbService.setDpi(activeDevice, dpiValue)
+                            if (result.isSuccess()) {
+                                messages.add("DPI set to $dpiValue")
+                            } else {
+                                success = false
+                                messages.add("Failed to set DPI")
+                            }
+                        } else {
+                            success = false
+                            messages.add("Invalid DPI value")
+                        }
+                    }
+                    
+                    PresetsDialogUpdateNotifier.notifyUpdate()
+                    
+                    ApplicationManager.getApplication().invokeLater {
+                        if (success) {
+                            NotificationUtils.showSuccess(project, messages.joinToString(", "))
+                        } else {
+                            NotificationUtils.showError(project, messages.joinToString(", "))
+                        }
+                        devicePollingService.forceCombinedUpdate()
+                    }
+                }
+            }.queue()
+        }
+    }
+    
     // ==================== CONNECTION ACTIONS ====================
     
     private fun disconnectWifiDevice(ipAddress: String) {
@@ -475,7 +669,7 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
             val devicesResult = AdbService.getConnectedDevices()
             val devices = devicesResult.getOrNull() ?: run {
                 devicesResult.onError { exception, message ->
-                    PluginLogger.error("Failed to verify connection", exception, message ?: "")
+                    PluginLogger.warn(LogCategory.ADB_CONNECTION, "Failed to verify connection: %s", exception.message)
                 }
                 emptyList()
             }
@@ -509,6 +703,34 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
         }
     }
 
+    /**
+     * Подключает устройство по Wi-Fi используя IP адрес и порт
+     * Используется для подключения из секции Previously connected devices
+     */
+    fun connectDeviceViaWifiByIp(ipAddress: String, port: Int = 5555) {
+        object : Task.Backgroundable(project, "Connecting to $ipAddress:$port") {
+            override fun run(indicator: ProgressIndicator) {
+                indicator.isIndeterminate = true
+                indicator.text = "Connecting to $ipAddress:$port..."
+
+                try {
+                    val connectResult = AdbService.connectWifi(project, ipAddress, port)
+                    val success = connectResult.getOrNull() ?: run {
+                        connectResult.onError { exception, _ ->
+                            PluginLogger.wifiConnectionFailed(ipAddress, port, exception)
+                        }
+                        false
+                    }
+                    handleConnectionResult(success, ipAddress, port)
+                } catch (e: Exception) {
+                    ApplicationManager.getApplication().invokeLater {
+                        NotificationUtils.showError(project, "Error connecting to device: ${e.message}")
+                    }
+                }
+            }
+        }.queue()
+    }
+
     private fun connectDeviceViaWifi(device: IDevice) {
         object : Task.Backgroundable(project, "Connecting to Device via Wi-Fi") {
             override fun run(indicator: ProgressIndicator) {
@@ -518,7 +740,7 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                 val ipResult = AdbService.getDeviceIpAddress(device)
                 val ipAddress = ipResult.getOrNull() ?: run {
                     ipResult.onError { exception, message ->
-                        PluginLogger.error("Failed to get IP address for device ${device.name}", exception, message ?: "")
+                        PluginLogger.warn(LogCategory.ADB_CONNECTION, "Failed to get IP address for device %s: %s", device.name, exception.message)
                     }
                     null
                 }
@@ -533,7 +755,7 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                     val ipBeforeResult = AdbService.getDeviceIpAddress(device)
                     val ipBeforeEnable = ipBeforeResult.getOrNull() ?: run {
                         ipBeforeResult.onError { exception, message ->
-                            PluginLogger.error("Failed to verify device IP before TCP/IP enable", exception, message ?: "")
+                            PluginLogger.warn(LogCategory.ADB_CONNECTION, "Failed to verify device IP before TCP/IP enable: %s", exception.message)
                         }
                         null
                     }
@@ -547,7 +769,7 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                     // Сначала включаем TCP/IP режим
                     val tcpipResult = AdbService.enableTcpIp(device)
                     tcpipResult.onError { exception, message ->
-                        PluginLogger.error("Failed to enable TCP/IP mode", exception, message ?: "")
+                        PluginLogger.warn(LogCategory.ADB_CONNECTION, "Failed to enable TCP/IP mode: %s", exception.message)
                     }
                     PluginLogger.info("TCP/IP mode enabled on port 5555")
                     

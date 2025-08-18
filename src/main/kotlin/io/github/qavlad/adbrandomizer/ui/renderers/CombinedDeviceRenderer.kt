@@ -6,6 +6,12 @@ import com.intellij.util.ui.JBFont
 import com.intellij.util.ui.JBUI
 import io.github.qavlad.adbrandomizer.ui.components.HoverState
 import io.github.qavlad.adbrandomizer.ui.models.CombinedDeviceInfo
+import io.github.qavlad.adbrandomizer.settings.PluginSettings
+import io.github.qavlad.adbrandomizer.ui.config.HitboxConfigManager
+import io.github.qavlad.adbrandomizer.ui.config.DeviceType
+import io.github.qavlad.adbrandomizer.ui.config.HitboxType
+import io.github.qavlad.adbrandomizer.utils.PluginLogger
+import io.github.qavlad.adbrandomizer.utils.logging.LogCategory
 import java.awt.*
 import javax.swing.*
 
@@ -17,12 +23,55 @@ class CombinedDeviceRenderer(
 ) {
     companion object {
         private const val BUTTON_HEIGHT = 22
-        private const val SECTION_SPACING = 15
+
+        // Статические поля для отслеживания позиции мыши в дебаг режиме
+        var debugMousePosition: Point? = null
+        var debugHoveredIndex: Int = -1
     }
 
     private val usbIcon: Icon = IconLoader.getIcon("/icons/usb.svg", javaClass)
+    private val usbOffIcon: Icon = IconLoader.getIcon("/icons/usb_off.svg", javaClass)
     private val wifiIcon: Icon = IconLoader.getIcon("/icons/wifi.svg", javaClass)
     private val mirrorIcon = IconLoader.getIcon("/icons/scrcpy.svg", javaClass)
+    private val resetIcon = IconLoader.getIcon("/icons/reset.svg", javaClass)
+    
+    // Кастомная иконка редактирования - простой монохромный карандаш
+    private val editIcon = object : Icon {
+        override fun paintIcon(c: Component?, g: Graphics, x: Int, y: Int) {
+            val g2d = g.create() as Graphics2D
+            g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+            
+            // Используем тот же цвет, что и для текста
+            val color = JBColor.foreground()
+            g2d.color = color
+            
+            // Основной корпус карандаша (направлен в левый нижний угол)
+            g2d.stroke = BasicStroke(1.5f)
+            g2d.drawLine(x + 12, y + 3, x + 5, y + 10) // Основная линия карандаша
+            
+            // Контур карандаша
+            g2d.stroke = BasicStroke(1f)
+            val bodyX = intArrayOf(x + 11, x + 13, x + 6, x + 4)
+            val bodyY = intArrayOf(y + 2, y + 4, y + 11, y + 9)
+            g2d.drawPolygon(bodyX, bodyY, 4)
+            
+            // Острие карандаша
+            g2d.fillPolygon(
+                intArrayOf(x + 4, x + 2, x + 3),
+                intArrayOf(y + 9, y + 11, y + 12),
+                3
+            )
+            
+            // Небольшая линия-след от карандаша
+            g2d.stroke = BasicStroke(0.8f)
+            g2d.drawLine(x + 2, y + 13, x + 5, y + 13)
+            
+            g2d.dispose()
+        }
+        
+        override fun getIconWidth() = 16
+        override fun getIconHeight() = 16
+    }
 
     fun createComponent(
         device: CombinedDeviceInfo,
@@ -30,119 +79,151 @@ class CombinedDeviceRenderer(
         isSelected: Boolean,
         list: JList<*>
     ): Component {
+        val hoverState = getHoverState()
+        
+        // Главная панель с BorderLayout для чекбокса слева и контента справа
+        val mainPanel = if (PluginSettings.instance.debugHitboxes) {
+            createDebugPanel(device, index, isSelected, list)
+        } else {
+            JPanel(BorderLayout()).apply {
+                background = if (isSelected) list.selectionBackground else list.background
+                border = JBUI.Borders.empty(5)
+                isOpaque = true
+            }
+        }
+        
+        // Чекбокс слева (без текста, только чекбокс)
+        val adbCheckbox = JCheckBox().apply {
+            this.isSelected = device.isSelectedForAdb
+            isOpaque = false
+            toolTipText = "Include this device in ADB commands"
+            // Не добавляем слушателей - они не работают в рендерере
+        }
+        val checkboxPanel = JPanel(BorderLayout()).apply {
+            isOpaque = false
+            border = JBUI.Borders.empty(0, 4)
+            preferredSize = Dimension(35, 0)
+            add(adbCheckbox, BorderLayout.NORTH) // Используем NORTH для выравнивания по верху
+        }
+        mainPanel.add(checkboxPanel, BorderLayout.WEST)
+        
+        // Панель с содержимым справа
         val panel = JPanel().apply {
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
-            border = JBUI.Borders.empty(8)
-            background = if (isSelected) list.selectionBackground else list.background
-            isOpaque = true
+            isOpaque = false
+            alignmentX = Component.LEFT_ALIGNMENT
         }
 
         // Первая строка - название устройства и серийный номер
-        val namePanel = JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
+        val namePanel = JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.X_AXIS)
             isOpaque = false
             maximumSize = Dimension(Int.MAX_VALUE, 20)
+            alignmentX = Component.LEFT_ALIGNMENT
         }
         
         val nameText = "${device.displayName} (${device.baseSerialNumber})"
         val nameLabel = JLabel(nameText).apply {
             font = font.deriveFont(Font.BOLD)
             foreground = if (isSelected) list.selectionForeground else list.foreground
+            toolTipText = "Device model and serial number"
         }
         namePanel.add(nameLabel)
         panel.add(namePanel)
 
-        // Вторая строка - информация об Android, IP адресе (если есть) и параметрах экрана
-        val infoPanel = JPanel(FlowLayout(FlowLayout.LEFT, 0, 2)).apply {
+        // Вторая строка - информация об Android и IP адресе
+        val infoPanel = JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.X_AXIS)
             isOpaque = false
             maximumSize = Dimension(Int.MAX_VALUE, 18)
+            alignmentX = Component.LEFT_ALIGNMENT
         }
         
         val infoText = buildString {
             append("Android ${device.androidVersion} (API ${device.apiLevel})")
-            // Добавляем IP адрес только если есть USB подключение без Wi-Fi
-            // (для устройств только с USB, чтобы видеть их IP для подключения по Wi-Fi)
-            if (device.hasUsbConnection && !device.hasWifiConnection) {
-                device.ipAddress?.let {
-                    append(" • $it")
-                }
-            }
-            device.getFormattedScreenParams()?.let {
+            // Добавляем IP адрес для всех устройств, у которых он есть
+            val ipAddress = device.wifiDevice?.ipAddress ?: device.ipAddress
+            ipAddress?.let {
                 append(" • $it")
             }
         }
         
+        val ipAddress = device.wifiDevice?.ipAddress ?: device.ipAddress
         val infoLabel = JLabel(infoText).apply {
             font = JBFont.small()
-            foreground = if (device.hasModifiedResolution || device.hasModifiedDpi) {
-                JBColor(Color(255, 140, 0), Color(255, 160, 0)) // Оранжевый цвет для изменённых параметров
-            } else {
-                JBColor.GRAY
-            }
+            foreground = JBColor.GRAY
+            toolTipText = "Android version, API level${if (ipAddress != null) " and IP address" else ""}"
         }
         infoPanel.add(infoLabel)
         panel.add(infoPanel)
+        
+        // Добавляем больше отступа между информацией и параметрами
+        panel.add(Box.createVerticalStrut(8))
+        
+        // Третья строка - дефолтные параметры экрана
+        val defaultParamsPanel = createDefaultParamsPanel(device)
+        panel.add(defaultParamsPanel)
+        
+        // Четвертая строка - текущие параметры экрана
+        val currentParamsPanel = createCurrentParamsPanel(device, index, hoverState)
+        panel.add(Box.createVerticalStrut(4))
+        panel.add(currentParamsPanel)
 
-        // Третья строка - кнопки управления подключениями
-        val controlsPanel = createControlsPanel(device, index)
+        // Пятая строка - кнопки управления подключениями
+        val controlsPanel = createControlsPanel(device, index, hoverState)
         panel.add(Box.createVerticalStrut(4))
         panel.add(controlsPanel)
-
-        return panel
+        
+        mainPanel.add(panel, BorderLayout.CENTER)
+        return mainPanel
     }
 
-    private fun createControlsPanel(device: CombinedDeviceInfo, index: Int): JPanel {
-        val panel = JPanel(FlowLayout(FlowLayout.LEFT, SECTION_SPACING, 0)).apply {
+    private fun createControlsPanel(device: CombinedDeviceInfo, index: Int, hoverState: HoverState): JPanel {
+        val panel = JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.X_AXIS)
             isOpaque = false
             maximumSize = Dimension(Int.MAX_VALUE, BUTTON_HEIGHT + 4)
+            alignmentX = Component.LEFT_ALIGNMENT
         }
 
-        val hoverState = getHoverState()
         val isThisDevice = hoverState.hoveredDeviceIndex == index
 
-        // USB секция
-        if (device.hasUsbConnection) {
-            val usbPanel = createConnectionSection(
-                usbIcon,
-                "USB",
-                true,
-                showMirror = true,
-                showConnect = false, // Убираем кнопку Wi-Fi из USB секции
-                showDisconnect = false,
-                isMirrorHovered = isThisDevice && hoverState.hoveredButtonType == "USB_MIRROR",
-                isConnectHovered = false,
-                isDisconnectHovered = false
-            )
-            panel.add(usbPanel)
-        } else {
-            val usbPanel = createConnectionSection(
-                usbIcon,
-                "USB",
-                false,
-                showMirror = false,
-                showConnect = false,
-                showDisconnect = false,
-                isMirrorHovered = false,
-                isConnectHovered = false,
-                isDisconnectHovered = false
-            )
-            panel.add(usbPanel)
-        }
+        // USB секция - всегда показываем кнопку зеркалирования если USB подключен
+        // Добавляем отрицательный отступ, чтобы сдвинуть USB влево
+        panel.add(Box.createHorizontalStrut(-5))
+        
+        val usbPanel = createConnectionSection(
+            if (device.hasUsbConnection) usbIcon else usbOffIcon,
+            "USB",
+            device.hasUsbConnection,
+            showMirror = true, // Показываем всегда, но будет серой если нет USB
+            showConnect = false,
+            showDisconnect = false,
+            isMirrorHovered = isThisDevice && hoverState.hoveredButtonType == "USB_MIRROR",
+            isConnectHovered = false,
+            isDisconnectHovered = false,
+            isMirrorEnabled = device.hasUsbConnection // Передаём флаг активности
+        )
+        panel.add(usbPanel)
 
         // Разделитель
+        panel.add(Box.createHorizontalStrut(15))
         panel.add(createSeparator())
+        panel.add(Box.createHorizontalStrut(15))
 
         // Wi-Fi секция
         if (device.hasWifiConnection) {
             val wifiPanel = createConnectionSection(
                 wifiIcon,
-                device.wifiDevice?.ipAddress ?: device.ipAddress ?: "Wi-Fi",
+                "Wi-Fi",
                 true,
                 showMirror = true,
                 showConnect = false,
                 showDisconnect = true,
                 isMirrorHovered = isThisDevice && hoverState.hoveredButtonType == "WIFI_MIRROR",
                 isConnectHovered = false,
-                isDisconnectHovered = isThisDevice && hoverState.hoveredButtonType == "WIFI_DISCONNECT"
+                isDisconnectHovered = isThisDevice && hoverState.hoveredButtonType == "WIFI_DISCONNECT",
+                isMirrorEnabled = true // Wi-Fi зеркалирование всегда активно если есть подключение
             )
             panel.add(wifiPanel)
         } else {
@@ -157,11 +238,12 @@ class CombinedDeviceRenderer(
                 showDisconnect = false,
                 isMirrorHovered = false,
                 isConnectHovered = isThisDevice && hoverState.hoveredButtonType == "WIFI_CONNECT",
-                isDisconnectHovered = false
+                isDisconnectHovered = false,
+                isMirrorEnabled = false
             )
             panel.add(wifiPanel)
         }
-
+        
         return panel
     }
 
@@ -174,9 +256,11 @@ class CombinedDeviceRenderer(
         showDisconnect: Boolean,
         isMirrorHovered: Boolean,
         isConnectHovered: Boolean,
-        isDisconnectHovered: Boolean
+        isDisconnectHovered: Boolean,
+        isMirrorEnabled: Boolean = true // По умолчанию активна
     ): JPanel {
-        val panel = JPanel(FlowLayout(FlowLayout.LEFT, 4, 0)).apply {
+        val panel = JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.X_AXIS)
             isOpaque = false
         }
 
@@ -185,13 +269,15 @@ class CombinedDeviceRenderer(
             isEnabled = isActive
             toolTipText = when {
                 icon == usbIcon && isActive -> "Connected via USB"
-                icon == usbIcon && !isActive -> "USB not connected"
-                icon == wifiIcon && isActive -> "Connected via Wi-Fi at $text"
+                (icon == usbIcon || icon == usbOffIcon) && !isActive -> "USB not connected"
+                icon == wifiIcon && isActive -> "Connected via Wi-Fi"
                 icon == wifiIcon && !isActive -> "Wi-Fi not connected"
                 else -> null
             }
         }
         panel.add(iconLabel)
+
+        panel.add(Box.createHorizontalStrut(4))
 
         // Текст (IP для Wi-Fi или "USB")
         val textLabel = JLabel(text).apply {
@@ -202,19 +288,32 @@ class CombinedDeviceRenderer(
 
         // Кнопка Mirror
         if (showMirror) {
-            val connectionType = if (icon == usbIcon) "USB" else "Wi-Fi"
-            val mirrorButton = createIconButton(mirrorIcon, "Mirror screen via $connectionType", isMirrorHovered)
+            panel.add(Box.createHorizontalStrut(4))
+            val connectionType = if (icon == usbIcon || icon == usbOffIcon) "USB" else "Wi-Fi"
+            val tooltip = if (isMirrorEnabled) {
+                "Mirror screen via $connectionType"
+            } else {
+                "Cannot mirror: $connectionType not connected"
+            }
+            val mirrorButton = createIconButton(
+                mirrorIcon, 
+                tooltip, 
+                isMirrorHovered && isMirrorEnabled, // Hover только если активна
+                isEnabled = isMirrorEnabled
+            )
             panel.add(mirrorButton)
         }
 
         // Кнопка Connect Wi-Fi
         if (showConnect) {
+            panel.add(Box.createHorizontalStrut(4))
             val connectButton = createConnectButton(isConnectHovered)
             panel.add(connectButton)
         }
 
         // Кнопка Disconnect (только для Wi-Fi)
         if (showDisconnect) {
+            panel.add(Box.createHorizontalStrut(4))
             val disconnectButton = createDisconnectButton(isDisconnectHovered)
             panel.add(disconnectButton)
         }
@@ -222,18 +321,28 @@ class CombinedDeviceRenderer(
         return panel
     }
 
-    private fun createIconButton(icon: Icon, tooltip: String, isHovered: Boolean): JButton {
+    private fun createIconButton(
+        icon: Icon, 
+        tooltip: String, 
+        isHovered: Boolean,
+        isEnabled: Boolean = true
+    ): JButton {
         return JButton(icon).apply {
             toolTipText = tooltip
             preferredSize = Dimension(BUTTON_HEIGHT, BUTTON_HEIGHT)
             minimumSize = preferredSize
             maximumSize = preferredSize
             isFocusable = false
-            isContentAreaFilled = isHovered
-            isBorderPainted = isHovered
-            cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+            this.isEnabled = isEnabled
+            isContentAreaFilled = isHovered && isEnabled
+            isBorderPainted = isHovered && isEnabled
+            cursor = if (isEnabled) {
+                Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+            } else {
+                Cursor.getDefaultCursor()
+            }
             
-            if (isHovered) {
+            if (isHovered && isEnabled) {
                 background = JBUI.CurrentTheme.ActionButton.hoverBackground()
             }
         }
@@ -298,6 +407,210 @@ class CombinedDeviceRenderer(
             foreground = JBColor.GRAY
         }
     }
+    
+    private fun createDefaultParamsPanel(device: CombinedDeviceInfo): JPanel {
+        val panel = JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.X_AXIS)
+            isOpaque = false
+            maximumSize = Dimension(Int.MAX_VALUE, 25)
+            alignmentX = Component.LEFT_ALIGNMENT
+        }
+        
+        // Default Size label и значение
+        panel.add(JLabel("Default Size:").apply {
+            font = JBFont.small()
+            foreground = JBColor.foreground()
+            toolTipText = "Factory default screen resolution"
+        })
+        
+        // Отступ между лейблом "Default Size:" и полем ввода (компенсирует разницу в длине с "Current Size:")
+        panel.add(Box.createHorizontalStrut(6))
+        
+        val defaultSizeText = device.defaultResolution?.let { "${it.first}x${it.second}" } ?: "N/A"
+        val sizeDefField = JTextField(defaultSizeText).apply {
+            font = JBFont.small()
+            preferredSize = Dimension(80, 20)
+            maximumSize = Dimension(80, 20)
+            isEditable = false
+            border = BorderFactory.createLineBorder(JBColor.GRAY, 1)
+            background = JBColor.background()
+            foreground = JBColor.GRAY
+            toolTipText = "Factory default screen resolution: $defaultSizeText"
+        }
+        panel.add(sizeDefField)
+        
+        // Отступ между полем ввода размера и иконкой сброса
+        panel.add(Box.createHorizontalStrut(6))
+        
+        // Иконка сброса для Size
+        val resetSizeButton = JButton(resetIcon).apply {
+            toolTipText = "Reset to default size"
+            preferredSize = Dimension(16, 16)
+            isFocusable = false
+            isContentAreaFilled = false
+            isBorderPainted = false
+            cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+        }
+        panel.add(resetSizeButton)
+        
+        // Отступ между секцией Size (иконка сброса) и секцией DPI
+        panel.add(Box.createHorizontalStrut(10))
+        
+        // Default DPI label и значение
+        panel.add(JLabel("Default DPI:").apply {
+            font = JBFont.small()
+            foreground = JBColor.foreground()
+            toolTipText = "Factory default dots per inch"
+        })
+        
+        // Отступ между лейблом "Default DPI:" и полем ввода
+        panel.add(Box.createHorizontalStrut(6))
+        
+        val defaultDpiText = device.defaultDpi?.toString() ?: "N/A"
+        val dpiDefField = JTextField(defaultDpiText).apply {
+            font = JBFont.small()
+            preferredSize = Dimension(50, 20)
+            maximumSize = Dimension(50, 20)
+            isEditable = false
+            border = BorderFactory.createLineBorder(JBColor.GRAY, 1)
+            background = JBColor.background()
+            foreground = JBColor.GRAY
+            toolTipText = "Factory default DPI: $defaultDpiText"
+        }
+        panel.add(dpiDefField)
+        
+        // Отступ между полем ввода DPI и иконкой сброса
+        panel.add(Box.createHorizontalStrut(5))
+        
+        // Иконка сброса для DPI
+        val resetDpiButton = JButton(resetIcon).apply {
+            toolTipText = "Reset to default DPI"
+            preferredSize = Dimension(16, 16)
+            isFocusable = false
+            isContentAreaFilled = false
+            isBorderPainted = false
+            cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+        }
+        panel.add(resetDpiButton)
+        
+        panel.add(Box.createHorizontalGlue())
+        
+        return panel
+    }
+    
+    private fun createCurrentParamsPanel(device: CombinedDeviceInfo, index: Int, hoverState: HoverState): JPanel {
+        val panel = JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.X_AXIS)
+            isOpaque = false
+            maximumSize = Dimension(Int.MAX_VALUE, 25)
+            alignmentX = Component.LEFT_ALIGNMENT
+        }
+        
+        val isThisDevice = hoverState.hoveredDeviceIndex == index
+        val isEditSizeHovered = isThisDevice && hoverState.hoveredButtonType == "EDIT_SIZE"
+        val isEditDpiHovered = isThisDevice && hoverState.hoveredButtonType == "EDIT_DPI"
+        
+        // Current Size label и поле ввода с иконкой редактирования
+        panel.add(JLabel("Current Size:").apply {
+            font = JBFont.small()
+            foreground = JBColor.foreground()
+            toolTipText = "Current screen resolution (click edit icon to change)"
+        })
+        
+        // Отступ между лейблом "Current Size:" и полем ввода  
+        panel.add(Box.createHorizontalStrut(5))
+        
+        val currentSizeText = device.currentResolution?.let { "${it.first}x${it.second}" } ?: "N/A"
+        val sizeField = JTextField(currentSizeText).apply {
+            font = JBFont.small()
+            preferredSize = Dimension(80, 20)
+            maximumSize = Dimension(80, 20)
+            isEditable = false
+            cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+            toolTipText = "Click to edit size"
+            // Подсветка рамки при наведении
+            border = if (isEditSizeHovered) {
+                BorderFactory.createLineBorder(JBColor(Color(100, 180, 255), Color(120, 200, 255)), 2)
+            } else {
+                BorderFactory.createLineBorder(JBColor(Color.WHITE, Color.WHITE), 1)
+            }
+            background = if (device.hasModifiedResolution) 
+                JBColor(Color(255, 250, 240), Color(60, 50, 40))
+            else JBColor.background()
+            foreground = if (device.hasModifiedResolution) 
+                JBColor(Color(255, 140, 0), Color(255, 160, 0))
+            else JBColor.foreground()
+        }
+        panel.add(sizeField)
+        
+        // Отступ между полем ввода размера и иконкой редактирования
+        panel.add(Box.createHorizontalStrut(5))
+        
+        // Иконка редактирования для Size
+        val editSizeButton = JButton(editIcon).apply {
+            toolTipText = "Click to edit screen resolution"
+            preferredSize = Dimension(16, 16)
+            isFocusable = false
+            isContentAreaFilled = false
+            isBorderPainted = false
+            cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+        }
+        panel.add(editSizeButton)
+        
+        // Отступ между секцией Size (иконка редактирования) и секцией DPI - такой же, как в Default
+        panel.add(Box.createHorizontalStrut(10))
+        
+        // Current DPI label и поле ввода с иконкой редактирования
+        panel.add(JLabel("Current DPI:").apply {
+            font = JBFont.small()
+            foreground = JBColor.foreground()
+            toolTipText = "Current dots per inch (click edit icon to change)"
+        })
+        
+        // Отступ между лейблом "Current DPI:" и полем ввода (компенсирует разницу в длине с "Default DPI:")
+        panel.add(Box.createHorizontalStrut(6))
+        
+        val currentDpiText = device.currentDpi?.toString() ?: "N/A"
+        val dpiField = JTextField(currentDpiText).apply {
+            font = JBFont.small()
+            preferredSize = Dimension(50, 20)
+            maximumSize = Dimension(50, 20)
+            isEditable = false
+            cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+            toolTipText = "Click to edit DPI"
+            // Подсветка рамки при наведении
+            border = if (isEditDpiHovered) {
+                BorderFactory.createLineBorder(JBColor(Color(100, 180, 255), Color(120, 200, 255)), 2)
+            } else {
+                BorderFactory.createLineBorder(JBColor(Color.WHITE, Color.WHITE), 1)
+            }
+            background = if (device.hasModifiedDpi) 
+                JBColor(Color(255, 250, 240), Color(60, 50, 40))
+            else JBColor.background()
+            foreground = if (device.hasModifiedDpi) 
+                JBColor(Color(255, 140, 0), Color(255, 160, 0))
+            else JBColor.foreground()
+        }
+        panel.add(dpiField)
+        
+        // Отступ между полем ввода DPI и иконкой редактирования
+        panel.add(Box.createHorizontalStrut(5))
+        
+        // Иконка редактирования для DPI
+        val editDpiButton = JButton(editIcon).apply {
+            toolTipText = "Click to edit DPI"
+            preferredSize = Dimension(16, 16)
+            isFocusable = false
+            isContentAreaFilled = false
+            isBorderPainted = false
+            cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+        }
+        panel.add(editDpiButton)
+        
+        panel.add(Box.createHorizontalGlue())
+        
+        return panel
+    }
 
     /**
      * Вычисляет области кнопок для обработки событий мыши
@@ -310,36 +623,335 @@ class CombinedDeviceRenderer(
     ): ButtonRects {
         val rects = ButtonRects()
         
-        // Y позиция для всех кнопок - внизу ячейки с отступом
-        val yOffset = cellBounds.y + cellBounds.height - BUTTON_HEIGHT - 10
+        // Логируем только раз в 5 секунд для каждого устройства
+        PluginLogger.debugWithRateLimit(
+            LogCategory.UI_EVENTS, 
+            "hitbox_${device.displayName}",
+            "HITBOX DEBUG for device: %s, Cell bounds: x=%d, y=%d, w=%d, h=%d",
+            device.displayName, cellBounds.x, cellBounds.y, cellBounds.width, cellBounds.height
+        )
         
-        // Основываясь на ваших измерениях:
-        // USB Mirror была на x=54, Wi-Fi Mirror на x=204, Disconnect на x=230
-        // Добавляем корректировку вправо для точного попадания
-        val xCorrectionUsb = 30
-        val xCorrectionWifi = 35
-        
-        if (device.hasUsbConnection) {
-            // USB Mirror: измерено 54, добавляем корректировку
-            rects.usbMirrorRect = Rectangle(54 + xCorrectionUsb, yOffset, BUTTON_HEIGHT, BUTTON_HEIGHT)
-        }
-        
-        if (device.hasWifiConnection) {
-            rects.wifiMirrorRect = Rectangle(204 + xCorrectionWifi, yOffset, BUTTON_HEIGHT, BUTTON_HEIGHT)
-            // Кнопка Disconnect теперь текстовая и шире (70px)
-            rects.wifiDisconnectRect = Rectangle(230 + xCorrectionWifi, yOffset, 70, BUTTON_HEIGHT)
-        } else if (device.hasUsbConnection) {
-            // Wi-Fi Connect: измерено 165, добавляем корректировку, ширина теперь 65
-            rects.wifiConnectRect = Rectangle(165 + xCorrectionUsb, yOffset, 65, BUTTON_HEIGHT)
+        // Загружаем позиции из JSON конфигурации
+        try {
+            // Используем позиции из JSON если они доступны
+            rects.checkboxRect = HitboxConfigManager.getHitboxRect(
+                DeviceType.CONNECTED, 
+                HitboxType.CHECKBOX, 
+                cellBounds
+            )
+            
+            rects.resetSizeRect = HitboxConfigManager.getHitboxRect(
+                DeviceType.CONNECTED,
+                HitboxType.RESET_SIZE,
+                cellBounds
+            )
+            
+            rects.resetDpiRect = HitboxConfigManager.getHitboxRect(
+                DeviceType.CONNECTED,
+                HitboxType.RESET_DPI,
+                cellBounds
+            )
+            
+            rects.editSizeRect = HitboxConfigManager.getHitboxRect(
+                DeviceType.CONNECTED,
+                HitboxType.EDIT_SIZE,
+                cellBounds
+            )
+            
+            rects.editDpiRect = HitboxConfigManager.getHitboxRect(
+                DeviceType.CONNECTED,
+                HitboxType.EDIT_DPI,
+                cellBounds
+            )
+            
+            // Кнопка USB зеркалирования показывается всегда, но активна только при USB подключении
+            rects.usbMirrorRect = HitboxConfigManager.getHitboxRect(
+                DeviceType.CONNECTED,
+                HitboxType.USB_MIRROR,
+                cellBounds
+            )
+            
+            if (device.hasWifiConnection) {
+                rects.wifiMirrorRect = HitboxConfigManager.getHitboxRect(
+                    DeviceType.CONNECTED,
+                    HitboxType.WIFI_MIRROR,
+                    cellBounds
+                )
+                
+                rects.wifiDisconnectRect = HitboxConfigManager.getHitboxRect(
+                    DeviceType.CONNECTED,
+                    HitboxType.WIFI_DISCONNECT,
+                    cellBounds
+                )
+            } else if (device.hasUsbConnection) {
+                rects.wifiConnectRect = HitboxConfigManager.getHitboxRect(
+                    DeviceType.CONNECTED,
+                    HitboxType.WIFI_CONNECT,
+                    cellBounds
+                )
+            }
+            
+            // Если какой-то хитбокс null, используем fallback
+            if (rects.checkboxRect == null) {
+                rects.checkboxRect = calculateFallbackCheckbox(cellBounds)
+            }
+            if (rects.resetSizeRect == null || rects.resetDpiRect == null || 
+                rects.editSizeRect == null || rects.editDpiRect == null) {
+                calculateFallbackPositions(rects, cellBounds)
+            }
+            
+        } catch (e: Exception) {
+            PluginLogger.error(LogCategory.UI_EVENTS, "Failed to load hitbox config, using fallback", e)
+            calculateFallbackPositions(rects, cellBounds)
         }
         
         return rects
+    }
+    
+    /**
+     * Вычисляет fallback позиции если JSON недоступен
+     */
+    private fun calculateFallbackPositions(rects: ButtonRects, cellBounds: Rectangle) {
+        // Используем старую логику как fallback
+        if (rects.checkboxRect == null) {
+            rects.checkboxRect = Rectangle(cellBounds.x + 8, cellBounds.y + 10, 20, 20)
+        }
+        
+        // Позиции для параметров экрана
+        val paramsYDefault = cellBounds.y + 50
+        val paramsYCurrent = cellBounds.y + 75
+        
+        if (rects.resetSizeRect == null) {
+            rects.resetSizeRect = Rectangle(cellBounds.x + 180, paramsYDefault + 2, 16, 16)
+        }
+        if (rects.resetDpiRect == null) {
+            rects.resetDpiRect = Rectangle(cellBounds.x + 292, paramsYDefault + 2, 16, 16)
+        }
+        if (rects.editSizeRect == null) {
+            rects.editSizeRect = Rectangle(cellBounds.x + 94, paramsYCurrent, 101, 20)
+        }
+        if (rects.editDpiRect == null) {
+            rects.editDpiRect = Rectangle(cellBounds.x + 241, paramsYCurrent, 71, 20)
+        }
+        
+        // Кнопки подключения
+        val yOffset = cellBounds.y + cellBounds.height - 32
+        if (rects.usbMirrorRect == null) {
+            rects.usbMirrorRect = Rectangle(cellBounds.x + 75, yOffset, 22, 22)
+        }
+        if (rects.wifiMirrorRect == null) {
+            rects.wifiMirrorRect = Rectangle(cellBounds.x + 235, yOffset, 22, 22)
+        }
+        if (rects.wifiConnectRect == null) {
+            rects.wifiConnectRect = Rectangle(cellBounds.x + 190, yOffset, 65, 22)
+        }
+        if (rects.wifiDisconnectRect == null) {
+            rects.wifiDisconnectRect = Rectangle(cellBounds.x + 262, yOffset, 70, 22)
+        }
+    }
+    
+    /**
+     * Вычисляет fallback позицию для чекбокса
+     */
+    private fun calculateFallbackCheckbox(cellBounds: Rectangle): Rectangle {
+        return Rectangle(cellBounds.x + 8, cellBounds.y + 10, 20, 20)
     }
 
     data class ButtonRects(
         var usbMirrorRect: Rectangle? = null,
         var wifiConnectRect: Rectangle? = null,
         var wifiMirrorRect: Rectangle? = null,
-        var wifiDisconnectRect: Rectangle? = null
+        var wifiDisconnectRect: Rectangle? = null,
+        var resetSizeRect: Rectangle? = null,
+        var resetDpiRect: Rectangle? = null,
+        var editSizeRect: Rectangle? = null,
+        var editDpiRect: Rectangle? = null,
+        var checkboxRect: Rectangle? = null
     )
+    
+    /**
+     * Создает панель с визуальной отладкой хитбоксов
+     */
+    private fun createDebugPanel(
+        device: CombinedDeviceInfo,
+        index: Int,
+        isSelected: Boolean,
+        list: JList<*>
+    ): JPanel {
+        return object : JPanel(BorderLayout()) {
+            init {
+                background = if (isSelected) list.selectionBackground else list.background
+                border = JBUI.Borders.empty(5)
+                isOpaque = true
+            }
+            
+            override fun paint(g: Graphics) {
+                super.paint(g)
+                
+                // Рисуем хитбоксы поверх содержимого
+                if (PluginSettings.instance.debugHitboxes) {
+                    val g2d = g.create() as Graphics2D
+                    g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+                    
+                    // Вычисляем хитбоксы относительно этой панели
+                    val cellBounds = Rectangle(0, 0, width, height)
+                    val rects = calculateButtonRects(device, cellBounds)
+                    
+                    // Используем статические поля для позиции мыши
+                    val mousePosition = if (debugHoveredIndex == index) debugMousePosition else null
+                    
+                    // Функция для определения прозрачности на основе наведения
+                    fun getAlpha(rect: Rectangle?): Float {
+                        return if (rect != null && mousePosition != null && rect.contains(mousePosition)) {
+                            0.7f // Менее прозрачный при наведении
+                        } else {
+                            0.3f // Обычная прозрачность
+                        }
+                    }
+                    
+                    // Рисуем чекбокс - синий
+                    rects.checkboxRect?.let {
+                        g2d.composite = AlphaComposite.getInstance(AlphaComposite.SRC_OVER, getAlpha(it))
+                        g2d.color = JBColor.BLUE
+                        g2d.fillRect(it.x, it.y, it.width, it.height)
+                        g2d.color = Color.BLUE.darker()
+                        g2d.drawRect(it.x, it.y, it.width, it.height)
+                    }
+                    
+                    // Рисуем кнопки сброса - красные
+                    listOf(rects.resetSizeRect, rects.resetDpiRect).forEach { rect ->
+                        rect?.let {
+                            g2d.composite = AlphaComposite.getInstance(AlphaComposite.SRC_OVER, getAlpha(it))
+                            g2d.color = JBColor.RED
+                            g2d.fillRect(it.x, it.y, it.width, it.height)
+                            g2d.color = Color.RED.darker()
+                            g2d.drawRect(it.x, it.y, it.width, it.height)
+                        }
+                    }
+                    
+                    // Рисуем кнопки редактирования - зеленые
+                    listOf(rects.editSizeRect, rects.editDpiRect).forEach { rect ->
+                        rect?.let {
+                            g2d.composite = AlphaComposite.getInstance(AlphaComposite.SRC_OVER, getAlpha(it))
+                            g2d.color = JBColor.GREEN
+                            g2d.fillRect(it.x, it.y, it.width, it.height)
+                            g2d.color = Color.GREEN.darker()
+                            g2d.drawRect(it.x, it.y, it.width, it.height)
+                        }
+                    }
+                    
+                    // Рисуем кнопки зеркалирования - желтые
+                    listOf(rects.usbMirrorRect, rects.wifiMirrorRect).forEach { rect ->
+                        rect?.let {
+                            g2d.composite = AlphaComposite.getInstance(AlphaComposite.SRC_OVER, getAlpha(it))
+                            g2d.color = JBColor.YELLOW
+                            g2d.fillRect(it.x, it.y, it.width, it.height)
+                            g2d.color = Color.YELLOW.darker()
+                            g2d.drawRect(it.x, it.y, it.width, it.height)
+                        }
+                    }
+                    
+                    // Рисуем кнопки подключения/отключения - оранжевые
+                    listOf(rects.wifiConnectRect, rects.wifiDisconnectRect).forEach { rect ->
+                        rect?.let {
+                            g2d.composite = AlphaComposite.getInstance(AlphaComposite.SRC_OVER, getAlpha(it))
+                            g2d.color = JBColor.ORANGE
+                            g2d.fillRect(it.x, it.y, it.width, it.height)
+                            g2d.color = Color.ORANGE.darker()
+                            g2d.drawRect(it.x, it.y, it.width, it.height)
+                        }
+                    }
+                    
+                    // Рисуем tooltip хитбоксы - фиолетовые
+                    val tooltipColor = JBColor(Color(128, 0, 128), Color(128, 0, 128)) // Purple
+                    
+                    // Default Size tooltip
+                    HitboxConfigManager.getHitboxRect(DeviceType.CONNECTED, HitboxType.DEFAULT_SIZE_TOOLTIP, cellBounds)?.let {
+                        g2d.composite = AlphaComposite.getInstance(AlphaComposite.SRC_OVER, getAlpha(it))
+                        g2d.color = tooltipColor
+                        g2d.fillRect(it.x, it.y, it.width, it.height)
+                        g2d.color = tooltipColor.darker()
+                        g2d.drawRect(it.x, it.y, it.width, it.height)
+                    }
+                    
+                    // Default DPI tooltip
+                    HitboxConfigManager.getHitboxRect(DeviceType.CONNECTED, HitboxType.DEFAULT_DPI_TOOLTIP, cellBounds)?.let {
+                        g2d.composite = AlphaComposite.getInstance(AlphaComposite.SRC_OVER, getAlpha(it))
+                        g2d.color = tooltipColor
+                        g2d.fillRect(it.x, it.y, it.width, it.height)
+                        g2d.color = tooltipColor.darker()
+                        g2d.drawRect(it.x, it.y, it.width, it.height)
+                    }
+                    
+                    // USB Icon tooltip
+                    HitboxConfigManager.getHitboxRect(DeviceType.CONNECTED, HitboxType.USB_ICON_TOOLTIP, cellBounds)?.let {
+                        g2d.composite = AlphaComposite.getInstance(AlphaComposite.SRC_OVER, getAlpha(it))
+                        g2d.color = tooltipColor
+                        g2d.fillRect(it.x, it.y, it.width, it.height)
+                        g2d.color = tooltipColor.darker()
+                        g2d.drawRect(it.x, it.y, it.width, it.height)
+                    }
+                    
+                    // Wi-Fi Icon tooltip
+                    HitboxConfigManager.getHitboxRect(DeviceType.CONNECTED, HitboxType.WIFI_ICON_TOOLTIP, cellBounds)?.let {
+                        g2d.composite = AlphaComposite.getInstance(AlphaComposite.SRC_OVER, getAlpha(it))
+                        g2d.color = tooltipColor
+                        g2d.fillRect(it.x, it.y, it.width, it.height)
+                        g2d.color = tooltipColor.darker()
+                        g2d.drawRect(it.x, it.y, it.width, it.height)
+                    }
+                    
+                    // Добавляем подписи к хитбоксам
+                    g2d.composite = AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.8f)
+                    g2d.color = JBColor.BLACK
+                    g2d.font = Font("Arial", Font.PLAIN, 9)
+                    
+                    // Подписываем каждый хитбокс
+                    rects.checkboxRect?.let {
+                        g2d.drawString("CB", it.x + 2, it.y + it.height - 2)
+                    }
+                    rects.resetSizeRect?.let {
+                        g2d.drawString("RS", it.x, it.y - 2)
+                    }
+                    rects.resetDpiRect?.let {
+                        g2d.drawString("RD", it.x, it.y - 2)
+                    }
+                    rects.editSizeRect?.let {
+                        g2d.drawString("ES", it.x + 2, it.y - 2)
+                    }
+                    rects.editDpiRect?.let {
+                        g2d.drawString("ED", it.x + 2, it.y - 2)
+                    }
+                    rects.usbMirrorRect?.let {
+                        g2d.drawString("UM", it.x, it.y - 2)
+                    }
+                    rects.wifiMirrorRect?.let {
+                        g2d.drawString("WM", it.x, it.y - 2)
+                    }
+                    rects.wifiConnectRect?.let {
+                        g2d.drawString("WC", it.x + 2, it.y - 2)
+                    }
+                    rects.wifiDisconnectRect?.let {
+                        g2d.drawString("WD", it.x + 2, it.y - 2)
+                    }
+                    
+                    // Подписи для tooltip хитбоксов
+                    HitboxConfigManager.getHitboxRect(DeviceType.CONNECTED, HitboxType.DEFAULT_SIZE_TOOLTIP, cellBounds)?.let {
+                        g2d.drawString("DS", it.x + 2, it.y + 12)
+                    }
+                    HitboxConfigManager.getHitboxRect(DeviceType.CONNECTED, HitboxType.DEFAULT_DPI_TOOLTIP, cellBounds)?.let {
+                        g2d.drawString("DD", it.x + 2, it.y + 12)
+                    }
+                    HitboxConfigManager.getHitboxRect(DeviceType.CONNECTED, HitboxType.USB_ICON_TOOLTIP, cellBounds)?.let {
+                        g2d.drawString("UI", it.x + 2, it.y + 12)
+                    }
+                    HitboxConfigManager.getHitboxRect(DeviceType.CONNECTED, HitboxType.WIFI_ICON_TOOLTIP, cellBounds)?.let {
+                        g2d.drawString("WI", it.x + 2, it.y + 12)
+                    }
+                    
+                    g2d.dispose()
+                }
+            }
+        }
+    }
 }

@@ -4,17 +4,20 @@ import com.android.ddmlib.IDevice
 import com.intellij.ui.components.JBList
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.util.ui.JBUI
+import com.intellij.util.ui.JBFont
+import com.intellij.ui.JBColor
 import io.github.qavlad.adbrandomizer.services.DeviceInfo
 import io.github.qavlad.adbrandomizer.services.WifiDeviceHistoryService
 import io.github.qavlad.adbrandomizer.ui.models.CombinedDeviceInfo
 import io.github.qavlad.adbrandomizer.ui.renderers.DeviceListRenderer
-import io.github.qavlad.adbrandomizer.ui.renderers.DeviceInfoPanelRenderer
+import io.github.qavlad.adbrandomizer.ui.config.HitboxConfigManager
+import io.github.qavlad.adbrandomizer.ui.config.DeviceType
+import io.github.qavlad.adbrandomizer.ui.config.HitboxType
 import io.github.qavlad.adbrandomizer.utils.DeviceConnectionUtils
-import java.awt.BorderLayout
-import java.awt.Cursor
-import java.awt.Dimension
-import java.awt.Point
-import java.awt.Rectangle
+import io.github.qavlad.adbrandomizer.utils.PluginLogger
+import io.github.qavlad.adbrandomizer.utils.logging.LogCategory
+import io.github.qavlad.adbrandomizer.settings.PluginSettings
+import java.awt.*
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import java.awt.event.MouseMotionAdapter
@@ -41,7 +44,12 @@ class DeviceListPanel(
     private val onWifiClick: (IDevice) -> Unit,
     private val onWifiDisconnect: (String) -> Unit, // Новый callback для disconnect Wi-Fi
     private val compactActionPanel: CompactActionPanel,
-    private val onForceUpdate: () -> Unit  // Новый callback для форсированного обновления
+    private val onForceUpdate: () -> Unit,  // Новый callback для форсированного обновления
+    private val onResetSize: (CombinedDeviceInfo) -> Unit = {},
+    private val onResetDpi: (CombinedDeviceInfo) -> Unit = {},
+    private val onApplyChanges: (CombinedDeviceInfo, String?, String?) -> Unit = { _, _, _ -> },
+    private val onAdbCheckboxChanged: (CombinedDeviceInfo, Boolean) -> Unit = { _, _ -> },
+    private val onWifiConnectByIp: (String, Int) -> Unit = { _, _ -> } // Callback для подключения по IP
 ) : JPanel(BorderLayout()) {
 
     companion object {
@@ -49,10 +57,10 @@ class DeviceListPanel(
         private val DELETE_ICON: Icon = AllIcons.Actions.GC
         private const val DELETE_BUTTON_WIDTH = 35
         private const val DELETE_BUTTON_HEIGHT = 25
-        private const val DELETE_BUTTON_RIGHT_MARGIN = 10
     }
 
     private val deviceListModel = DefaultListModel<DeviceListItem>()
+    private var currentMousePosition: Point? = null
     private val deviceList = object : JBList<DeviceListItem>(deviceListModel) {
         override fun getToolTipText(event: MouseEvent): String? {
             val index = locationToIndex(event.point)
@@ -62,22 +70,45 @@ class DeviceListPanel(
             val bounds = getCellBounds(index, index) ?: return null
             
             return when (item) {
+                is DeviceListItem.SectionHeader -> {
+                    // Если это заголовок Connected devices с ADB
+                    if (item.title == "Connected devices") {
+                        // Проверяем, находится ли курсор над областью ADB
+                        val cellRelativePoint = Point(event.point.x - bounds.x, event.point.y - bounds.y)
+                        // Хитбокс для ADB лейбла (должен совпадать с тем что в paint)
+                        val adbHitbox = Rectangle(4, 4, 32, 22)
+                        
+                        if (adbHitbox.contains(cellRelativePoint)) {
+                            "ADB commands will be executed only for devices selected with checkboxes below"
+                        } else {
+                            null
+                        }
+                    } else {
+                        null
+                    }
+                }
                 is DeviceListItem.CombinedDevice -> {
                     getTooltipForCombinedDevice(item.info, event.point, bounds)
                 }
                 is DeviceListItem.WifiHistoryDevice -> {
-                    val deleteButtonRect = getDeleteButtonRect(bounds)
-                    if (deleteButtonRect.contains(event.point)) {
-                        "Remove this device from Wi-Fi connection history"
-                    } else null
+                    // Преобразуем координаты мыши относительно ячейки  
+                    val cellRelativePoint = Point(event.point.x - bounds.x, event.point.y - bounds.y)
+                    val cellBoundsAtOrigin = Rectangle(0, 0, bounds.width, bounds.height)
+                    val deleteButtonRect = getDeleteButtonRect(cellBoundsAtOrigin)
+                    val connectButtonRect = getConnectButtonRect(cellBoundsAtOrigin)
+                    
+                    when {
+                        connectButtonRect.contains(cellRelativePoint) -> "Connect to this device via Wi-Fi"
+                        deleteButtonRect.contains(cellRelativePoint) -> "Remove this device from Wi-Fi connection history"
+                        else -> null
+                    }
                 }
                 else -> null
             }
         }
     }
     private val properties = PropertiesComponent.getInstance()
-    private val deviceInfoRenderer = DeviceInfoPanelRenderer()
-    
+
     private val combinedDeviceRenderer = io.github.qavlad.adbrandomizer.ui.renderers.CombinedDeviceRenderer(
         getHoverState = getHoverState
     )
@@ -90,16 +121,25 @@ class DeviceListPanel(
     }
 
     private fun setupUI() {
+        // Создаём заголовок без ADB (ADB будет под Connected devices)
+        val titlePanel = JPanel(BorderLayout()).apply {
+            border = JBUI.Borders.empty()
+        }
+        
+        // Центральная панель с заголовком Devices
         val titleLabel = JLabel("Devices").apply {
             border = JBUI.Borders.empty()
-            font = font.deriveFont(font.style or java.awt.Font.BOLD)
+            font = font.deriveFont(font.style or Font.BOLD)
         }
+        
+        titlePanel.add(titleLabel, BorderLayout.WEST)
+        
         val headerPanel = JPanel(BorderLayout()).apply {
             border = JBUI.Borders.compound(
                 BorderFactory.createMatteBorder(1, 1, 1, 1, JBUI.CurrentTheme.CustomFrameDecorations.separatorForeground()),
                 JBUI.Borders.empty(4, 8)
             )
-            add(titleLabel, BorderLayout.WEST)
+            add(titlePanel, BorderLayout.WEST)
             add(compactActionPanel, BorderLayout.EAST)
             maximumSize = Dimension(Int.MAX_VALUE, JBUI.scale(36))
             preferredSize = Dimension(preferredSize.width, JBUI.scale(36))
@@ -113,11 +153,115 @@ class DeviceListPanel(
             )
             override fun getListCellRendererComponent(
                 list: JList<out DeviceListItem>, value: DeviceListItem, index: Int, selected: Boolean, focused: Boolean
-            ): java.awt.Component {
+            ): Component {
                 return when (value) {
-                    is DeviceListItem.SectionHeader -> JLabel(value.title).apply {
-                        font = font.deriveFont(font.style or java.awt.Font.BOLD)
-                        border = JBUI.Borders.empty(8, 8, 4, 8)
+                    is DeviceListItem.SectionHeader -> {
+                        // Если это заголовок Connected devices, создаем специальную компоновку
+                        if (value.title == "Connected devices") {
+                            val mainPanel = JPanel().apply {
+                                layout = BoxLayout(this, BoxLayout.Y_AXIS)
+                                background = JBUI.CurrentTheme.CustomFrameDecorations.paneBackground()
+                                border = BorderFactory.createCompoundBorder(
+                                    BorderFactory.createMatteBorder(0, 0, 1, 0, JBUI.CurrentTheme.CustomFrameDecorations.separatorForeground()),
+                                    JBUI.Borders.empty(4)
+                                )
+                            }
+                            
+                            // Одна строка с "ADB" и "Connected devices" с визуальным разделением
+                            val titlePanel = object : JPanel(BorderLayout()) {
+                                init {
+                                    isOpaque = false
+                                    maximumSize = Dimension(Int.MAX_VALUE, 30)
+                                    alignmentX = LEFT_ALIGNMENT
+                                }
+                                
+                                override fun paint(g: Graphics) {
+                                    super.paint(g)
+                                    
+                                    // Рисуем хитбокс для ADB в режиме дебага
+                                    if (PluginSettings.instance.debugHitboxes) {
+                                        val g2d = g.create() as Graphics2D
+                                        g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+                                        
+                                        // Хитбокс для ADB лейбла (примерные координаты)
+                                        val adbHitbox = Rectangle(4, 4, 32, 22)
+                                        
+                                        // Рисуем хитбокс фиолетовым цветом для tooltip зон
+                                        g2d.composite = AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.3f)
+                                        g2d.color = JBColor(Color(128, 0, 128), Color(128, 0, 128))
+                                        g2d.fillRect(adbHitbox.x, adbHitbox.y, adbHitbox.width, adbHitbox.height)
+                                        g2d.color = JBColor(Color(128, 0, 128).darker(), Color(128, 0, 128).darker())
+                                        g2d.drawRect(adbHitbox.x, adbHitbox.y, adbHitbox.width, adbHitbox.height)
+                                        
+                                        // Подпись
+                                        g2d.composite = AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.8f)
+                                        g2d.color = JBColor.BLACK
+                                        g2d.font = Font("Arial", Font.PLAIN, 9)
+                                        g2d.drawString("ADB", adbHitbox.x + 2, adbHitbox.y + 12)
+                                        
+                                        g2d.dispose()
+                                    }
+                                }
+                            }
+                            
+                            // Левая часть с ADB и Connected devices
+                            val leftPanel = JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
+                                isOpaque = false
+                            }
+                            
+                            // Сначала ADB
+                            val adbLabel = JLabel("ADB").apply {
+                                font = JBFont.medium().deriveFont(Font.BOLD)
+                                foreground = JBColor.foreground() // Делаем текст ярче
+                                border = JBUI.Borders.empty(4, 4, 4, 0)
+                                preferredSize = Dimension(32, preferredSize.height)
+                                toolTipText = "ADB commands will be executed only for devices selected with checkboxes below"
+                            }
+                            leftPanel.add(adbLabel)
+                            
+                            // Разделитель
+                            val separatorLabel = JLabel(" | ").apply {
+                                foreground = JBUI.CurrentTheme.CustomFrameDecorations.separatorForeground()
+                            }
+                            leftPanel.add(separatorLabel)
+                            
+                            // Потом Connected devices
+                            val titleLabel = JLabel(value.title).apply {
+                                font = font.deriveFont(font.style or Font.BOLD)
+                                border = JBUI.Borders.empty(4, 0, 4, 4)
+                            }
+                            leftPanel.add(titleLabel)
+                            
+                            titlePanel.add(leftPanel, BorderLayout.WEST)
+                            mainPanel.add(titlePanel)
+                            
+                            mainPanel
+                        } else {
+                            // Для Previously connected devices - добавляем отступ сверху
+                            val panel = JPanel(BorderLayout()).apply {
+                                background = JBUI.CurrentTheme.CustomFrameDecorations.paneBackground()
+                                val isPrevoiuslyConnected = value.title == "Previously connected devices"
+                                border = if (isPrevoiuslyConnected) {
+                                    BorderFactory.createCompoundBorder(
+                                        JBUI.Borders.emptyTop(8), // Отступ сверху
+                                        BorderFactory.createCompoundBorder(
+                                            BorderFactory.createMatteBorder(1, 0, 1, 0, JBUI.CurrentTheme.CustomFrameDecorations.separatorForeground()),
+                                            JBUI.Borders.empty(8, 8, 4, 8)
+                                        )
+                                    )
+                                } else {
+                                    BorderFactory.createCompoundBorder(
+                                        BorderFactory.createMatteBorder(0, 0, 1, 0, JBUI.CurrentTheme.CustomFrameDecorations.separatorForeground()),
+                                        JBUI.Borders.empty(8, 8, 4, 8)
+                                    )
+                                }
+                            }
+                            val titleLabel = JLabel(value.title).apply {
+                                font = font.deriveFont(font.style or Font.BOLD)
+                            }
+                            panel.add(titleLabel, BorderLayout.WEST)
+                            panel
+                        }
                     }
                     is DeviceListItem.Device -> {
                         @Suppress("UNCHECKED_CAST")
@@ -132,48 +276,107 @@ class DeviceListPanel(
                         )
                     }
                     is DeviceListItem.WifiHistoryDevice -> {
-                        val panel = JPanel(BorderLayout(10, 0)).apply {
-                            border = BorderFactory.createEmptyBorder(5, 5, 5, 5)
-                            background = list.background
-                            isOpaque = true
+                        // Создаем панель с BorderLayout для фиксированной позиции кнопок
+                        val panel = if (PluginSettings.instance.debugHitboxes) {
+                            createDebugWifiHistoryPanel(list)
+                        } else {
+                            JPanel(BorderLayout()).apply {
+                                border = BorderFactory.createEmptyBorder(2, 5, 2, 5)
+                                background = list.background
+                                isOpaque = true
+                            }
                         }
-                        val fakeDeviceInfo = DeviceInfo(
-                            device = null,
-                            displayName = value.entry.displayName,
-                            displaySerialNumber = value.entry.realSerialNumber ?: value.entry.logicalSerialNumber,  // Используем настоящий серийник, если есть
-                            logicalSerialNumber = "${value.entry.ipAddress}:${value.entry.port}",  // Создаём Wi-Fi серийник
-                            androidVersion = value.entry.androidVersion,
-                            apiLevel = value.entry.apiLevel,
-                            ipAddress = value.entry.ipAddress
-                        )
-                        val infoPanel = deviceInfoRenderer.createInfoPanel(
-                            deviceInfo = fakeDeviceInfo,
-                            allDevices = emptyList(),
-                            listForeground = list.foreground
-                        )
-                        panel.add(infoPanel, BorderLayout.CENTER)
+                        // Создаём панель с информацией без иконки Wi-Fi
+                        val infoPanel = JPanel(BorderLayout()).apply {
+                            isOpaque = false
+                            
+                            val textPanel = JPanel().apply {
+                                layout = BoxLayout(this, BoxLayout.Y_AXIS)
+                                isOpaque = false
+                            }
+                            
+                            // Первая строка - название и серийник
+                            val firstLine = JLabel("${value.entry.displayName} (${value.entry.realSerialNumber ?: value.entry.logicalSerialNumber})").apply {
+                                font = font.deriveFont(font.style or Font.BOLD)
+                            }
+                            textPanel.add(firstLine)
+                            
+                            // Вторая строка - Android версия и IP
+                            val secondLine = JLabel("Android ${value.entry.androidVersion} (API ${value.entry.apiLevel}) • ${value.entry.ipAddress}:${value.entry.port}").apply {
+                                font = JBFont.small()
+                                foreground = JBColor.GRAY
+                            }
+                            textPanel.add(secondLine)
+                            
+                            add(textPanel, BorderLayout.CENTER)
+                        }
                         
-                        // Проверяем, находится ли курсор над этим элементом
-                        val isHovered = getHoverState().hoveredDeviceIndex == index && 
+                        // Проверяем, находится ли курсор над кнопками
+                        val isDeleteHovered = getHoverState().hoveredDeviceIndex == index && 
                                       getHoverState().hoveredButtonType == "DELETE"
+                        val isConnectHovered = getHoverState().hoveredDeviceIndex == index && 
+                                      getHoverState().hoveredButtonType == "WIFI_HISTORY_CONNECT"
+                        
+                        // Кнопка Connect
+                        val connectButton = JButton("Connect").apply {
+                            isFocusable = false
+                            font = JBFont.small()
+                            preferredSize = Dimension(65, 22)
+                            isContentAreaFilled = true
+                            cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+                            toolTipText = "Connect to this device via Wi-Fi"
+                            
+                            // Зелёная рамка с эффектом при наведении
+                            border = if (isConnectHovered) {
+                                BorderFactory.createCompoundBorder(
+                                    BorderFactory.createLineBorder(JBColor(Color(100, 200, 100), Color(120, 220, 120)), 2),
+                                    BorderFactory.createEmptyBorder(0, 0, 0, 0)
+                                )
+                            } else {
+                                BorderFactory.createLineBorder(JBColor(Color(50, 150, 50), Color(60, 180, 60)), 1)
+                            }
+                            
+                            if (isConnectHovered) {
+                                background = JBColor(Color(230, 255, 230), Color(30, 80, 30))
+                            }
+                        }
                         
                         val deleteButton = JButton(DELETE_ICON).apply {
                             isFocusable = false
-                            isContentAreaFilled = isHovered
-                            isBorderPainted = isHovered
+                            isContentAreaFilled = isDeleteHovered
+                            isBorderPainted = isDeleteHovered
                             isRolloverEnabled = true
                             toolTipText = "Remove this device from Wi-Fi connection history"
                             preferredSize = Dimension(DELETE_BUTTON_WIDTH, DELETE_BUTTON_HEIGHT)
-                            if (isHovered) {
+                            if (isDeleteHovered) {
                                 background = JBUI.CurrentTheme.ActionButton.hoverBackground()
                             }
                         }
-                        val buttonPanel = JPanel(FlowLayout(FlowLayout.RIGHT, 5, 0)).apply {
+                        
+                        // Создаём панель для кнопок справа с GridBagLayout для точного позиционирования
+                        val buttonsPanel = JPanel(GridBagLayout()).apply {
                             isOpaque = false
-                            preferredSize = Dimension(115, 30)
-                            add(deleteButton)
+                            val gbc = GridBagConstraints().apply {
+                                gridy = 0
+                                insets = JBUI.emptyInsets()
+                                anchor = GridBagConstraints.CENTER
+                            }
+                            
+                            // Connect button
+                            gbc.gridx = 0
+                            gbc.insets = JBUI.insetsRight(8) // 8px gap справа
+                            add(connectButton, gbc)
+                            
+                            // Delete button
+                            gbc.gridx = 1
+                            gbc.insets = JBUI.emptyInsets()
+                            add(deleteButton, gbc)
                         }
-                        panel.add(buttonPanel, BorderLayout.EAST)
+                        
+                        // Добавляем элементы в BorderLayout
+                        panel.add(infoPanel, BorderLayout.CENTER)
+                        panel.add(buttonsPanel, BorderLayout.EAST)
+                        
                         panel
                     }
                 }
@@ -206,12 +409,34 @@ class DeviceListPanel(
                 handleMouseClick(e)
             }
             override fun mouseExited(event: MouseEvent?) {
+                currentMousePosition = null
                 resetHoverState()
+                if (PluginSettings.instance.debugHitboxes) {
+                    io.github.qavlad.adbrandomizer.ui.renderers.CombinedDeviceRenderer.debugMousePosition = null
+                    io.github.qavlad.adbrandomizer.ui.renderers.CombinedDeviceRenderer.debugHoveredIndex = -1
+                    deviceList.repaint()
+                }
             }
         })
     }
 
     private fun handleMouseMovement(e: MouseEvent) {
+        // Сохраняем позицию мыши для дебаг режима
+        currentMousePosition = e.point
+        if (PluginSettings.instance.debugHitboxes) {
+            val index = deviceList.locationToIndex(e.point)
+            if (index != -1 && index < deviceListModel.size()) {
+                val bounds = deviceList.getCellBounds(index, index)
+                if (bounds != null) {
+                    // Сохраняем позицию относительно ячейки в статические поля рендерера
+                    io.github.qavlad.adbrandomizer.ui.renderers.CombinedDeviceRenderer.debugMousePosition = 
+                        Point(e.point.x - bounds.x, e.point.y - bounds.y)
+                    io.github.qavlad.adbrandomizer.ui.renderers.CombinedDeviceRenderer.debugHoveredIndex = index
+                }
+            }
+            deviceList.repaint()
+        }
+        
         val index = deviceList.locationToIndex(e.point)
         if (index == -1 || index >= deviceListModel.size()) return
         val item = deviceListModel.getElementAt(index)
@@ -235,7 +460,12 @@ class DeviceListPanel(
                 val bounds = deviceList.getCellBounds(index, index)
                 val buttonRects = combinedDeviceRenderer.calculateButtonRects(item.info, bounds)
                 val newButtonType = when {
-                    buttonRects.usbMirrorRect?.contains(e.point) == true -> "USB_MIRROR"
+                    buttonRects.checkboxRect?.contains(e.point) == true -> "CHECKBOX"
+                    buttonRects.resetSizeRect?.contains(e.point) == true -> "RESET_SIZE"
+                    buttonRects.resetDpiRect?.contains(e.point) == true -> "RESET_DPI"
+                    buttonRects.editSizeRect?.contains(e.point) == true -> "EDIT_SIZE"
+                    buttonRects.editDpiRect?.contains(e.point) == true -> "EDIT_DPI"
+                    buttonRects.usbMirrorRect?.contains(e.point) == true && item.info.hasUsbConnection -> "USB_MIRROR"
                     buttonRects.wifiConnectRect?.contains(e.point) == true -> "WIFI_CONNECT"
                     buttonRects.wifiMirrorRect?.contains(e.point) == true -> "WIFI_MIRROR"
                     buttonRects.wifiDisconnectRect?.contains(e.point) == true -> "WIFI_DISCONNECT"
@@ -245,10 +475,33 @@ class DeviceListPanel(
             }
             is DeviceListItem.WifiHistoryDevice -> {
                 val bounds = deviceList.getCellBounds(index, index)
-                val deleteButtonRect = getDeleteButtonRect(bounds)
-                if (deleteButtonRect.contains(e.point)) {
+                // Проверяем, что мышь действительно внутри границ ячейки
+                if (!bounds.contains(e.point)) {
+                    // Если мышь не в ячейке, сбрасываем состояние
+                    deviceList.cursor = Cursor.getDefaultCursor()
+                    if (getHoverState().hoveredDeviceIndex == index) {
+                        setHoverState(HoverState.noHover())
+                        deviceList.repaint()
+                    }
+                    return
+                }
+                
+                // Преобразуем координаты мыши относительно ячейки
+                val cellRelativePoint = Point(e.point.x - bounds.x, e.point.y - bounds.y)
+                // Для хитбоксов используем координаты относительно начала координат (0,0)
+                val cellBoundsAtOrigin = Rectangle(0, 0, bounds.width, bounds.height)
+                val deleteButtonRect = getDeleteButtonRect(cellBoundsAtOrigin)
+                val connectButtonRect = getConnectButtonRect(cellBoundsAtOrigin)
+                
+                val newButtonType = when {
+                    connectButtonRect.contains(cellRelativePoint) -> "WIFI_HISTORY_CONNECT"
+                    deleteButtonRect.contains(cellRelativePoint) -> "DELETE"
+                    else -> null
+                }
+                
+                if (newButtonType != null) {
                     deviceList.cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
-                    val newHoverState = HoverState(hoveredDeviceIndex = index, hoveredButtonType = "DELETE")
+                    val newHoverState = HoverState(hoveredDeviceIndex = index, hoveredButtonType = newButtonType)
                     if (getHoverState() != newHoverState) {
                         setHoverState(newHoverState)
                         deviceList.repaint()
@@ -291,6 +544,12 @@ class DeviceListPanel(
         if (index == -1 || index >= deviceListModel.size()) return
         val item = deviceListModel.getElementAt(index)
         
+        PluginLogger.debug(
+            LogCategory.UI_EVENTS,
+            "Mouse click at point: %s, index: %d, item type: %s",
+            e.point, index, item.javaClass.simpleName
+        )
+        
         when (item) {
             is DeviceListItem.Device -> {
                 val bounds = deviceList.getCellBounds(index, index)
@@ -307,9 +566,66 @@ class DeviceListPanel(
             is DeviceListItem.CombinedDevice -> {
                 val bounds = deviceList.getCellBounds(index, index)
                 val buttonRects = combinedDeviceRenderer.calculateButtonRects(item.info, bounds)
+                
+                PluginLogger.debug(LogCategory.UI_EVENTS, 
+                    "Click at: %s, bounds: %s", 
+                    e.point, bounds)
+                
                 when {
+                    buttonRects.checkboxRect?.contains(e.point) == true -> {
+                        PluginLogger.debug(LogCategory.UI_EVENTS, "Click HIT: Checkbox for %s", item.info.displayName)
+                        // Переключаем состояние чекбокса
+                        item.info.isSelectedForAdb = !item.info.isSelectedForAdb
+                        onAdbCheckboxChanged(item.info, item.info.isSelectedForAdb)
+                        deviceList.repaint()
+                    }
+                    buttonRects.resetSizeRect?.contains(e.point) == true -> {
+                        PluginLogger.debug(LogCategory.UI_EVENTS, "Click HIT: Reset Size for %s", item.info.displayName)
+                        onResetSize(item.info)
+                    }
+                    buttonRects.resetDpiRect?.contains(e.point) == true -> {
+                        PluginLogger.debug(LogCategory.UI_EVENTS, "Click HIT: Reset DPI for %s", item.info.displayName)
+                        onResetDpi(item.info)
+                    }
+                    buttonRects.editSizeRect?.contains(e.point) == true -> {
+                        // Показываем диалог редактирования размера
+                        val currentSizeText = item.info.currentResolution?.let { "${it.first}x${it.second}" } ?: "N/A"
+                        val newSize = JOptionPane.showInputDialog(
+                            deviceList,
+                            "Enter new size (e.g., 1080x1920):",
+                            "Edit Size",
+                            JOptionPane.PLAIN_MESSAGE,
+                            null,
+                            null,
+                            currentSizeText
+                        ) as? String
+                        
+                        if (newSize != null && newSize.isNotBlank() && newSize != currentSizeText) {
+                            onApplyChanges(item.info, newSize, null)
+                        }
+                    }
+                    buttonRects.editDpiRect?.contains(e.point) == true -> {
+                        // Показываем диалог редактирования DPI
+                        val currentDpiText = item.info.currentDpi?.toString() ?: "N/A"
+                        val newDpi = JOptionPane.showInputDialog(
+                            deviceList,
+                            "Enter new DPI (e.g., 320):",
+                            "Edit DPI",
+                            JOptionPane.PLAIN_MESSAGE,
+                            null,
+                            null,
+                            currentDpiText
+                        ) as? String
+                        
+                        if (newDpi != null && newDpi.isNotBlank() && newDpi != currentDpiText) {
+                            onApplyChanges(item.info, null, newDpi)
+                        }
+                    }
                     buttonRects.usbMirrorRect?.contains(e.point) == true -> {
-                        item.info.usbDevice?.let { onMirrorClick(it) }
+                        // Кликаем только если есть USB подключение
+                        if (item.info.hasUsbConnection) {
+                            item.info.usbDevice?.let { onMirrorClick(it) }
+                        }
                     }
                     buttonRects.wifiConnectRect?.contains(e.point) == true -> {
                         item.info.usbDevice?.device?.let { onWifiClick(it) }
@@ -325,9 +641,23 @@ class DeviceListPanel(
             }
             is DeviceListItem.WifiHistoryDevice -> {
                 val bounds = deviceList.getCellBounds(index, index)
-                val deleteButtonRect = getDeleteButtonRect(bounds)
-                if (deleteButtonRect.contains(e.point)) {
-                    handleDeleteHistoryDevice(item.entry)
+                // Преобразуем координаты мыши относительно ячейки
+                val cellRelativePoint = Point(e.point.x - bounds.x, e.point.y - bounds.y)
+                // Для хитбоксов используем координаты относительно начала координат (0,0)
+                val cellBoundsAtOrigin = Rectangle(0, 0, bounds.width, bounds.height)
+                val deleteButtonRect = getDeleteButtonRect(cellBoundsAtOrigin)
+                val connectButtonRect = getConnectButtonRect(cellBoundsAtOrigin)
+                
+                when {
+                    connectButtonRect.contains(cellRelativePoint) -> {
+                        PluginLogger.debug(LogCategory.UI_EVENTS, "Connect button clicked!")
+                        // Подключаемся к устройству по Wi-Fi
+                        handleConnectHistoryDevice(item.entry)
+                    }
+                    deleteButtonRect.contains(cellRelativePoint) -> {
+                        PluginLogger.debug(LogCategory.UI_EVENTS, "Delete button clicked!")
+                        handleDeleteHistoryDevice(item.entry)
+                    }
                 }
             }
             else -> return
@@ -412,24 +742,69 @@ class DeviceListPanel(
     private fun getTooltipForCombinedDevice(device: CombinedDeviceInfo, point: Point, bounds: Rectangle): String? {
         val buttonRects = combinedDeviceRenderer.calculateButtonRects(device, bounds)
         
-        // Проверяем позиции иконок и текста рядом с ними (увеличенная зона)
-        // USB секция: иконка + текст "USB"
-        val usbIconRect = Rectangle(bounds.x + 8, bounds.y + bounds.height - 35, 70, 30)
-        // Wi-Fi секция: иконка + текст "Wi-Fi" или IP адрес
-        val wifiIconRect = Rectangle(bounds.x + 135, bounds.y + bounds.height - 35, 60, 30)
+        // Получаем координаты полей из конфигурации
+        val defaultSizeFieldRect = HitboxConfigManager.getHitboxRect(
+            DeviceType.CONNECTED, 
+            HitboxType.DEFAULT_SIZE_TOOLTIP, 
+            bounds
+        )
+        val defaultDpiFieldRect = HitboxConfigManager.getHitboxRect(
+            DeviceType.CONNECTED, 
+            HitboxType.DEFAULT_DPI_TOOLTIP, 
+            bounds
+        )
+        
+        // Получаем координаты иконок из конфигурации
+        val usbIconRect = HitboxConfigManager.getHitboxRect(
+            DeviceType.CONNECTED,
+            HitboxType.USB_ICON_TOOLTIP,
+            bounds
+        )
+        val wifiIconRect = HitboxConfigManager.getHitboxRect(
+            DeviceType.CONNECTED,
+            HitboxType.WIFI_ICON_TOOLTIP,
+            bounds
+        )
         
         return when {
-            // Кнопки
-            buttonRects.usbMirrorRect?.contains(point) == true -> "Mirror screen via USB"
+            // Чекбокс для выбора устройства
+            buttonRects.checkboxRect?.contains(point) == true -> {
+                if (device.isSelectedForAdb) {
+                    "Device is selected for ADB commands. Click to deselect"
+                } else {
+                    "Select this device for ADB commands"
+                }
+            }
+            
+            // Кнопки управления параметрами
+            buttonRects.resetSizeRect?.contains(point) == true -> "Reset to default size"
+            buttonRects.resetDpiRect?.contains(point) == true -> "Reset to default DPI"
+            buttonRects.editSizeRect?.contains(point) == true -> "Click to edit screen resolution"
+            buttonRects.editDpiRect?.contains(point) == true -> "Click to edit DPI"
+            
+            // Поля с дефолтными значениями
+            defaultSizeFieldRect?.contains(point) == true -> {
+                val defaultSize = device.defaultResolution?.let { "${it.first}x${it.second}" } ?: "N/A"
+                "Device default resolution: $defaultSize"
+            }
+            defaultDpiFieldRect?.contains(point) == true -> {
+                val defaultDpi = device.defaultDpi?.toString() ?: "N/A"
+                "Device default DPI: $defaultDpi"
+            }
+            
+            // Кнопки подключения
+            buttonRects.usbMirrorRect?.contains(point) == true -> {
+                if (device.hasUsbConnection) "Mirror screen via USB" else "Cannot mirror: USB not connected"
+            }
             buttonRects.wifiConnectRect?.contains(point) == true -> "Connect to this device via Wi-Fi"
             buttonRects.wifiMirrorRect?.contains(point) == true -> "Mirror screen via Wi-Fi"
             buttonRects.wifiDisconnectRect?.contains(point) == true -> "Disconnect Wi-Fi connection"
             
             // Иконки статуса
-            usbIconRect.contains(point) -> {
+            usbIconRect?.contains(point) == true -> {
                 if (device.hasUsbConnection) "Connected via USB" else "USB not connected"
             }
-            wifiIconRect.contains(point) -> {
+            wifiIconRect?.contains(point) == true -> {
                 when {
                     device.hasWifiConnection -> "Connected via Wi-Fi at ${device.wifiDevice?.ipAddress ?: device.ipAddress}"
                     device.hasUsbConnection -> "Wi-Fi not connected. Click 'Connect' button to connect via Wi-Fi"
@@ -445,11 +820,81 @@ class DeviceListPanel(
      * Вычисляет прямоугольник кнопки удаления
      */
     private fun getDeleteButtonRect(bounds: Rectangle): Rectangle {
-        val deleteButtonX = bounds.x + bounds.width - DELETE_BUTTON_WIDTH - DELETE_BUTTON_RIGHT_MARGIN
-        val deleteButtonY = bounds.y + (bounds.height - DELETE_BUTTON_HEIGHT) / 2
-        return Rectangle(deleteButtonX, deleteButtonY, DELETE_BUTTON_WIDTH, DELETE_BUTTON_HEIGHT)
+        // Пытаемся загрузить позицию из JSON конфигурации
+        return try {
+            HitboxConfigManager.getHitboxRect(
+                DeviceType.PREVIOUSLY_CONNECTED,
+                HitboxType.DELETE,
+                bounds
+            ) ?: calculateFallbackDeleteRect(bounds)
+        } catch (e: Exception) {
+            PluginLogger.error(LogCategory.UI_EVENTS, "Failed to load delete button rect from config", e)
+            calculateFallbackDeleteRect(bounds)
+        }
+    }
+    
+    /**
+     * Вычисляет прямоугольник кнопки подключения
+     */
+    private fun getConnectButtonRect(bounds: Rectangle): Rectangle {
+        // Пытаемся загрузить позицию из JSON конфигурации
+        return try {
+            HitboxConfigManager.getHitboxRect(
+                DeviceType.PREVIOUSLY_CONNECTED,
+                HitboxType.CONNECT,
+                bounds
+            ) ?: calculateFallbackConnectRect(bounds)
+        } catch (e: Exception) {
+            PluginLogger.error(LogCategory.UI_EVENTS, "Failed to load connect button rect from config", e)
+            calculateFallbackConnectRect(bounds)
+        }
+    }
+    
+    /**
+     * Вычисляет fallback позицию для кнопки удаления
+     */
+    private fun calculateFallbackDeleteRect(bounds: Rectangle): Rectangle {
+        // Delete button теперь справа с фиксированной позицией благодаря BorderLayout.EAST
+        // bounds - это размеры ячейки относительно (0,0)
+        // Учитываем padding панели (2px сверху/снизу, 5px слева/справа из BorderFactory.createEmptyBorder)
+        val deleteButtonX = bounds.width - DELETE_BUTTON_WIDTH - 5 // 5px - правый padding панели
+        val deleteButtonY = (bounds.height - DELETE_BUTTON_HEIGHT) / 2
+        val rect = Rectangle(deleteButtonX, deleteButtonY, DELETE_BUTTON_WIDTH, DELETE_BUTTON_HEIGHT)
+        
+        PluginLogger.debugWithRateLimit(
+            LogCategory.UI_EVENTS,
+            "prev_connected_delete_rect",
+            "Previously connected - Delete button rect: %s for bounds %s",
+            rect, bounds
+        )
+        return rect
+    }
+    
+    /**
+     * Вычисляет fallback позицию для кнопки подключения
+     */
+    private fun calculateFallbackConnectRect(bounds: Rectangle): Rectangle {
+        // Connect button теперь справа с фиксированной позицией благодаря BorderLayout.EAST
+        // bounds - это размеры ячейки относительно (0,0)
+        // Connect идёт первой в GridBagLayout панели кнопок
+        val connectButtonX = bounds.width - 65 - DELETE_BUTTON_WIDTH - 8 - 5 // 65 (width) + 35 (delete) + 8 (gap между кнопками) + 5 (правый padding)
+        val connectButtonY = (bounds.height - 22) / 2  
+        val rect = Rectangle(connectButtonX, connectButtonY, 65, 22)
+        
+        PluginLogger.debugWithRateLimit(
+            LogCategory.UI_EVENTS,
+            "prev_connected_connect_rect",
+            "Previously connected - Connect button rect: %s for bounds %s",
+            rect, bounds
+        )
+        return rect
     }
 
+    private fun handleConnectHistoryDevice(entry: WifiDeviceHistoryService.WifiDeviceHistoryEntry) {
+        // Используем тот же метод подключения, что и в Connected devices
+        onWifiConnectByIp(entry.ipAddress, entry.port)
+    }
+    
     private fun handleDeleteHistoryDevice(entry: WifiDeviceHistoryService.WifiDeviceHistoryEntry) {
         val skipConfirm = properties.getBoolean(CONFIRM_DELETE_KEY, false)
         var doDelete = true
@@ -476,6 +921,61 @@ class DeviceListPanel(
             updateDeviceList(getAllDevices())
             // Форсируем обновление списка устройств
             onForceUpdate()
+        }
+    }
+    
+    /**
+     * Создает панель с визуальной отладкой для Previously connected devices
+     */
+    private fun createDebugWifiHistoryPanel(
+        list: JList<out DeviceListItem>
+    ): JPanel {
+        return object : JPanel(BorderLayout()) {
+            init {
+                border = BorderFactory.createEmptyBorder(2, 5, 2, 5)
+                background = list.background
+                isOpaque = true
+            }
+            
+            override fun paint(g: Graphics) {
+                super.paint(g)
+                
+                // Рисуем хитбоксы поверх содержимого
+                if (PluginSettings.instance.debugHitboxes) {
+                    val g2d = g.create() as Graphics2D
+                    g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+                    
+                    // Используем те же методы, что и для обработки кликов
+                    val cellBoundsAtOrigin = Rectangle(0, 0, width, height)
+                    val connectRect = getConnectButtonRect(cellBoundsAtOrigin)
+                    val deleteRect = getDeleteButtonRect(cellBoundsAtOrigin)
+                    
+                    // Настройка прозрачности
+                    g2d.composite = AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.3f)
+                    
+                    // Рисуем кнопку Connect - оранжевая
+                    g2d.color = JBColor.ORANGE
+                    g2d.fillRect(connectRect.x, connectRect.y, connectRect.width, connectRect.height)
+                    g2d.color = Color.ORANGE.darker()
+                    g2d.drawRect(connectRect.x, connectRect.y, connectRect.width, connectRect.height)
+                    
+                    // Рисуем кнопку Delete - красная
+                    g2d.color = JBColor.RED
+                    g2d.fillRect(deleteRect.x, deleteRect.y, deleteRect.width, deleteRect.height)
+                    g2d.color = Color.RED.darker()
+                    g2d.drawRect(deleteRect.x, deleteRect.y, deleteRect.width, deleteRect.height)
+                    
+                    // Добавляем подписи
+                    g2d.composite = AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.8f)
+                    g2d.color = JBColor.BLACK
+                    g2d.font = Font("Arial", Font.PLAIN, 9)
+                    
+                    g2d.drawString("CN", connectRect.x + 2, connectRect.y - 2)
+                    g2d.drawString("DEL", deleteRect.x + 2, deleteRect.y - 2)
+                    
+                    g2d.dispose()
+                }
+            }
         }
     }
 }

@@ -88,6 +88,35 @@ object ValidationUtils {
             false
         }
     }
+    
+    /**
+     * Проверяет валидность DPI (целое число)
+     * @param dpi DPI в виде целого числа
+     * @return true если DPI валидный, false иначе
+     */
+    fun isValidDpi(dpi: Int): Boolean {
+        return dpi > 0
+    }
+    
+    /**
+     * Проверяет валидность размера экрана
+     * @param size Размер в формате "ширинаxвысота" (например, "1080x1920")
+     * @return true если размер валидный, false иначе
+     */
+    fun isValidScreenSize(size: String): Boolean {
+        if (size.isBlank()) return false
+        
+        val parts = size.trim().split("x")
+        if (parts.size != 2) return false
+        
+        return try {
+            val width = parts[0].toInt()
+            val height = parts[1].toInt()
+            width > 0 && height > 0
+        } catch (_: NumberFormatException) {
+            false
+        }
+    }
 
     /**
      * Парсит размер из строки в пару (width, height)

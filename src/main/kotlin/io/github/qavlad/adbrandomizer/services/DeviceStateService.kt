@@ -2,6 +2,7 @@ package io.github.qavlad.adbrandomizer.services
 
 import io.github.qavlad.adbrandomizer.utils.ValidationUtils
 import io.github.qavlad.adbrandomizer.utils.PluginLogger
+import io.github.qavlad.adbrandomizer.utils.logging.LogCategory
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
@@ -125,7 +126,7 @@ object DeviceStateService {
             val devicesResult = AdbService.getConnectedDevices()
             val devices = devicesResult.getOrNull() ?: run {
                 devicesResult.onError { exception, message ->
-                    PluginLogger.error("Failed to get devices for async state refresh", exception, message ?: "")
+                    PluginLogger.warn(LogCategory.ADB_CONNECTION, "Failed to get devices for async state refresh: %s", exception.message)
                 }
                 emptyList()
             }
@@ -137,13 +138,13 @@ object DeviceStateService {
                             val sizeResult = AdbService.getCurrentSize(device)
                             val currentSize = sizeResult.getOrNull()
                             sizeResult.onError { exception, message ->
-                                PluginLogger.error("Failed to get size for device ${device.serialNumber}", exception, message ?: "")
+                                PluginLogger.debug(LogCategory.ADB_CONNECTION, "Failed to get size for device %s: %s", device.serialNumber, exception.message)
                             }
                             
                             val dpiResult = AdbService.getCurrentDpi(device)
                             val currentDpi = dpiResult.getOrNull()
                             dpiResult.onError { exception, message ->
-                                PluginLogger.error("Failed to get DPI for device ${device.serialNumber}", exception, message ?: "")
+                                PluginLogger.debug(LogCategory.ADB_CONNECTION, "Failed to get DPI for device %s: %s", device.serialNumber, exception.message)
                             }
                             
                             updateDeviceState(

@@ -7,6 +7,7 @@ import io.github.qavlad.adbrandomizer.core.Result
 import io.github.qavlad.adbrandomizer.core.runAdbOperation
 import io.github.qavlad.adbrandomizer.utils.AdbPathResolver
 import io.github.qavlad.adbrandomizer.utils.PluginLogger
+import io.github.qavlad.adbrandomizer.utils.logging.LogCategory
 import kotlinx.coroutines.*
 import java.util.concurrent.TimeUnit
 
@@ -28,7 +29,7 @@ internal object AdbConnectionManager {
 
         val adbPath = AdbPathResolver.findAdbExecutable()
         if (adbPath == null) {
-            PluginLogger.error("ADB executable not found")
+            PluginLogger.warn(LogCategory.ADB_CONNECTION, "ADB executable not found")
             return@withContext Result.Error(Exception("ADB executable not found"), "ADB executable not found")
         }
 
@@ -68,7 +69,7 @@ internal object AdbConnectionManager {
             val bridge = when (bridgeResult) {
                 is Result.Success -> bridgeResult.data
                 is Result.Error -> {
-                    PluginLogger.error("Failed to create debug bridge", bridgeResult.exception)
+                    PluginLogger.warn(LogCategory.ADB_CONNECTION, "Failed to create debug bridge: %s", bridgeResult.exception.message)
                     null
                 }
             }

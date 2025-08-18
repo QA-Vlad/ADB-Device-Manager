@@ -59,6 +59,7 @@ class PluginSettingsConfigurable : SearchableConfigurable {
 
 class PluginSettingsPanel : JBPanel<PluginSettingsPanel>(VerticalFlowLayout(VerticalFlowLayout.TOP, 0, 0, true, false)) {
     private val settings = PluginSettings.instance
+    private var resetPanel: JPanel? = null
     
     private val restartScrcpyCheckBox = JBCheckBox("Automatically restart scrcpy when screen resolution changes").apply {
         toolTipText = "When enabled, scrcpy will automatically restart when screen resolution is changed via presets or reset"
@@ -78,6 +79,11 @@ class PluginSettingsPanel : JBPanel<PluginSettingsPanel>(VerticalFlowLayout(Vert
     
     private val debugModeCheckBox = JBCheckBox("Enable debug mode (writes logs to file)").apply {
         toolTipText = "When enabled, all plugin logs will be written to files in the plugin directory"
+    }
+    
+    private val debugHitboxesCheckBox = JBCheckBox("Show hitbox debug overlay").apply {
+        toolTipText = "When enabled, shows colored overlays on UI elements to debug click areas"
+        isVisible = false // По умолчанию скрыт, показываем только если debugMode включен
     }
     
     private val scrcpyPathField = JBTextField().apply {
@@ -319,7 +325,7 @@ class PluginSettingsPanel : JBPanel<PluginSettingsPanel>(VerticalFlowLayout(Vert
     
     private fun createUI() {
         // Screen mirroring settings
-        val mirroringPanel = JPanel(VerticalFlowLayout(VerticalFlowLayout.TOP)).apply {
+        val mirroringPanel = JPanel(VerticalFlowLayout(VerticalFlowLayout.TOP, 0, 0, true, false)).apply {
             border = JBUI.Borders.empty(10)
         }
         
@@ -360,10 +366,16 @@ class PluginSettingsPanel : JBPanel<PluginSettingsPanel>(VerticalFlowLayout(Vert
         }
         mirroringPanel.add(scrcpyFlagsLabel)
         
-        mirroringPanel.add(scrcpyFlagsField.apply {
-            preferredSize = JBUI.size(350, 30)
-            maximumSize = JBUI.size(400, 30)
-        })
+        // Создаём панель-обёртку для поля флагов
+        val scrcpyFlagsPanel = JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
+            isOpaque = false
+            maximumSize = Dimension(Integer.MAX_VALUE, 35)
+            add(scrcpyFlagsField.apply {
+                preferredSize = JBUI.size(350, 30)
+                maximumSize = JBUI.size(400, 30)
+            })
+        }
+        mirroringPanel.add(scrcpyFlagsPanel)
         
         // Validation label for flags
         val flagsValidationLabel = JLabel().apply {
@@ -485,7 +497,7 @@ class PluginSettingsPanel : JBPanel<PluginSettingsPanel>(VerticalFlowLayout(Vert
         add(mirroringPanel)
         
         // Network settings
-        val networkPanel = JPanel(VerticalFlowLayout(VerticalFlowLayout.TOP)).apply {
+        val networkPanel = JPanel(VerticalFlowLayout(VerticalFlowLayout.TOP, 0, 0, true, false)).apply {
             border = JBUI.Borders.empty(10)
         }
         
@@ -494,13 +506,22 @@ class PluginSettingsPanel : JBPanel<PluginSettingsPanel>(VerticalFlowLayout(Vert
         add(networkPanel)
         
         // Debug settings
-        val debugPanel = JPanel(VerticalFlowLayout(VerticalFlowLayout.TOP)).apply {
+        val debugPanel = JPanel(VerticalFlowLayout(VerticalFlowLayout.TOP, 0, 0, true, false)).apply {
             border = JBUI.Borders.empty(10)
         }
         
         debugPanel.add(debugModeCheckBox)
         
-        val buttonPanel = JPanel(FlowLayout(FlowLayout.LEFT)).apply {
+        // Добавляем чекбокс для отладки хитбоксов (с отступом)
+        // Панель всегда добавлена, но чекбокс может быть скрыт
+        val hitboxPanel = JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
+            border = JBUI.Borders.emptyLeft(20)
+            isOpaque = false
+            add(debugHitboxesCheckBox)
+        }
+        debugPanel.add(hitboxPanel)
+        
+        val buttonPanel = JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
             border = JBUI.Borders.emptyLeft(20)
             add(openLogsButton)
         }
@@ -508,26 +529,33 @@ class PluginSettingsPanel : JBPanel<PluginSettingsPanel>(VerticalFlowLayout(Vert
         
         add(debugPanel)
         
-        // Reset section
-        val resetPanel = JPanel(VerticalFlowLayout(VerticalFlowLayout.TOP)).apply {
+        // Reset section - ALWAYS visible
+        resetPanel = JPanel(VerticalFlowLayout(VerticalFlowLayout.TOP, 0, 0, true, false)).apply {
             border = JBUI.Borders.empty(10)
+            // Ensure it's always visible
+            isVisible = true
         }
         
         val resetSeparator = JSeparator()
-        resetPanel.add(resetSeparator)
+        resetPanel?.add(resetSeparator)
         
         val resetLabel = JLabel("Danger Zone").apply {
             font = font.deriveFont(font.style or java.awt.Font.BOLD)
             border = JBUI.Borders.empty(10, 0, 5, 0)
         }
-        resetPanel.add(resetLabel)
+        resetPanel?.add(resetLabel)
         
-        val resetButtonPanel = JPanel(FlowLayout(FlowLayout.LEFT)).apply {
+        val resetButtonPanel = JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
             add(resetAllButton)
         }
-        resetPanel.add(resetButtonPanel)
+        resetPanel?.add(resetButtonPanel)
         
-        add(resetPanel)
+        // ВАЖНО: Добавляем resetPanel в основную панель
+        resetPanel?.let { panel ->
+            add(panel)
+            // Убедимся, что панель видима
+            panel.isVisible = true
+        }
     }
     
     private fun setupFocusHandling() {
@@ -565,9 +593,24 @@ class PluginSettingsPanel : JBPanel<PluginSettingsPanel>(VerticalFlowLayout(Vert
     }
     
     private fun setupListeners() {
-        // Enable/disable open logs button based on debug mode checkbox
+        // Enable/disable open logs button and hitbox checkbox based on debug mode checkbox
         debugModeCheckBox.addChangeListener {
-            openLogsButton.isEnabled = debugModeCheckBox.isSelected
+            val isDebugEnabled = debugModeCheckBox.isSelected
+            openLogsButton.isEnabled = isDebugEnabled
+            
+            // Обновляем видимость чекбокса хитбоксов
+            debugHitboxesCheckBox.isVisible = isDebugEnabled
+            // Если debug mode выключен, выключаем и hitbox debug
+            if (!isDebugEnabled) {
+                debugHitboxesCheckBox.isSelected = false
+            }
+            
+            // Убедимся, что Danger Zone всегда видна
+            resetPanel?.isVisible = true
+            
+            // Перерисовываем панель для обновления видимости компонентов
+            revalidate()
+            repaint()
         }
         
         // Add listeners to all checkboxes to trigger Apply button state update
@@ -584,6 +627,7 @@ class PluginSettingsPanel : JBPanel<PluginSettingsPanel>(VerticalFlowLayout(Vert
         restartActiveAppCheckBox.addActionListener(stateChangeListener)
         autoSwitchWifiCheckBox.addActionListener(stateChangeListener)
         debugModeCheckBox.addActionListener(stateChangeListener)
+        debugHitboxesCheckBox.addActionListener(stateChangeListener)
         
         // Browse button for scrcpy path
         scrcpyPathButton.addActionListener {
@@ -922,6 +966,7 @@ Are you sure you want to continue?""",
         modified = modified || restartActiveAppCheckBox.isSelected != settings.restartActiveAppOnResolutionChange
         modified = modified || autoSwitchWifiCheckBox.isSelected != settings.autoSwitchToHostWifi
         modified = modified || debugModeCheckBox.isSelected != settings.debugMode
+        modified = modified || debugHitboxesCheckBox.isSelected != settings.debugHitboxes
         modified = modified || scrcpyPathField.text != settings.scrcpyPath
         modified = modified || scrcpyFlagsField.text != settings.scrcpyCustomFlags
         return modified
@@ -939,6 +984,7 @@ Are you sure you want to continue?""",
         
         val debugModeChanged = settings.debugMode != debugModeCheckBox.isSelected
         settings.debugMode = debugModeCheckBox.isSelected
+        settings.debugHitboxes = debugHitboxesCheckBox.isSelected
         
         // Reinitialize FileLogger if debug mode changed
         if (debugModeChanged) {
@@ -954,6 +1000,9 @@ Are you sure you want to continue?""",
         restartActiveAppCheckBox.isSelected = settings.restartActiveAppOnResolutionChange
         autoSwitchWifiCheckBox.isSelected = settings.autoSwitchToHostWifi
         debugModeCheckBox.isSelected = settings.debugMode
+        debugHitboxesCheckBox.isSelected = settings.debugHitboxes
+        // Показываем/скрываем чекбокс отладки хитбоксов в зависимости от debug mode
+        debugHitboxesCheckBox.isVisible = settings.debugMode
         
         // Синхронизируем путь scrcpy из старого хранилища если нужно
         if (settings.scrcpyPath.isBlank()) {
@@ -966,5 +1015,13 @@ Are you sure you want to continue?""",
         scrcpyPathField.text = settings.scrcpyPath
         scrcpyFlagsField.text = settings.scrcpyCustomFlags
         openLogsButton.isEnabled = settings.debugMode
+        // Убедимся, что Danger Zone видна
+        resetPanel?.isVisible = true
+        // Если resetPanel не в списке компонентов, добавляем её обратно
+        if (resetPanel != null && !components.contains(resetPanel)) {
+            add(resetPanel)
+            revalidate()
+            repaint()
+        }
     }
 }

@@ -8,6 +8,7 @@ import io.github.qavlad.adbrandomizer.config.PluginConfig
 import io.github.qavlad.adbrandomizer.core.Result
 import io.github.qavlad.adbrandomizer.utils.AdbPathResolver
 import io.github.qavlad.adbrandomizer.utils.PluginLogger
+import io.github.qavlad.adbrandomizer.utils.logging.LogCategory
 import io.github.qavlad.adbrandomizer.utils.ValidationUtils
 import io.github.qavlad.adbrandomizer.utils.DeviceConnectionUtils
 import io.github.qavlad.adbrandomizer.utils.NotificationUtils
@@ -921,7 +922,7 @@ object AdbService {
         return runAdbOperation("Disconnect Wi-Fi") {
             val adbPath = AdbPathResolver.findAdbExecutable()
             if (adbPath == null) {
-                PluginLogger.error("ADB executable not found")
+                PluginLogger.warn(LogCategory.ADB_CONNECTION, "ADB executable not found")
                 return@runAdbOperation false
             }
             

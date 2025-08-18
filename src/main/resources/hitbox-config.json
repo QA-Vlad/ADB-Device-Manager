@@ -1,0 +1,96 @@
+{
+  "connectedDevices": {
+    "checkbox": {
+      "xOffset": 9,
+      "yOffset": 4,
+      "width": 20,
+      "height": 20
+    },
+    "resetSize": {
+      "xOffset": 195,
+      "yOffset": 43,
+      "width": 21,
+      "height": 21
+    },
+    "resetDpi": {
+      "xOffset": 343,
+      "yOffset": 43,
+      "width": 21,
+      "height": 21
+    },
+    "editSize": {
+      "xOffset": 110,
+      "yOffset": 68,
+      "width": 105,
+      "height": 19
+    },
+    "editDpi": {
+      "xOffset": 290,
+      "yOffset": 68,
+      "width": 71,
+      "height": 20
+    },
+    "usbMirror": {
+      "xOffset": 85,
+      "yFromBottom": 28,
+      "width": 22,
+      "height": 22
+    },
+    "wifiMirror": {
+      "xOffset": 195,
+      "yFromBottom": 28,
+      "width": 22,
+      "height": 22
+    },
+    "wifiConnect": {
+      "xOffset": 195,
+      "yFromBottom": 28,
+      "width": 67,
+      "height": 24
+    },
+    "wifiDisconnect": {
+      "xOffset": 222,
+      "yFromBottom": 28,
+      "width": 70,
+      "height": 22
+    },
+    "defaultSizeTooltip": {
+      "xOffset": 110,
+      "yOffset": 43,
+      "width": 80,
+      "height": 20
+    },
+    "defaultDpiTooltip": {
+      "xOffset": 219,
+      "yOffset": 43,
+      "width": 120,
+      "height": 20
+    },
+    "usbIconTooltip": {
+      "xOffset": 33,
+      "yFromBottom": 30,
+      "width": 50,
+      "height": 30
+    },
+    "wifiIconTooltip": {
+      "xOffset": 140,
+      "yFromBottom": 30,
+      "width": 50,
+      "height": 30
+    }
+  },
+  "previouslyConnected": {
+    "connect": {
+      "xFromRight": 113,
+      "yCenter": true,
+      "width": 65,
+      "height": 22
+    },
+    "delete": {
+      "xFromRight": 40,
+      "yCenter": true,
+      "width": 35,
+      "height": 25
+    }
+  }
+}

@@ -25,6 +25,9 @@ class PluginSettings : PersistentStateComponent<PluginSettings> {
     // Настройка для включения режима отладки
     var debugMode: Boolean = false
     
+    // Настройка для включения визуальной отладки хитбоксов
+    var debugHitboxes: Boolean = false
+    
     // Пользовательские флаги для scrcpy
     var scrcpyCustomFlags: String = "--show-touches --stay-awake --always-on-top"
     

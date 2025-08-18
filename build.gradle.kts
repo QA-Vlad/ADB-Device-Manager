@@ -49,8 +49,9 @@ dependencies {
     testImplementation("org.jetbrains.kotlin:kotlin-test-junit")
     testImplementation("io.mockk:mockk:1.13.7")
 
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-jdk8:1.7.3")
+    // Kotlin Coroutines уже включены в IntelliJ Platform, не нужно добавлять явно
+    // implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
+    // implementation("org.jetbrains.kotlinx:kotlinx-coroutines-jdk8:1.7.3")
 }
 
 tasks {

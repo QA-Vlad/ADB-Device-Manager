@@ -13,6 +13,9 @@ class DevicePollingService(private val project: Project) {
     private var pollingJob: Job? = null
     private val pollingScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var lastCombinedUpdateCallback: ((List<CombinedDeviceInfo>) -> Unit)? = null
+    
+    // Сохраняем состояние чекбоксов между обновлениями
+    private val selectedDevices = mutableSetOf<String>()
 
     fun stopDevicePolling() {
         pollingJob?.cancel()
@@ -105,7 +108,8 @@ class DevicePollingService(private val project: Project) {
                         currentResolution = existing.currentResolution ?: currentResolution,
                         currentDpi = existing.currentDpi ?: currentDpi,
                         defaultResolution = existing.defaultResolution ?: defaultResolution,
-                        defaultDpi = existing.defaultDpi ?: defaultDpi
+                        defaultDpi = existing.defaultDpi ?: defaultDpi,
+                        isSelectedForAdb = selectedDevices.contains(baseSerial) // Восстанавливаем состояние чекбокса
                     )
                 } else {
                     existing.copy(
@@ -114,7 +118,8 @@ class DevicePollingService(private val project: Project) {
                         currentResolution = currentResolution ?: existing.currentResolution,
                         currentDpi = currentDpi ?: existing.currentDpi,
                         defaultResolution = defaultResolution ?: existing.defaultResolution,
-                        defaultDpi = defaultDpi ?: existing.defaultDpi
+                        defaultDpi = defaultDpi ?: existing.defaultDpi,
+                        isSelectedForAdb = selectedDevices.contains(baseSerial) // Восстанавливаем состояние чекбокса
                     )
                 }
                 combinedMap[baseSerial] = updated
@@ -131,7 +136,8 @@ class DevicePollingService(private val project: Project) {
                     currentResolution = currentResolution,
                     currentDpi = currentDpi,
                     defaultResolution = defaultResolution,
-                    defaultDpi = defaultDpi
+                    defaultDpi = defaultDpi,
+                    isSelectedForAdb = selectedDevices.contains(baseSerial) // Восстанавливаем состояние чекбокса
                 )
                 combinedMap[baseSerial] = combined
             }
@@ -149,6 +155,17 @@ class DevicePollingService(private val project: Project) {
             device.displaySerialNumber ?: device.logicalSerialNumber
         } else {
             device.logicalSerialNumber
+        }
+    }
+    
+    /**
+     * Обновляет состояние выбора устройства для ADB команд
+     */
+    fun updateDeviceSelection(baseSerialNumber: String, isSelected: Boolean) {
+        if (isSelected) {
+            selectedDevices.add(baseSerialNumber)
+        } else {
+            selectedDevices.remove(baseSerialNumber)
         }
     }
     
