@@ -126,7 +126,7 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
     private fun validateDevicesAvailable(): Boolean {
         val devicesResult = AdbService.getConnectedDevices()
         val devices = devicesResult.getOrNull() ?: run {
-            devicesResult.onError { exception, message ->
+            devicesResult.onError { exception, _ ->
                 PluginLogger.warn(LogCategory.ADB_CONNECTION, "Failed to get connected devices: %s", exception.message)
             }
             emptyList()
@@ -668,7 +668,7 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
             Thread.sleep(PluginConfig.Network.CONNECTION_VERIFY_DELAY_MS)
             val devicesResult = AdbService.getConnectedDevices()
             val devices = devicesResult.getOrNull() ?: run {
-                devicesResult.onError { exception, message ->
+                devicesResult.onError { exception, _ ->
                     PluginLogger.warn(LogCategory.ADB_CONNECTION, "Failed to verify connection: %s", exception.message)
                 }
                 emptyList()
@@ -739,7 +739,7 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
 
                 val ipResult = AdbService.getDeviceIpAddress(device)
                 val ipAddress = ipResult.getOrNull() ?: run {
-                    ipResult.onError { exception, message ->
+                    ipResult.onError { exception, _ ->
                         PluginLogger.warn(LogCategory.ADB_CONNECTION, "Failed to get IP address for device %s: %s", device.name, exception.message)
                     }
                     null
@@ -754,7 +754,7 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                     // Получаем IP до включения TCP/IP, чтобы убедиться что устройство подключено к Wi-Fi
                     val ipBeforeResult = AdbService.getDeviceIpAddress(device)
                     val ipBeforeEnable = ipBeforeResult.getOrNull() ?: run {
-                        ipBeforeResult.onError { exception, message ->
+                        ipBeforeResult.onError { exception, _ ->
                             PluginLogger.warn(LogCategory.ADB_CONNECTION, "Failed to verify device IP before TCP/IP enable: %s", exception.message)
                         }
                         null
@@ -768,7 +768,7 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                     
                     // Сначала включаем TCP/IP режим
                     val tcpipResult = AdbService.enableTcpIp(device)
-                    tcpipResult.onError { exception, message ->
+                    tcpipResult.onError { exception, _ ->
                         PluginLogger.warn(LogCategory.ADB_CONNECTION, "Failed to enable TCP/IP mode: %s", exception.message)
                     }
                     PluginLogger.info("TCP/IP mode enabled on port 5555")

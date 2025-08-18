@@ -40,59 +40,35 @@ class CombinedDeviceRenderer(
     private val resetIcon = IconLoader.getIcon("/icons/reset.svg", javaClass)
     
     private fun loadUsbOffIcon(): Icon {
-        // Временно меняем уровень логирования для UI_EVENTS на INFO для диагностики (делаем это здесь, а не в init блоке)
-        try {
-            val config = io.github.qavlad.adbrandomizer.utils.logging.LoggingConfiguration.getInstance()
-            config.setCategoryLogLevel(LogCategory.UI_EVENTS, io.github.qavlad.adbrandomizer.utils.logging.LogLevel.INFO)
-        } catch (_: Exception) {
-            // Игнорируем ошибку, просто не получим дополнительные логи
-        }
-        
-        // Логируем попытку загрузки
-        PluginLogger.info(LogCategory.UI_EVENTS, "Attempting to load usb_off.svg icon")
         
         // Пробуем разные способы загрузки
-        val attempts = listOf(
-            { 
-                PluginLogger.info(LogCategory.UI_EVENTS, "Trying standard IconLoader.getIcon")
-                IconLoader.getIcon("/icons/usb_off.svg", javaClass) 
-            },
-            { 
-                PluginLogger.info(LogCategory.UI_EVENTS, "Trying IconLoader.findIcon")
-                IconLoader.findIcon("/icons/usb_off.svg", javaClass.classLoader) 
-            },
-            {
-                PluginLogger.info(LogCategory.UI_EVENTS, "Trying IconLoader with CombinedDeviceRenderer classloader")
-                IconLoader.getIcon("/icons/usb_off.svg", CombinedDeviceRenderer::class.java)
-            },
+        val attempts = listOf<() -> Icon?>(
+            { IconLoader.getIcon("/icons/usb_off.svg", javaClass) },
+            { IconLoader.findIcon("/icons/usb_off.svg", javaClass.classLoader) },
+            { IconLoader.getIcon("/icons/usb_off.svg", CombinedDeviceRenderer::class.java) },
             {
                 // Пробуем загрузить как ресурс и проверить его наличие
-                PluginLogger.info(LogCategory.UI_EVENTS, "Checking if resource exists")
                 val resource = javaClass.getResource("/icons/usb_off.svg")
                 if (resource != null) {
-                    PluginLogger.info(LogCategory.UI_EVENTS, "Resource found at: %s", resource.toString())
                     IconLoader.getIcon("/icons/usb_off.svg", javaClass)
                 } else {
-                    PluginLogger.info(LogCategory.UI_EVENTS, "Resource /icons/usb_off.svg not found in classpath")
                     null
                 }
             }
         )
         
-        for ((index, attempt) in attempts.withIndex()) {
+        for (attempt in attempts) {
             try {
                 val icon = attempt()
                 if (icon != null) {
-                    PluginLogger.info(LogCategory.UI_EVENTS, "Successfully loaded usb_off.svg icon using method %d", index + 1)
                     return icon
                 }
-            } catch (e: Exception) {
-                PluginLogger.info(LogCategory.UI_EVENTS, "Failed attempt %d to load icon: %s", e, index + 1, e.message)
+            } catch (_: Exception) {
+                // Игнорируем и пробуем следующий метод
             }
         }
         
         // Если все попытки провалились, используем фоллбэк
-        PluginLogger.info(LogCategory.UI_EVENTS, "All attempts to load usb_off.svg failed, using fallback icon")
         return createUsbOffFallbackIcon()
     }
     
@@ -184,10 +160,6 @@ class CombinedDeviceRenderer(
         isSelected: Boolean,
         list: JList<*>
     ): Component {
-        // Логируем создание компонента
-        PluginLogger.info(LogCategory.UI_EVENTS, "Creating component for device: %s (index: %d, USB: %s, WiFi: %s)", 
-            device.displayName, index, device.hasUsbConnection, device.hasWifiConnection)
-        
         val hoverState = getHoverState()
         
         // Главная панель с BorderLayout для чекбокса слева и контента справа
@@ -279,9 +251,7 @@ class CombinedDeviceRenderer(
         panel.add(currentParamsPanel)
 
         // Пятая строка - кнопки управления подключениями
-        PluginLogger.info(LogCategory.UI_EVENTS, "About to create controls panel for device: %s", device.displayName)
         val controlsPanel = createControlsPanel(device, index, hoverState)
-        PluginLogger.info(LogCategory.UI_EVENTS, "Controls panel created for device: %s", device.displayName)
         panel.add(Box.createVerticalStrut(4))
         panel.add(controlsPanel)
         
@@ -290,15 +260,6 @@ class CombinedDeviceRenderer(
     }
 
     private fun createControlsPanel(device: CombinedDeviceInfo, index: Int, hoverState: HoverState): JPanel {
-        // Логируем информацию об устройстве
-        PluginLogger.info(LogCategory.UI_EVENTS, "Creating controls for device: %s (USB: %s, WiFi: %s, usbDevice: %s, wifiDevice: %s)", 
-            device.displayName, 
-            device.hasUsbConnection, 
-            device.hasWifiConnection,
-            device.usbDevice?.logicalSerialNumber ?: "null",
-            device.wifiDevice?.logicalSerialNumber ?: "null"
-        )
-        
         val panel = JPanel().apply {
             layout = BoxLayout(this, BoxLayout.X_AXIS)
             isOpaque = false
@@ -313,12 +274,8 @@ class CombinedDeviceRenderer(
         panel.add(Box.createHorizontalStrut(-5))
         
         val selectedUsbIcon = if (device.hasUsbConnection) {
-            PluginLogger.info(LogCategory.UI_EVENTS, "Device %s has USB connection, using usbIcon", device.displayName)
             usbIcon
         } else {
-            // Логируем использование usbOffIcon
-            PluginLogger.info(LogCategory.UI_EVENTS, "Device %s has NO USB connection, using usbOffIcon (size: %dx%d)", 
-                device.displayName, usbOffIcon.iconWidth, usbOffIcon.iconHeight)
             usbOffIcon
         }
         
@@ -396,10 +353,6 @@ class CombinedDeviceRenderer(
 
         // Иконка подключения
         val iconLabel = JLabel(icon).apply {
-            // Для отладки - проверяем что за иконка
-            if (icon === usbOffIcon) {
-                PluginLogger.info(LogCategory.UI_EVENTS, "Creating JLabel with usbOffIcon, isActive=%s", isActive)
-            }
             // ВАЖНО: Не отключаем JLabel для неактивных иконок, иначе они могут не отображаться
             // isEnabled = isActive // Закомментировано - иконка должна быть всегда видима
             

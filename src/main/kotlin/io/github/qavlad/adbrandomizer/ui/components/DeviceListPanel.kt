@@ -168,7 +168,7 @@ class DeviceListPanel(
                             }
                             
                             // Одна строка с "ADB" и "Connected devices" с визуальным разделением
-                            val titlePanel = object : JPanel(BorderLayout()) {
+                            val titleHeaderPanel = object : JPanel(BorderLayout()) {
                                 init {
                                     isOpaque = false
                                     maximumSize = Dimension(Int.MAX_VALUE, 30)
@@ -226,14 +226,14 @@ class DeviceListPanel(
                             leftPanel.add(separatorLabel)
                             
                             // Потом Connected devices
-                            val titleLabel = JLabel(value.title).apply {
+                            val connectedLabel = JLabel(value.title).apply {
                                 font = font.deriveFont(font.style or Font.BOLD)
                                 border = JBUI.Borders.empty(4, 0, 4, 4)
                             }
-                            leftPanel.add(titleLabel)
+                            leftPanel.add(connectedLabel)
                             
-                            titlePanel.add(leftPanel, BorderLayout.WEST)
-                            mainPanel.add(titlePanel)
+                            titleHeaderPanel.add(leftPanel, BorderLayout.WEST)
+                            mainPanel.add(titleHeaderPanel)
                             
                             mainPanel
                         } else {
@@ -256,10 +256,10 @@ class DeviceListPanel(
                                     )
                                 }
                             }
-                            val titleLabel = JLabel(value.title).apply {
+                            val sectionLabel = JLabel(value.title).apply {
                                 font = font.deriveFont(font.style or Font.BOLD)
                             }
-                            panel.add(titleLabel, BorderLayout.WEST)
+                            panel.add(sectionLabel, BorderLayout.WEST)
                             panel
                         }
                     }

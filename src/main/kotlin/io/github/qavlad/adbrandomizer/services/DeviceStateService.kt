@@ -125,7 +125,7 @@ object DeviceStateService {
         try {
             val devicesResult = AdbService.getConnectedDevices()
             val devices = devicesResult.getOrNull() ?: run {
-                devicesResult.onError { exception, message ->
+                devicesResult.onError { exception, _ ->
                     PluginLogger.warn(LogCategory.ADB_CONNECTION, "Failed to get devices for async state refresh: %s", exception.message)
                 }
                 emptyList()
@@ -137,13 +137,13 @@ object DeviceStateService {
                         try {
                             val sizeResult = AdbService.getCurrentSize(device)
                             val currentSize = sizeResult.getOrNull()
-                            sizeResult.onError { exception, message ->
+                            sizeResult.onError { exception, _ ->
                                 PluginLogger.debug(LogCategory.ADB_CONNECTION, "Failed to get size for device %s: %s", device.serialNumber, exception.message)
                             }
                             
                             val dpiResult = AdbService.getCurrentDpi(device)
                             val currentDpi = dpiResult.getOrNull()
-                            dpiResult.onError { exception, message ->
+                            dpiResult.onError { exception, _ ->
                                 PluginLogger.debug(LogCategory.ADB_CONNECTION, "Failed to get DPI for device %s: %s", device.serialNumber, exception.message)
                             }
                             
