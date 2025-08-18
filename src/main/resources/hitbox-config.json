@@ -1,10 +1,10 @@
 {
   "connectedDevices": {
     "checkbox": {
-      "xOffset": 9,
-      "yOffset": 4,
-      "width": 20,
-      "height": 20
+      "xOffset": 7,
+      "yOffset": 2,
+      "width": 24,
+      "height": 24
     },
     "resetSize": {
       "xOffset": 195,

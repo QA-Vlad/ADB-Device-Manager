@@ -1,6 +1,7 @@
 package io.github.qavlad.adbrandomizer.ui.renderers
 
 import com.intellij.openapi.util.IconLoader
+import com.intellij.ui.Gray
 import com.intellij.ui.JBColor
 import com.intellij.util.ui.JBFont
 import com.intellij.util.ui.JBUI
@@ -30,10 +31,114 @@ class CombinedDeviceRenderer(
     }
 
     private val usbIcon: Icon = IconLoader.getIcon("/icons/usb.svg", javaClass)
-    private val usbOffIcon: Icon = IconLoader.getIcon("/icons/usb_off.svg", javaClass)
+    // Используем ленивую инициализацию для проблемной иконки
+    private val usbOffIcon: Icon by lazy { 
+        loadUsbOffIcon()
+    }
     private val wifiIcon: Icon = IconLoader.getIcon("/icons/wifi.svg", javaClass)
     private val mirrorIcon = IconLoader.getIcon("/icons/scrcpy.svg", javaClass)
     private val resetIcon = IconLoader.getIcon("/icons/reset.svg", javaClass)
+    
+    private fun loadUsbOffIcon(): Icon {
+        // Временно меняем уровень логирования для UI_EVENTS на INFO для диагностики (делаем это здесь, а не в init блоке)
+        try {
+            val config = io.github.qavlad.adbrandomizer.utils.logging.LoggingConfiguration.getInstance()
+            config.setCategoryLogLevel(LogCategory.UI_EVENTS, io.github.qavlad.adbrandomizer.utils.logging.LogLevel.INFO)
+        } catch (_: Exception) {
+            // Игнорируем ошибку, просто не получим дополнительные логи
+        }
+        
+        // Логируем попытку загрузки
+        PluginLogger.info(LogCategory.UI_EVENTS, "Attempting to load usb_off.svg icon")
+        
+        // Пробуем разные способы загрузки
+        val attempts = listOf(
+            { 
+                PluginLogger.info(LogCategory.UI_EVENTS, "Trying standard IconLoader.getIcon")
+                IconLoader.getIcon("/icons/usb_off.svg", javaClass) 
+            },
+            { 
+                PluginLogger.info(LogCategory.UI_EVENTS, "Trying IconLoader.findIcon")
+                IconLoader.findIcon("/icons/usb_off.svg", javaClass.classLoader) 
+            },
+            {
+                PluginLogger.info(LogCategory.UI_EVENTS, "Trying IconLoader with CombinedDeviceRenderer classloader")
+                IconLoader.getIcon("/icons/usb_off.svg", CombinedDeviceRenderer::class.java)
+            },
+            {
+                // Пробуем загрузить как ресурс и проверить его наличие
+                PluginLogger.info(LogCategory.UI_EVENTS, "Checking if resource exists")
+                val resource = javaClass.getResource("/icons/usb_off.svg")
+                if (resource != null) {
+                    PluginLogger.info(LogCategory.UI_EVENTS, "Resource found at: %s", resource.toString())
+                    IconLoader.getIcon("/icons/usb_off.svg", javaClass)
+                } else {
+                    PluginLogger.info(LogCategory.UI_EVENTS, "Resource /icons/usb_off.svg not found in classpath")
+                    null
+                }
+            }
+        )
+        
+        for ((index, attempt) in attempts.withIndex()) {
+            try {
+                val icon = attempt()
+                if (icon != null) {
+                    PluginLogger.info(LogCategory.UI_EVENTS, "Successfully loaded usb_off.svg icon using method %d", index + 1)
+                    return icon
+                }
+            } catch (e: Exception) {
+                PluginLogger.info(LogCategory.UI_EVENTS, "Failed attempt %d to load icon: %s", e, index + 1, e.message)
+            }
+        }
+        
+        // Если все попытки провалились, используем фоллбэк
+        PluginLogger.info(LogCategory.UI_EVENTS, "All attempts to load usb_off.svg failed, using fallback icon")
+        return createUsbOffFallbackIcon()
+    }
+    
+    // Фоллбэк иконка для USB Off если загрузка SVG не удалась
+    private fun createUsbOffFallbackIcon(): Icon = object : Icon {
+        override fun paintIcon(c: Component?, g: Graphics, x: Int, y: Int) {
+            val g2d = g.create() as Graphics2D
+            g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+            
+            // Используем тот же цвет, что и для текста в теме
+            val baseColor = JBColor.namedColor("Label.foreground", JBColor(Gray._100, Gray._187))
+            g2d.color = baseColor
+            
+            // Основа USB иконки
+            val offsetX = x + 2
+            val offsetY = y + 2
+            
+            // Кабель USB (вертикальная линия)
+            g2d.stroke = BasicStroke(1.5f)
+            g2d.drawLine(offsetX + 8, offsetY + 2, offsetX + 8, offsetY + 8)
+            
+            // USB коннектор (прямоугольник)
+            g2d.fillRect(offsetX + 6, offsetY + 8, 4, 4)
+            
+            // Трезубец USB
+            g2d.stroke = BasicStroke(1f)
+            // Левая вилка
+            g2d.drawLine(offsetX + 8, offsetY + 2, offsetX + 5, offsetY + 5)
+            g2d.fillRect(offsetX + 4, offsetY + 4, 2, 2)
+            // Правая вилка  
+            g2d.drawLine(offsetX + 8, offsetY + 2, offsetX + 11, offsetY + 5)
+            g2d.fillRect(offsetX + 10, offsetY + 4, 2, 2)
+            // Центральная линия
+            g2d.drawLine(offsetX + 8, offsetY, offsetX + 8, offsetY + 2)
+            
+            // Диагональная линия "отключено"
+            g2d.color = JBColor.namedColor("Label.errorForeground", JBColor(Color(176, 0, 32), Color(255, 100, 100)))
+            g2d.stroke = BasicStroke(2f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)
+            g2d.drawLine(x + 3, y + 16, x + 16, y + 3)
+            
+            g2d.dispose()
+        }
+        
+        override fun getIconWidth() = 20
+        override fun getIconHeight() = 20
+    }
     
     // Кастомная иконка редактирования - простой монохромный карандаш
     private val editIcon = object : Icon {
@@ -79,6 +184,10 @@ class CombinedDeviceRenderer(
         isSelected: Boolean,
         list: JList<*>
     ): Component {
+        // Логируем создание компонента
+        PluginLogger.info(LogCategory.UI_EVENTS, "Creating component for device: %s (index: %d, USB: %s, WiFi: %s)", 
+            device.displayName, index, device.hasUsbConnection, device.hasWifiConnection)
+        
         val hoverState = getHoverState()
         
         // Главная панель с BorderLayout для чекбокса слева и контента справа
@@ -170,7 +279,9 @@ class CombinedDeviceRenderer(
         panel.add(currentParamsPanel)
 
         // Пятая строка - кнопки управления подключениями
+        PluginLogger.info(LogCategory.UI_EVENTS, "About to create controls panel for device: %s", device.displayName)
         val controlsPanel = createControlsPanel(device, index, hoverState)
+        PluginLogger.info(LogCategory.UI_EVENTS, "Controls panel created for device: %s", device.displayName)
         panel.add(Box.createVerticalStrut(4))
         panel.add(controlsPanel)
         
@@ -179,6 +290,15 @@ class CombinedDeviceRenderer(
     }
 
     private fun createControlsPanel(device: CombinedDeviceInfo, index: Int, hoverState: HoverState): JPanel {
+        // Логируем информацию об устройстве
+        PluginLogger.info(LogCategory.UI_EVENTS, "Creating controls for device: %s (USB: %s, WiFi: %s, usbDevice: %s, wifiDevice: %s)", 
+            device.displayName, 
+            device.hasUsbConnection, 
+            device.hasWifiConnection,
+            device.usbDevice?.logicalSerialNumber ?: "null",
+            device.wifiDevice?.logicalSerialNumber ?: "null"
+        )
+        
         val panel = JPanel().apply {
             layout = BoxLayout(this, BoxLayout.X_AXIS)
             isOpaque = false
@@ -192,8 +312,18 @@ class CombinedDeviceRenderer(
         // Добавляем отрицательный отступ, чтобы сдвинуть USB влево
         panel.add(Box.createHorizontalStrut(-5))
         
+        val selectedUsbIcon = if (device.hasUsbConnection) {
+            PluginLogger.info(LogCategory.UI_EVENTS, "Device %s has USB connection, using usbIcon", device.displayName)
+            usbIcon
+        } else {
+            // Логируем использование usbOffIcon
+            PluginLogger.info(LogCategory.UI_EVENTS, "Device %s has NO USB connection, using usbOffIcon (size: %dx%d)", 
+                device.displayName, usbOffIcon.iconWidth, usbOffIcon.iconHeight)
+            usbOffIcon
+        }
+        
         val usbPanel = createConnectionSection(
-            if (device.hasUsbConnection) usbIcon else usbOffIcon,
+            selectedUsbIcon,
             "USB",
             device.hasUsbConnection,
             showMirror = true, // Показываем всегда, но будет серой если нет USB
@@ -266,10 +396,21 @@ class CombinedDeviceRenderer(
 
         // Иконка подключения
         val iconLabel = JLabel(icon).apply {
-            isEnabled = isActive
+            // Для отладки - проверяем что за иконка
+            if (icon === usbOffIcon) {
+                PluginLogger.info(LogCategory.UI_EVENTS, "Creating JLabel with usbOffIcon, isActive=%s", isActive)
+            }
+            // ВАЖНО: Не отключаем JLabel для неактивных иконок, иначе они могут не отображаться
+            // isEnabled = isActive // Закомментировано - иконка должна быть всегда видима
+            
+            // Делаем иконку полупрозрачной если неактивна
+            if (!isActive) {
+                foreground = JBColor.GRAY
+            }
+            
             toolTipText = when {
                 icon == usbIcon && isActive -> "Connected via USB"
-                (icon == usbIcon || icon == usbOffIcon) && !isActive -> "USB not connected"
+                (icon === usbOffIcon || (icon == usbIcon && !isActive)) -> "USB not connected"
                 icon == wifiIcon && isActive -> "Connected via Wi-Fi"
                 icon == wifiIcon && !isActive -> "Wi-Fi not connected"
                 else -> null
@@ -289,7 +430,7 @@ class CombinedDeviceRenderer(
         // Кнопка Mirror
         if (showMirror) {
             panel.add(Box.createHorizontalStrut(4))
-            val connectionType = if (icon == usbIcon || icon == usbOffIcon) "USB" else "Wi-Fi"
+            val connectionType = if (icon == usbIcon || icon === usbOffIcon) "USB" else "Wi-Fi"
             val tooltip = if (isMirrorEnabled) {
                 "Mirror screen via $connectionType"
             } else {
@@ -327,7 +468,15 @@ class CombinedDeviceRenderer(
         isHovered: Boolean,
         isEnabled: Boolean = true
     ): JButton {
-        return JButton(icon).apply {
+        // Используем disabled версию иконки если кнопка неактивна
+        val buttonIcon = if (isEnabled) {
+            icon
+        } else {
+            // Создаём серую версию иконки для неактивного состояния
+            IconLoader.getDisabledIcon(icon)
+        }
+        
+        return JButton(buttonIcon).apply {
             toolTipText = tooltip
             preferredSize = Dimension(BUTTON_HEIGHT, BUTTON_HEIGHT)
             minimumSize = preferredSize
