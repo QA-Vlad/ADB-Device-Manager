@@ -41,6 +41,8 @@ object ScrcpyService {
     private val unauthorizedDevices = mutableSetOf<String>()
     // Хранилище недавно запущенных процессов (временное)
     private val recentlyStartedProcesses = mutableMapOf<Long, String>() // PID -> serialNumber
+    // Устройства, для которых scrcpy был намеренно остановлен (например, при отключении Wi-Fi)
+    private val intentionallyStopped = mutableSetOf<String>()
 
     fun findScrcpyExecutable(): String? {
         // 1. Проверяем путь из настроек плагина (если пользователь явно задал)
@@ -102,6 +104,26 @@ object ScrcpyService {
             isActive
         )
         return isActive
+    }
+    
+    /**
+     * Проверяет, была ли остановка scrcpy намеренной (например, при отключении Wi-Fi)
+     */
+    fun wasIntentionallyStopped(serialNumber: String): Boolean {
+        return intentionallyStopped.contains(serialNumber)
+    }
+    
+    /**
+     * Помечает устройство как намеренно остановленное
+     * Используется для предотвращения показа диалога об ошибке при отключении Wi-Fi
+     */
+    fun markAsIntentionallyStopped(serialNumber: String) {
+        intentionallyStopped.add(serialNumber)
+        // Убираем флаг через некоторое время (чтобы не накапливались)
+        Thread {
+            Thread.sleep(10000) // 10 секунд должно быть достаточно
+            intentionallyStopped.remove(serialNumber)
+        }.start()
     }
     
     /**
@@ -169,6 +191,14 @@ object ScrcpyService {
         val process = activeScrcpyProcesses.remove(serialNumber)
         if (process != null && process.isAlive) {
             try {
+                // Помечаем что остановка намеренная
+                intentionallyStopped.add(serialNumber)
+                // Убираем флаг через некоторое время (чтобы не накапливались)
+                Thread {
+                    Thread.sleep(5000)
+                    intentionallyStopped.remove(serialNumber)
+                }.start()
+                
                 process.destroy()
                 // Даём процессу время на завершение
                 if (!process.waitFor(5, TimeUnit.SECONDS)) {
@@ -476,8 +506,25 @@ object ScrcpyService {
     fun restartScrcpyForDevice(serialNumber: String, project: Project): Boolean {
         PluginLogger.info(LogCategory.SCRCPY, "Restarting scrcpy for device: %s", serialNumber)
         
-        // Останавливаем текущий процесс из плагина
-        stopScrcpyForDevice(serialNumber)
+        // Проверяем, не было ли устройство намеренно остановлено
+        if (wasIntentionallyStopped(serialNumber)) {
+            PluginLogger.info(LogCategory.SCRCPY, "Device %s was intentionally stopped, skipping restart", serialNumber)
+            return false
+        }
+        
+        // Останавливаем текущий процесс из плагина (но не помечаем как намеренную остановку при рестарте)
+        val process = activeScrcpyProcesses.remove(serialNumber)
+        if (process != null && process.isAlive) {
+            try {
+                process.destroy()
+                if (!process.waitFor(5, TimeUnit.SECONDS)) {
+                    process.destroyForcibly()
+                }
+                PluginLogger.info(LogCategory.SCRCPY, "Stopped scrcpy for restart: %s", serialNumber)
+            } catch (e: Exception) {
+                PluginLogger.info(LogCategory.SCRCPY, "Error stopping scrcpy for restart: %s", e.message)
+            }
+        }
         
         // Останавливаем внешние процессы scrcpy для этого устройства
         stopExternalScrcpyProcesses(serialNumber)
@@ -524,7 +571,20 @@ object ScrcpyService {
     }
 
     fun launchScrcpy(scrcpyPath: String, serialNumber: String, project: Project): Boolean {
+        println("ADB_Randomizer: launchScrcpy called for device: $serialNumber")
+        println("ADB_Randomizer: Stack trace:")
+        Thread.currentThread().stackTrace.take(10).forEach { 
+            println("  at ${it.className}.${it.methodName}(${it.fileName}:${it.lineNumber})")
+        }
+        
         try {
+            // Проверяем, не было ли устройство намеренно остановлено
+            if (wasIntentionallyStopped(serialNumber)) {
+                println("ADB_Randomizer: Device $serialNumber was intentionally stopped, not launching scrcpy")
+                PluginLogger.info(LogCategory.SCRCPY, "Device %s was intentionally stopped, not launching scrcpy", serialNumber)
+                return false
+            }
+            
             if (scrcpyPath.isBlank() || serialNumber.isBlank()) {
                 PluginLogger.info(LogCategory.SCRCPY, "Empty scrcpy path or serial number provided")
                 return false
@@ -557,6 +617,15 @@ object ScrcpyService {
             val success = launchScrcpyWithFlags(scrcpyPath, serialNumber, adbPath, customFlags, project)
 
             if (!success) {
+                // Проверяем, была ли остановка намеренной (например при отключении Wi-Fi)
+                if (wasIntentionallyStopped(serialNumber)) {
+                    PluginLogger.info(LogCategory.SCRCPY, "Scrcpy was intentionally stopped for device %s, not showing error dialog", serialNumber)
+                    // Убираем флаг
+                    intentionallyStopped.remove(serialNumber)
+                    // Не показываем диалог об ошибке
+                    return false
+                }
+                
                 // Проверяем причину неудачи
                 if (lastLaunchResult == LaunchResult.UNAUTHORIZED) {
                     PluginLogger.error(LogCategory.SCRCPY, "Device %s is unauthorized", null, serialNumber)
@@ -568,6 +637,8 @@ object ScrcpyService {
                     }
                 } else {
                     // Показываем диалог совместимости только если проблема не в авторизации
+                    println("ADB_Randomizer: Showing scrcpy compatibility dialog for device: $serialNumber")
+                    PluginLogger.error(LogCategory.SCRCPY, "Showing compatibility dialog for device: %s, lastLaunchResult: %s", null, serialNumber, lastLaunchResult.toString())
                     var retry = false
                     val version = checkScrcpyVersion(scrcpyPath)
                     ApplicationManager.getApplication().invokeAndWait {
@@ -983,19 +1054,32 @@ object ScrcpyService {
             }
 
             PluginLogger.info(LogCategory.SCRCPY, "Scrcpy started successfully for device: %s", serialNumber)
+            println("ADB_Randomizer: Scrcpy started successfully for device: $serialNumber")
             
             // Сбрасываем флаг при успешном запуске
             lastLaunchResult = LaunchResult.SUCCESS
             
             // Сохраняем процесс для возможности управления им
             activeScrcpyProcesses[serialNumber] = process
+            println("ADB_Randomizer: Saved scrcpy process with key: $serialNumber")
+            println("ADB_Randomizer: Active scrcpy processes: ${activeScrcpyProcesses.keys.joinToString(", ")}")
             PluginLogger.info(LogCategory.SCRCPY, "Saved scrcpy process for device %s, total active processes: %s", 
                 serialNumber, activeScrcpyProcesses.size.toString())
 
             Thread {
                 try {
                     val exitCode = process.waitFor()
+                    println("ADB_Randomizer: Scrcpy process for device $serialNumber exited with code: $exitCode")
                     PluginLogger.info(LogCategory.SCRCPY, "Scrcpy for device %s closed with exit code: %s", serialNumber, exitCode)
+                    
+                    // Проверяем, была ли остановка намеренной
+                    if (wasIntentionallyStopped(serialNumber)) {
+                        println("ADB_Randomizer: Scrcpy was intentionally stopped for device $serialNumber, not triggering error handling")
+                        intentionallyStopped.remove(serialNumber)
+                    } else if (exitCode != 0) {
+                        println("ADB_Randomizer: Scrcpy exited with error for device $serialNumber, exit code: $exitCode")
+                    }
+                    
                     outputReader.join(1000)
                     errorReader.join(1000)
                     // Удаляем процесс из активных после завершения

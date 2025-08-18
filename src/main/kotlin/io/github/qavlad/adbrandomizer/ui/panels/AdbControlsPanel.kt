@@ -572,6 +572,48 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                 indicator.isIndeterminate = true
                 indicator.text = "Disconnecting from $ipAddress..."
                 
+                println("ADB_Randomizer: Disconnecting Wi-Fi device: $ipAddress")
+                PluginLogger.warn(LogCategory.ADB_CONNECTION, "Starting Wi-Fi device disconnect: %s", ipAddress)
+                
+                // Сначала останавливаем scrcpy если он запущен для этого устройства
+                // ipAddress может содержать порт (например "192.168.1.100:5555"), извлекаем серийный номер
+                val serialNumber = ipAddress // В случае Wi-Fi устройств, серийный номер это IP:port
+                
+                // Проверяем все возможные варианты серийных номеров
+                val possibleSerials = listOf(
+                    serialNumber,
+                    serialNumber.substringBefore(":"),  // Без порта
+                    "$serialNumber:5555"  // С явным портом если его нет
+                )
+                
+                println("ADB_Randomizer: Checking scrcpy for serial numbers: ${possibleSerials.joinToString(", ")}")
+                
+                var scrcpyStopped = false
+                for (serial in possibleSerials) {
+                    if (ScrcpyService.isScrcpyActiveForDevice(serial)) {
+                        println("ADB_Randomizer: Found active scrcpy for device: $serial, stopping it...")
+                        PluginLogger.warn(LogCategory.SCRCPY, "Stopping scrcpy before disconnecting Wi-Fi device: %s", serial)
+                        ScrcpyService.stopScrcpyForDevice(serial)
+                        scrcpyStopped = true
+                        break
+                    }
+                }
+                
+                // Даже если scrcpy не найден, помечаем все возможные серийные номера как намеренно остановленные
+                // чтобы предотвратить попытки запуска scrcpy после отключения
+                for (serial in possibleSerials) {
+                    ScrcpyService.markAsIntentionallyStopped(serial)
+                    println("ADB_Randomizer: Marked $serial as intentionally stopped")
+                }
+                
+                if (scrcpyStopped) {
+                    println("ADB_Randomizer: Scrcpy stopped, waiting for process to terminate...")
+                    // Даем время процессу завершиться корректно
+                    Thread.sleep(1000)
+                } else {
+                    println("ADB_Randomizer: No active scrcpy found for device: $ipAddress")
+                }
+                
                 val result = AdbService.disconnectWifi(ipAddress)
                 val success = result.getOrNull() ?: false
                 
