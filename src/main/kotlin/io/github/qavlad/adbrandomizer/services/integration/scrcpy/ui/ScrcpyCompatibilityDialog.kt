@@ -40,7 +40,8 @@ class ScrcpyCompatibilityDialog(
     enum class ProblemType {
         NOT_FOUND, // scrcpy не найден
         NOT_WORKING, // scrcpy найден, но не запускается/ошибка
-        INCOMPATIBLE // scrcpy несовместим (например, слишком старая версия)
+        INCOMPATIBLE, // scrcpy несовместим (например, слишком старая версия)
+        ANDROID_15_INCOMPATIBLE // специфичная проблема с Android 15
     }
 
     private val scrcpyName = if (System.getProperty("os.name").startsWith("Windows")) 
@@ -209,6 +210,11 @@ class ScrcpyCompatibilityDialog(
             ProblemType.INCOMPATIBLE ->
                 "Your current scrcpy version ($currentVersion) is incompatible with your device or Android version.\n\n" +
                 "Please update scrcpy to the latest version or select a compatible version."
+            ProblemType.ANDROID_15_INCOMPATIBLE ->
+                "Your scrcpy version ($currentVersion) is incompatible with Android 15.\n\n" +
+                "Android 15 introduced API changes that require scrcpy version 2.4 or newer.\n" +
+                "The error 'NoSuchMethodException: SurfaceControl.createDisplay' indicates your scrcpy version is too old.\n" +
+                "Please update to scrcpy 2.4 or later to support Android 15 devices."
         }
     }
 
@@ -527,6 +533,11 @@ class ScrcpyCompatibilityDialog(
             }
         }
         
+        // На macOS автоматически удаляем атрибут карантина
+        if (System.getProperty("os.name").contains("Mac", ignoreCase = true)) {
+            removeQuarantineAttribute(path)
+        }
+        
         // Валидируем путь
         var pathToSave: String? = null
         
@@ -653,9 +664,7 @@ class ScrcpyCompatibilityDialog(
             }
         }
 
-        val chosenFile: VirtualFile? = FileChooser.chooseFile(descriptor, project, initialVirtualFile)
-
-        if (chosenFile == null) return null
+        val chosenFile: VirtualFile = FileChooser.chooseFile(descriptor, project, initialVirtualFile) ?: return null
 
         val selectedIoFile = File(chosenFile.path)
         
@@ -875,6 +884,40 @@ class ScrcpyCompatibilityDialog(
             return finished && process.exitValue() == 0
         } catch (_: Exception) {
             return false
+        }
+    }
+    
+    private fun removeQuarantineAttribute(path: String) {
+        try {
+            val file = File(path)
+            
+            // Определяем, что нужно обработать
+            when {
+                file.isFile -> {
+                    // Удаляем атрибут у файла
+                    val removeCmd = ProcessBuilder("xattr", "-d", "com.apple.quarantine", file.absolutePath).start()
+                    removeCmd.waitFor(2, TimeUnit.SECONDS)
+                    PluginLogger.info(LogCategory.GENERAL, "Removed quarantine attribute from file: %s", file.absolutePath)
+                }
+                file.isDirectory -> {
+                    // Удаляем атрибут рекурсивно у всех файлов в директории
+                    val removeCmd = ProcessBuilder("xattr", "-r", "-d", "com.apple.quarantine", file.absolutePath).start()
+                    removeCmd.waitFor(3, TimeUnit.SECONDS)
+                    
+                    // Дополнительно убеждаемся, что scrcpy исполняемый
+                    val scrcpyFile = File(file, "scrcpy")
+                    if (scrcpyFile.exists()) {
+                        // Делаем файл исполняемым
+                        val chmodCmd = ProcessBuilder("chmod", "+x", scrcpyFile.absolutePath).start()
+                        chmodCmd.waitFor(1, TimeUnit.SECONDS)
+                    }
+                    
+                    PluginLogger.info(LogCategory.GENERAL, "Removed quarantine attribute from directory: %s", file.absolutePath)
+                }
+            }
+        } catch (e: Exception) {
+            // Не показываем ошибку пользователю, просто логируем
+            PluginLogger.debug(LogCategory.GENERAL, "Could not remove quarantine attribute: %s", e.message ?: "Unknown error")
         }
     }
 

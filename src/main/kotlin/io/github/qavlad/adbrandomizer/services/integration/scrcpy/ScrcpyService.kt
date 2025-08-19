@@ -23,7 +23,9 @@ object ScrcpyService {
     private enum class LaunchResult {
         SUCCESS,
         UNAUTHORIZED,
-        INVALID_FLAGS
+        INVALID_FLAGS,
+        FAILED,
+        ANDROID_15_INCOMPATIBLE
     }
     
     // Хранилище последней ошибки с флагами
@@ -224,13 +226,14 @@ object ScrcpyService {
             val isWindows = System.getProperty("os.name").startsWith("Windows")
             PluginLogger.debug(LogCategory.SCRCPY, "Operating system: %s, isWindows: %s", System.getProperty("os.name"), isWindows.toString())
             
-            // Команда для поиска процессов scrcpy
+            // Команда для поиска процессов scrcpy - используем более эффективный подход
             val command = if (isWindows) {
                 // На Windows используем tasklist + wmic для надёжности
                 listOf("cmd.exe", "/c", "tasklist | findstr scrcpy")
             } else {
-                // На Unix-подобных системах используем ps
-                listOf("ps", "aux")
+                // На Unix-подобных системах используем pgrep для более быстрого поиска
+                // pgrep возвращает только PID процессов, что намного быстрее чем ps aux
+                listOf("pgrep", "-f", "scrcpy.*$serialNumber")
             }
             
             PluginLogger.debug(LogCategory.SCRCPY, "Executing command: %s", command.joinToString(" "))
@@ -238,127 +241,103 @@ object ScrcpyService {
             val processBuilder = ProcessBuilder(command)
             val process = processBuilder.start()
             
-            // Читаем ошибки, если есть
-            val errorOutput = process.errorStream.bufferedReader().use { it.readText() }
-            if (errorOutput.isNotBlank()) {
-                PluginLogger.warn(LogCategory.SCRCPY, "Command error output: %s", errorOutput)
+            // Читаем вывод с таймаутом
+            val finished = process.waitFor(3, TimeUnit.SECONDS)
+            if (!finished) {
+                PluginLogger.warn(LogCategory.SCRCPY, "Process search timed out, destroying process")
+                process.destroyForcibly()
+                return
             }
             
-            process.inputStream.bufferedReader().use { reader ->
-                val output = reader.readText()
-                PluginLogger.debug(LogCategory.SCRCPY, "Command output length: %d characters", output.length.toString())
+            val output = process.inputStream.bufferedReader().use { it.readText() }
+            val errorOutput = process.errorStream.bufferedReader().use { it.readText() }
+            
+            if (errorOutput.isNotBlank()) {
+                PluginLogger.debug(LogCategory.SCRCPY, "Command error output: %s", errorOutput)
+            }
+            
+            if (output.isBlank()) {
+                PluginLogger.debug(LogCategory.SCRCPY, "No external scrcpy processes found for device %s", serialNumber)
+                return
+            }
+            
+            PluginLogger.debug(LogCategory.SCRCPY, "Found process output: %s", output)
+            
+            // Парсим вывод в зависимости от ОС
+            val processesToKill = mutableListOf<String>()
+            
+            if (isWindows) {
+                // Парсим вывод tasklist
+                // Формат: scrcpy.exe                    4764 Console                    6   156�440 ��
+                val lines = output.lines()
                 
-                // Логируем первые несколько строк для отладки
-                val outputLines = output.lines()
-                if (outputLines.isNotEmpty()) {
-                    PluginLogger.debug(LogCategory.SCRCPY, "First few lines of output:")
-                    outputLines.take(5).forEach { line ->
-                        PluginLogger.debug(LogCategory.SCRCPY, "  %s", line)
-                    }
-                }
-                
-                // Парсим вывод и ищем процессы scrcpy с нужным серийным номером
-                val processesToKill = mutableListOf<String>()
-                var totalScrcpyProcessesFound = 0
-                
-                if (isWindows) {
-                    // Парсим вывод tasklist
-                    // Формат: scrcpy.exe                    4764 Console                    6   156�440 ��
-                    val lines = output.lines()
-                    
-                    for (line in lines) {
-                        if (line.contains("scrcpy.exe")) {
-                            totalScrcpyProcessesFound++
+                for (line in lines) {
+                    if (line.contains("scrcpy.exe")) {
+                        // Парсим PID из строки tasklist
+                        val parts = line.trim().split("\\s+".toRegex())
+                        if (parts.size >= 2) {
+                            val pid = parts[1]
+                            PluginLogger.debug(LogCategory.SCRCPY, "Found scrcpy process from tasklist: PID=%s", pid)
                             
-                            // Парсим PID из строки tasklist
-                            val parts = line.trim().split("\\s+".toRegex())
-                            if (parts.size >= 2) {
-                                val pid = parts[1]
-                                PluginLogger.debug(LogCategory.SCRCPY, "Found scrcpy process from tasklist: PID=%s", pid)
+                            // Получаем командную строку для этого PID
+                            val cmdLineCommand = listOf("cmd.exe", "/c", "wmic process where ProcessId=$pid get CommandLine")
+                            try {
+                                val cmdLineProcess = ProcessBuilder(cmdLineCommand).start()
+                                val cmdLineOutput = cmdLineProcess.inputStream.bufferedReader().use { it.readText() }
                                 
-                                // Получаем командную строку для этого PID
-                                val cmdLineCommand = listOf("cmd.exe", "/c", "wmic process where ProcessId=$pid get CommandLine")
-                                try {
-                                    val cmdLineProcess = ProcessBuilder(cmdLineCommand).start()
-                                    val cmdLineOutput = cmdLineProcess.inputStream.bufferedReader().use { it.readText() }
-                                    
-                                    PluginLogger.debug(LogCategory.SCRCPY, "Command line for PID %s: %s", pid, cmdLineOutput.trim())
-                                    
-                                    // Проверяем, содержит ли командная строка наш серийный номер
-                                    val containsSerial = cmdLineOutput.contains(serialNumber)
-                                    PluginLogger.debug(LogCategory.SCRCPY, "Process PID=%s contains serial '%s': %s", 
-                                        pid, serialNumber, containsSerial.toString())
-                                    
-                                    if (containsSerial) {
-                                        // Проверяем, что это не наш процесс
-                                        val pidInt = pid.toIntOrNull()
-                                        if (pidInt != null) {
-                                            val isOur = isOurProcess(pidInt)
-                                            PluginLogger.debug(LogCategory.SCRCPY, "Process PID=%s is our process: %s", 
-                                                pid, isOur.toString())
-                                            
-                                            if (!isOur) {
-                                                processesToKill.add(pid)
-                                                PluginLogger.info(LogCategory.SCRCPY, "Will kill external scrcpy process: PID=%s", pid)
-                                            }
+                                PluginLogger.debug(LogCategory.SCRCPY, "Command line for PID %s: %s", pid, cmdLineOutput.trim())
+                                
+                                // Проверяем, содержит ли командная строка наш серийный номер
+                                val containsSerial = cmdLineOutput.contains(serialNumber)
+                                PluginLogger.debug(LogCategory.SCRCPY, "Process PID=%s contains serial '%s': %s", 
+                                    pid, serialNumber, containsSerial.toString())
+                                
+                                if (containsSerial) {
+                                    // Проверяем, что это не наш процесс
+                                    val pidInt = pid.toIntOrNull()
+                                    if (pidInt != null) {
+                                        val isOur = isOurProcess(pidInt)
+                                        PluginLogger.debug(LogCategory.SCRCPY, "Process PID=%s is our process: %s", 
+                                            pid, isOur.toString())
+                                        
+                                        if (!isOur) {
+                                            processesToKill.add(pid)
+                                            PluginLogger.info(LogCategory.SCRCPY, "Will kill external scrcpy process: PID=%s", pid)
                                         }
                                     }
-                                    
-                                    cmdLineProcess.waitFor(2, TimeUnit.SECONDS)
-                                } catch (e: Exception) {
-                                    PluginLogger.debug(LogCategory.SCRCPY, "Error getting command line for PID %s: %s", 
-                                        pid, e.message ?: "Unknown error")
                                 }
-                            }
-                        }
-                    }
-                } else {
-                    // Парсим вывод ps aux
-                    val lines = output.lines()
-                    for (line in lines) {
-                        if (line.contains("scrcpy")) {
-                            totalScrcpyProcessesFound++
-                            PluginLogger.debug(LogCategory.SCRCPY, "Found scrcpy process: %s", line)
-                            
-                            if (line.contains(serialNumber)) {
-                                val parts = line.trim().split("\\s+".toRegex())
-                                if (parts.size > 1) {
-                                    val pid = parts[1]
-                                    val pidInt = pid.toIntOrNull() ?: -1
-                                    val isOur = isOurProcess(pidInt)
-                                    
-                                    PluginLogger.debug(LogCategory.SCRCPY, "Process PID=%s is our process: %s", 
-                                        pid, isOur.toString())
-                                    
-                                    if (!isOur) {
-                                        processesToKill.add(pid)
-                                        PluginLogger.info(LogCategory.SCRCPY, "Will kill external scrcpy process: PID=%s", pid)
-                                    }
-                                }
+                                
+                                cmdLineProcess.waitFor(2, TimeUnit.SECONDS)
+                            } catch (e: Exception) {
+                                PluginLogger.debug(LogCategory.SCRCPY, "Error getting command line for PID %s: %s", 
+                                    pid, e.message ?: "Unknown error")
                             }
                         }
                     }
                 }
-                
-                PluginLogger.info(LogCategory.SCRCPY, "Total scrcpy processes found: %s, processes to kill: %s", 
-                    totalScrcpyProcessesFound.toString(), processesToKill.size.toString())
-                
-                // Убиваем найденные процессы
-                for (pid in processesToKill) {
-                    killProcess(pid, isWindows)
-                }
-                
-                if (processesToKill.isEmpty() && totalScrcpyProcessesFound > 0) {
-                    PluginLogger.info(LogCategory.SCRCPY, "Found %s scrcpy processes but none matched device %s", 
-                        totalScrcpyProcessesFound.toString(), serialNumber)
-                    
-                    // Если не нашли процессы по серийному номеру, но есть scrcpy процессы,
-                    // попробуем альтернативную стратегию
-                    tryAlternativeScrcpyKillStrategy(serialNumber)
+            } else {
+                // Для Unix - pgrep уже вернул только PID процессов scrcpy с нужным серийным номером
+                val lines = output.lines().filter { it.isNotBlank() }
+                for (pidStr in lines) {
+                    val pid = pidStr.trim().toIntOrNull()
+                    if (pid != null) {
+                        val isOur = isOurProcess(pid)
+                        PluginLogger.debug(LogCategory.SCRCPY, "Found scrcpy process PID=%s, is our: %s", pid.toString(), isOur.toString())
+                        
+                        if (!isOur) {
+                            processesToKill.add(pid.toString())
+                            PluginLogger.info(LogCategory.SCRCPY, "Will kill external scrcpy process: PID=%s", pid.toString())
+                        }
+                    }
                 }
             }
             
-            process.waitFor(5, TimeUnit.SECONDS)
+            PluginLogger.info(LogCategory.SCRCPY, "Processes to kill: %s", processesToKill.size.toString())
+            
+            // Убиваем найденные процессы
+            for (pid in processesToKill) {
+                killProcess(pid, isWindows)
+            }
             
         } catch (e: Exception) {
             PluginLogger.error(LogCategory.SCRCPY, "Error stopping external scrcpy processes", e)
@@ -460,30 +439,6 @@ object ScrcpyService {
             }
         } catch (e: Exception) {
             PluginLogger.error(LogCategory.SCRCPY, "Error killing process %s", e, pid)
-        }
-    }
-    
-    /**
-     * Альтернативная стратегия для закрытия процессов scrcpy
-     * Используется когда не можем найти процесс по серийному номеру
-     */
-    private fun tryAlternativeScrcpyKillStrategy(serialNumber: String) {
-        try {
-            PluginLogger.info(LogCategory.SCRCPY, "Trying alternative strategy to find scrcpy processes")
-            
-            // Используем AdbService вместо прямого вызова adb devices
-            val deviceFound = AdbService.isDeviceAuthorized(serialNumber)
-            
-            if (deviceFound) {
-                PluginLogger.info(LogCategory.SCRCPY, "Device %s is connected", serialNumber)
-                // НЕ убиваем процессы в альтернативной стратегии!
-                // Просто логируем предупреждение
-                PluginLogger.warn(LogCategory.SCRCPY, "Could not identify external scrcpy process for device %s", serialNumber)
-                PluginLogger.warn(LogCategory.SCRCPY, "External scrcpy process may still be running")
-            }
-            
-        } catch (e: Exception) {
-            PluginLogger.error(LogCategory.SCRCPY, "Error in alternative scrcpy kill strategy", e)
         }
     }
     
@@ -641,11 +596,21 @@ object ScrcpyService {
                     PluginLogger.error(LogCategory.SCRCPY, "Showing compatibility dialog for device: %s, lastLaunchResult: %s", null, serialNumber, lastLaunchResult.toString())
                     var retry = false
                     val version = checkScrcpyVersion(scrcpyPath)
+                    
+                    // Определяем тип проблемы на основе lastLaunchResult
+                    val problemType = when (lastLaunchResult) {
+                        LaunchResult.ANDROID_15_INCOMPATIBLE -> ScrcpyCompatibilityDialog.ProblemType.ANDROID_15_INCOMPATIBLE
+                        LaunchResult.INVALID_FLAGS -> ScrcpyCompatibilityDialog.ProblemType.INCOMPATIBLE
+                        LaunchResult.UNAUTHORIZED -> ScrcpyCompatibilityDialog.ProblemType.NOT_WORKING
+                        else -> ScrcpyCompatibilityDialog.ProblemType.NOT_WORKING
+                    }
+                    
                     ApplicationManager.getApplication().invokeAndWait {
                         val dialog = ScrcpyCompatibilityDialog(
                             project,
                             version.ifBlank { "Unknown" },
-                            serialNumber
+                            serialNumber,
+                            problemType
                         )
                         dialog.show()
                         if (dialog.exitCode == PluginConfig.UIConstants.RETRY_EXIT_CODE) {
@@ -984,6 +949,12 @@ object ScrcpyService {
                                 line.contains("Device is unauthorized", ignoreCase = true)) {
                                 unauthorizedDetected = true
                             }
+                            // Проверяем на проблему с Android 15
+                            if (line.contains("NoSuchMethodException") && 
+                                line.contains("SurfaceControl.createDisplay")) {
+                                lastLaunchResult = LaunchResult.ANDROID_15_INCOMPATIBLE
+                                PluginLogger.info(LogCategory.SCRCPY, "Detected Android 15 compatibility issue")
+                            }
                             // Проверяем на ошибки с флагами и сохраняем текст ошибки
                             if (line.contains("Unexpected additional argument", ignoreCase = true) ||
                                 line.contains("Unknown option", ignoreCase = true) ||
@@ -1026,11 +997,16 @@ object ScrcpyService {
                 if (unauthorizedDetected) {
                     lastLaunchResult = LaunchResult.UNAUTHORIZED
                 }
-                // Если уже установлен INVALID_FLAGS, не перезаписываем
-                if (lastLaunchResult != LaunchResult.INVALID_FLAGS && exitCode != 0) {
+                // Если уже установлен INVALID_FLAGS или ANDROID_15_INCOMPATIBLE, не перезаписываем
+                if (lastLaunchResult != LaunchResult.INVALID_FLAGS && 
+                    lastLaunchResult != LaunchResult.ANDROID_15_INCOMPATIBLE && 
+                    exitCode != 0) {
                     // Проверяем, возможно это проблема с флагами
-                    if (exitCode == 1 || exitCode == 2) {
-                        lastLaunchResult = LaunchResult.INVALID_FLAGS
+                    lastLaunchResult = if (exitCode == 1 || exitCode == 2) {
+                        LaunchResult.INVALID_FLAGS
+                    } else {
+                        // Устанавливаем общую ошибку запуска
+                        LaunchResult.FAILED
                     }
                 }
                 return exitCode == 0
@@ -1044,10 +1020,15 @@ object ScrcpyService {
                 if (unauthorizedDetected) {
                     lastLaunchResult = LaunchResult.UNAUTHORIZED
                 }
-                // Если уже установлен INVALID_FLAGS, не перезаписываем
-                if (lastLaunchResult != LaunchResult.INVALID_FLAGS && exitCode != 0) {
-                    if (exitCode == 1 || exitCode == 2) {
-                        lastLaunchResult = LaunchResult.INVALID_FLAGS
+                // Если уже установлен INVALID_FLAGS или ANDROID_15_INCOMPATIBLE, не перезаписываем
+                if (lastLaunchResult != LaunchResult.INVALID_FLAGS && 
+                    lastLaunchResult != LaunchResult.ANDROID_15_INCOMPATIBLE && 
+                    exitCode != 0) {
+                    lastLaunchResult = if (exitCode == 1 || exitCode == 2) {
+                        LaunchResult.INVALID_FLAGS
+                    } else {
+                        // Устанавливаем общую ошибку запуска
+                        LaunchResult.FAILED
                     }
                 }
                 return exitCode == 0
@@ -1105,7 +1086,12 @@ object ScrcpyService {
             val process = ProcessBuilder(scrcpyPath, "--version").start()
             val finished = process.waitFor(PluginConfig.Scrcpy.VERSION_CHECK_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             if (finished) {
-                process.inputStream.bufferedReader().use { it.readText() }.trim()
+                val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
+                // Извлекаем версию из первой строки вывода
+                // Формат: "scrcpy 2.3.1 <https://github.com/Genymobile/scrcpy>"
+                val firstLine = output.lines().firstOrNull() ?: return ""
+                val versionMatch = Regex("scrcpy\\s+([\\d.]+)").find(firstLine)
+                versionMatch?.groupValues?.get(1) ?: ""
             } else {
                 ""
             }
