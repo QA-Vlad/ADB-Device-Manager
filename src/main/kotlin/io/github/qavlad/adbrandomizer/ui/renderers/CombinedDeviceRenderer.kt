@@ -36,6 +36,7 @@ class CombinedDeviceRenderer(
         loadUsbOffIcon()
     }
     private val wifiIcon: Icon = IconLoader.getIcon("/icons/wifi.svg", javaClass)
+    private val wifiOffIcon: Icon = IconLoader.getIcon("/icons/wifi_off.svg", javaClass)
     private val mirrorIcon = IconLoader.getIcon("/icons/scrcpy.svg", javaClass)
     private val resetIcon = IconLoader.getIcon("/icons/reset.svg", javaClass)
     
@@ -317,7 +318,7 @@ class CombinedDeviceRenderer(
             // Если есть USB подключение, но нет Wi-Fi - показываем кнопку Connect
             val showConnectButton = device.hasUsbConnection
             val wifiPanel = createConnectionSection(
-                wifiIcon,
+                wifiOffIcon,  // Используем серую иконку когда Wi-Fi не подключен
                 "Wi-Fi",
                 false,
                 showMirror = false,
@@ -365,7 +366,7 @@ class CombinedDeviceRenderer(
                 icon == usbIcon && isActive -> "Connected via USB"
                 (icon === usbOffIcon || (icon == usbIcon && !isActive)) -> "USB not connected"
                 icon == wifiIcon && isActive -> "Connected via Wi-Fi"
-                icon == wifiIcon && !isActive -> "Wi-Fi not connected"
+                (icon === wifiOffIcon || (icon == wifiIcon && !isActive)) -> "Wi-Fi not connected"
                 else -> null
             }
         }

@@ -16,8 +16,8 @@ import javax.swing.*
  */
 class DeviceInfoPanelRenderer {
 
-    private val usbIcon: Icon = IconLoader.getIcon("/icons/usb.svg", javaClass)
     private val wifiIcon: Icon = IconLoader.getIcon("/icons/wifi.svg", javaClass)
+    private val wifiOffIcon: Icon = IconLoader.getIcon("/icons/wifi_off.svg", javaClass)
 
     private var cachedSmallWifiIcon: Icon? = null
 
@@ -36,7 +36,7 @@ class DeviceInfoPanelRenderer {
         val displayInfo = DeviceConnectionUtils.formatDeviceInfo(deviceInfo)
 
         // Иконка типа подключения
-        val connectionIcon = if (displayInfo.isWifiConnection) wifiIcon else usbIcon
+        val connectionIcon = if (displayInfo.isWifiConnection) wifiIcon else wifiOffIcon
         mainPanel.add(JLabel(connectionIcon), BorderLayout.WEST)
 
         // Текстовая информация
