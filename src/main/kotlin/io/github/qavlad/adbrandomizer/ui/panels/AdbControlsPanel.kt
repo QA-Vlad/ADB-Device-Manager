@@ -237,18 +237,24 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
         applyPresetToDevices(preset)
     }
 
-    private fun applyPresetToSelectedDevices(preset: DevicePreset, setSize: Boolean, setDpi: Boolean, @Suppress("UNUSED_PARAMETER") selectedDevices: List<IDevice>) {
+    private fun applyPresetToSelectedDevices(preset: DevicePreset, setSize: Boolean, setDpi: Boolean, selectedDevices: List<IDevice>) {
         lastUsedPreset = preset
         
         // Используем PresetApplicationService для применения пресета
         // Это обеспечит правильную работу перезапуска scrcpy и приложений
-        // selectedDevices игнорируется, так как PresetApplicationService сам получает список устройств
-        PresetApplicationService.applyPreset(project, preset, setSize, setDpi)
+        // Передаем выбранные устройства для применения только к ним
+        PresetApplicationService.applyPreset(project, preset, setSize, setDpi, selectedDevices = selectedDevices)
     }
     
     private fun applyPresetToDevices(preset: DevicePreset) {
         lastUsedPreset = preset
-        PresetApplicationService.applyPreset(project, preset, setSize = true, setDpi = true)
+        // Получаем список выбранных устройств для применения пресета
+        val selectedDevices = getSelectedDevicesForAdb()
+        if (selectedDevices.isEmpty()) {
+            NotificationUtils.showWarning(project, "No devices selected for ADB commands. Please check the ADB checkboxes.")
+            return
+        }
+        PresetApplicationService.applyPreset(project, preset, setSize = true, setDpi = true, selectedDevices = selectedDevices)
     }
 
     // ==================== RESET ACTIONS ====================

@@ -16,16 +16,25 @@ import javax.swing.SwingUtilities
 
 object PresetApplicationService {
     
-    fun applyPreset(project: Project, preset: DevicePreset, setSize: Boolean, setDpi: Boolean, currentTablePosition: Int? = null) {
+    fun applyPreset(project: Project, preset: DevicePreset, setSize: Boolean, setDpi: Boolean, currentTablePosition: Int? = null, selectedDevices: List<IDevice>? = null) {
         PluginLogger.debug(LogCategory.PRESET_SERVICE, "applyPreset called - preset: %s, currentTablePosition: %s", preset.label, currentTablePosition)
         object : Task.Backgroundable(project, "Applying preset") {
             override fun run(indicator: ProgressIndicator) {
                 val presetData = validateAndParsePresetData(preset, setSize, setDpi) ?: return
-                val devicesResult = AdbService.getConnectedDevices(project)
-                val devices = devicesResult.getOrNull() ?: emptyList()
+                
+                // Используем переданный список устройств или получаем все подключенные
+                val devices = if (selectedDevices != null) {
+                    selectedDevices
+                } else {
+                    // Если список устройств не передан, получаем все подключенные устройства
+                    // В этом случае вызов должен происходить из контекстного меню, где устройства уже отфильтрованы
+                    val devicesResult = AdbService.getConnectedDevices(project)
+                    devicesResult.getOrNull() ?: emptyList()
+                }
+                
                 if (devices.isEmpty()) {
                     ApplicationManager.getApplication().invokeLater {
-                        NotificationUtils.showInfo(project, "No devices connected")
+                        NotificationUtils.showInfo(project, "No devices selected or connected")
                     }
                     return
                 }

@@ -171,7 +171,7 @@ class DevicePollingService(private val project: Project) {
             selectedDevices.remove(baseSerialNumber)
         }
     }
-    
+
     /**
      * Освобождает все ресурсы и отменяет все корутины
      */
