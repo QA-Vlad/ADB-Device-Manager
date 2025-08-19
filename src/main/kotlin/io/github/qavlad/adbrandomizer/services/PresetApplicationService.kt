@@ -113,20 +113,14 @@ object PresetApplicationService {
         var dpi: Int? = null
         
         if (setSize && preset.size.isNotBlank()) {
-            val sizeData = ValidationUtils.parseSize(preset.size)
-            if (sizeData == null) {
-                return null
-            }
+            val sizeData = ValidationUtils.parseSize(preset.size) ?: return null
             width = sizeData.first
             height = sizeData.second
             appliedSettings.add("Size: ${preset.size}")
         }
         
         if (setDpi && preset.dpi.isNotBlank()) {
-            val dpiValue = ValidationUtils.parseDpi(preset.dpi)
-            if (dpiValue == null) {
-                return null
-            }
+            val dpiValue = ValidationUtils.parseDpi(preset.dpi) ?: return null
             dpi = dpiValue
             appliedSettings.add("DPI: ${preset.dpi}")
         }
@@ -139,6 +133,16 @@ object PresetApplicationService {
     }
     
     private fun applyPresetToAllDevices(devices: List<IDevice>, preset: DevicePreset, presetData: PresetData, indicator: ProgressIndicator, project: Project) {
+        PluginLogger.info(LogCategory.PRESET_SERVICE, 
+            "===== APPLY PRESET TO ALL DEVICES START =====\nPreset: %s\nDevices count: %d\nDevices: %s\nPresetData: width=%s, height=%s, dpi=%s", 
+            preset.label,
+            devices.size,
+            devices.joinToString(", ") { it.serialNumber },
+            presetData.width?.toString() ?: "null",
+            presetData.height?.toString() ?: "null",
+            presetData.dpi?.toString() ?: "null"
+        )
+        
         // Collect devices that need Running Devices restart
         val devicesNeedingRunningDevicesRestart = mutableListOf<IDevice>()
         
@@ -152,6 +156,12 @@ object PresetApplicationService {
         val devicesWithActiveApps = mutableMapOf<IDevice, Pair<String, String>>()
         val settings = PluginSettings.instance
         
+        PluginLogger.info(LogCategory.PRESET_SERVICE, 
+            "Settings: restartScrcpyOnResolutionChange=%s, restartActiveAppOnResolutionChange=%s",
+            settings.restartScrcpyOnResolutionChange,
+            settings.restartActiveAppOnResolutionChange
+        )
+        
         // Сначала проверяем, какие устройства будут иметь изменение разрешения
         if (presetData.width != null && presetData.height != null) {
             devices.forEach { device ->
@@ -159,31 +169,62 @@ object PresetApplicationService {
                 val currentSizeResult = AdbService.getCurrentSize(device)
                 val currentSize = currentSizeResult.getOrNull()
                 
+                PluginLogger.info(LogCategory.PRESET_SERVICE, 
+                    "Checking resolution change for device %s: current=%s, target=%dx%d", 
+                    device.serialNumber, 
+                    currentSize?.let { "${it.first}x${it.second}" } ?: "null",
+                    presetData.width, presetData.height
+                )
+                
                 // Проверяем, изменится ли разрешение
-                if (currentSize != null && (currentSize.first != presetData.width || currentSize.second != presetData.height)) {
+                val resolutionWillChange = currentSize != null && 
+                    (currentSize.first != presetData.width || currentSize.second != presetData.height)
+                
+                // Также считаем что разрешение "изменилось" если пресет был применен недавно
+                // Это нужно для случаев когда применяется тот же пресет повторно
+                val wasRecentlyApplied = DeviceStateService.wasPresetRecentlyApplied(device.serialNumber)
+                
+                if (resolutionWillChange || wasRecentlyApplied) {
                     devicesWithResolutionChange.add(device)
-                    PluginLogger.debug(LogCategory.PRESET_SERVICE, 
-                        "Resolution will change for device %s: %dx%d -> %dx%d", 
-                        device.serialNumber, currentSize.first, currentSize.second, 
-                        presetData.width, presetData.height
-                    )
+                    if (resolutionWillChange) {
+                        PluginLogger.info(LogCategory.PRESET_SERVICE, 
+                            "Resolution WILL change for device %s: %dx%d -> %dx%d", 
+                            device.serialNumber, currentSize?.first ?: 0, currentSize?.second ?: 0, 
+                            presetData.width, presetData.height
+                        )
+                    } else {
+                        PluginLogger.info(LogCategory.PRESET_SERVICE, 
+                            "Device %s marked for restart due to recent preset application (resolution already %dx%d)", 
+                            device.serialNumber, presetData.width, presetData.height
+                        )
+                    }
                 } else {
-                    PluginLogger.debug(LogCategory.PRESET_SERVICE, 
-                        "Resolution will NOT change for device %s (already %dx%d)", 
+                    PluginLogger.info(LogCategory.PRESET_SERVICE, 
+                        "Resolution will NOT change for device %s (already %dx%d, not recently applied)", 
                         device.serialNumber, presetData.width, presetData.height
                     )
                 }
             }
+        } else {
+            PluginLogger.info(LogCategory.PRESET_SERVICE, 
+                "No resolution data in preset (width=%s, height=%s)", 
+                presetData.width?.toString() ?: "null",
+                presetData.height?.toString() ?: "null"
+            )
         }
         
         // Сохраняем активные приложения только для устройств с изменением разрешения
         PluginLogger.info(LogCategory.PRESET_SERVICE, 
-            "Checking active apps - restartActiveAppOnResolutionChange: %s, devicesWithResolutionChange: %d", 
-            settings.restartActiveAppOnResolutionChange, devicesWithResolutionChange.size
+            "=== APP RESTART CHECK START ===\nrestartActiveAppOnResolutionChange: %s\ndevicesWithResolutionChange count: %d\ndevices: %s", 
+            settings.restartActiveAppOnResolutionChange, 
+            devicesWithResolutionChange.size,
+            devicesWithResolutionChange.joinToString(", ") { it.serialNumber }
         )
         
         if (settings.restartActiveAppOnResolutionChange && devicesWithResolutionChange.isNotEmpty()) {
+            PluginLogger.info(LogCategory.PRESET_SERVICE, "Will check for active apps on %d devices", devicesWithResolutionChange.size)
             devicesWithResolutionChange.forEach { device ->
+                PluginLogger.info(LogCategory.PRESET_SERVICE, "Checking active app on device: %s", device.serialNumber)
                 // Получаем активное приложение
                 val focusedAppResult = AdbService.getCurrentFocusedApp(device)
                 
@@ -193,6 +234,11 @@ object PresetApplicationService {
                 }
                 
                 val focusedApp = focusedAppResult.getOrNull()
+                PluginLogger.info(LogCategory.PRESET_SERVICE, 
+                    "getCurrentFocusedApp result for device %s: %s", 
+                    device.serialNumber, 
+                    focusedApp?.let { "${it.first}/${it.second}" } ?: "NULL"
+                )
                 
                 if (focusedApp != null) {
                     PluginLogger.info(LogCategory.PRESET_SERVICE, 
@@ -334,32 +380,48 @@ object PresetApplicationService {
                 
                 AdbService.setSize(device, finalWidth, finalHeight)
                 
+                // Помечаем что пресет был применен для этого устройства
+                DeviceStateService.markPresetApplied(device.serialNumber)
+                
                 // Дополнительная задержка после установки размера
                 Thread.sleep(500)
                 
                 // Собираем информацию о необходимости перезапуска scrcpy
+                PluginLogger.info(LogCategory.PRESET_SERVICE, 
+                    "Checking scrcpy restart for device %s: restartScrcpyOnResolutionChange=%s, resolutionChanged=%s", 
+                    device.serialNumber,
+                    settings.restartScrcpyOnResolutionChange,
+                    devicesWithResolutionChange.contains(device)
+                )
+                
                 if (settings.restartScrcpyOnResolutionChange && devicesWithResolutionChange.contains(device)) {
                     val serialNumber = device.serialNumber
                     // Проверяем любые процессы scrcpy (наши или внешние)
-                    if (ScrcpyService.hasAnyScrcpyProcessForDevice(serialNumber)) {
+                    val hasScrcpy = ScrcpyService.hasAnyScrcpyProcessForDevice(serialNumber)
+                    PluginLogger.info(LogCategory.PRESET_SERVICE, 
+                        "Scrcpy process check for device %s: hasAnyScrcpy=%s", 
+                        serialNumber, hasScrcpy
+                    )
+                    
+                    if (hasScrcpy) {
                         PluginLogger.info(LogCategory.PRESET_SERVICE, 
                             "Found scrcpy process for device %s, will restart after resolution change", 
                             serialNumber
                         )
                         devicesNeedingScrcpyRestart.add(serialNumber)
                     } else {
-                        PluginLogger.debug(LogCategory.PRESET_SERVICE, 
+                        PluginLogger.info(LogCategory.PRESET_SERVICE, 
                             "No scrcpy processes found for device %s", 
                             serialNumber
                         )
                     }
                 } else if (!devicesWithResolutionChange.contains(device)) {
-                    PluginLogger.debug(LogCategory.PRESET_SERVICE, 
+                    PluginLogger.info(LogCategory.PRESET_SERVICE, 
                         "Skipping scrcpy restart for device %s - resolution did not change", 
                         device.serialNumber
                     )
                 } else {
-                    PluginLogger.debug(LogCategory.PRESET_SERVICE, 
+                    PluginLogger.info(LogCategory.PRESET_SERVICE, 
                         "Scrcpy restart is disabled in settings"
                     )
                 }
@@ -369,14 +431,14 @@ object PresetApplicationService {
                 AndroidStudioIntegrationService.instance?.let { androidService ->
                     when {
                         !devicesWithResolutionChange.contains(device) -> {
-                            PluginLogger.debug(LogCategory.PRESET_SERVICE, 
+                            PluginLogger.info(LogCategory.PRESET_SERVICE, 
                                 "Skipping Running Devices restart for device %s - resolution did not change", 
                                 device.serialNumber
                             )
                         }
                         settings.restartRunningDevicesOnResolutionChange && 
                         androidService.hasActiveDeviceTab(device) -> {
-                            PluginLogger.debug(LogCategory.PRESET_SERVICE, 
+                            PluginLogger.info(LogCategory.PRESET_SERVICE, 
                                 "Running Devices has active tab for device %s with resolution change, will restart after all devices are processed", 
                                 device.serialNumber
                             )
@@ -384,9 +446,11 @@ object PresetApplicationService {
                         }
                         else -> {
                             // Running Devices restart is disabled or no active tab
-                            PluginLogger.debug(LogCategory.PRESET_SERVICE, 
-                                "Running Devices restart not needed for device %s (disabled or no active tab)", 
-                                device.serialNumber
+                            PluginLogger.info(LogCategory.PRESET_SERVICE, 
+                                "Running Devices restart not needed for device %s (disabled=%s, no active tab=%s)", 
+                                device.serialNumber,
+                                !settings.restartRunningDevicesOnResolutionChange,
+                                !androidService.hasActiveDeviceTab(device)
                             )
                         }
                     }

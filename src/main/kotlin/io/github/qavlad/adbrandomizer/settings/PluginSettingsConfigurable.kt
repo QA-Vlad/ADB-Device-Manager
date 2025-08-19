@@ -978,6 +978,13 @@ Are you sure you want to continue?""",
             settings.restartRunningDevicesOnResolutionChange = restartRunningDevicesCheckBox.isSelected
         }
         settings.restartActiveAppOnResolutionChange = restartActiveAppCheckBox.isSelected
+        
+        PluginLogger.info(LogCategory.GENERAL, 
+            "Settings applied: restartScrcpy=%s, restartActiveApp=%s", 
+            settings.restartScrcpyOnResolutionChange,
+            settings.restartActiveAppOnResolutionChange
+        )
+        
         settings.autoSwitchToHostWifi = autoSwitchWifiCheckBox.isSelected
         settings.scrcpyPath = scrcpyPathField.text
         settings.scrcpyCustomFlags = scrcpyFlagsField.text

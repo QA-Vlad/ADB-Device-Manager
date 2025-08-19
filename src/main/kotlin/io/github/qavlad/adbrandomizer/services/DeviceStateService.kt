@@ -36,6 +36,10 @@ object DeviceStateService {
     private var lastResetSizeValue: String? = null
     private var lastResetDpiValue: String? = null
     
+    // Трекинг применения пресетов для перезапуска
+    private val recentPresetApplications = mutableMapOf<String, Long>()
+    private const val PRESET_APPLICATION_TIMEOUT = 5000L // 5 секунд
+    
     fun updateDeviceState(deviceId: String, width: Int?, height: Int?, dpi: Int?) {
         val currentState = deviceStates[deviceId]
         
@@ -58,6 +62,23 @@ object DeviceStateService {
             lastResetDpiPreset = null
             lastResetDpiValue = null // Сбрасываем значение
         }
+    }
+    
+    fun markPresetApplied(deviceId: String) {
+        recentPresetApplications[deviceId] = System.currentTimeMillis()
+        PluginLogger.info(LogCategory.PRESET_SERVICE, 
+            "Marked preset application for device %s", deviceId
+        )
+    }
+    
+    fun wasPresetRecentlyApplied(deviceId: String): Boolean {
+        val lastApplication = recentPresetApplications[deviceId] ?: return false
+        val isRecent = (System.currentTimeMillis() - lastApplication) < PRESET_APPLICATION_TIMEOUT
+        PluginLogger.info(LogCategory.PRESET_SERVICE, 
+            "Checking recent preset application for device %s: %s", 
+            deviceId, isRecent
+        )
+        return isRecent
     }
 
     fun handleReset(resetSize: Boolean, resetDpi: Boolean) {

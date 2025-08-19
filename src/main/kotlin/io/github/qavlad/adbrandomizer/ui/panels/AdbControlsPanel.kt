@@ -237,56 +237,13 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
         applyPresetToDevices(preset)
     }
 
-    private fun applyPresetToSelectedDevices(preset: DevicePreset, setSize: Boolean, setDpi: Boolean, selectedDevices: List<IDevice>) {
+    private fun applyPresetToSelectedDevices(preset: DevicePreset, setSize: Boolean, setDpi: Boolean, @Suppress("UNUSED_PARAMETER") selectedDevices: List<IDevice>) {
         lastUsedPreset = preset
         
-        val taskDescription = buildString {
-            append("Applying ")
-            when {
-                setSize && setDpi -> append("${preset.size} and ${preset.dpi} DPI")
-                setSize -> append(preset.size)
-                setDpi -> append("${preset.dpi} DPI")
-            }
-        }
-        
-        object : Task.Backgroundable(project, taskDescription) {
-            override fun run(indicator: ProgressIndicator) {
-                selectedDevices.forEach { device ->
-                    indicator.text = "Applying to ${device.name}..."
-                    
-                    if (setSize) {
-                        ValidationUtils.parseSize(preset.size)?.let { (width, height) ->
-                            AdbService.setSize(device, width, height)
-                        }
-                    }
-                    
-                    if (setDpi) {
-                        ValidationUtils.parseDpi(preset.dpi)?.let { dpi ->
-                            AdbService.setDpi(device, dpi)
-                        }
-                    }
-                }
-                
-                // Сохраняем информацию о последнем примененном пресете
-                DeviceStateService.setLastAppliedPresets(
-                    if (setSize) preset else null,
-                    if (setDpi) preset else null
-                )
-                
-                ApplicationManager.getApplication().invokeLater {
-                    val message = buildString {
-                        append("Applied ")
-                        when {
-                            setSize && setDpi -> append("${preset.size} and ${preset.dpi} DPI")
-                            setSize -> append(preset.size)
-                            setDpi -> append("${preset.dpi} DPI")
-                        }
-                        append(" to ${selectedDevices.size} device(s)")
-                    }
-                    NotificationUtils.showSuccess(project, message)
-                }
-            }
-        }.queue()
+        // Используем PresetApplicationService для применения пресета
+        // Это обеспечит правильную работу перезапуска scrcpy и приложений
+        // selectedDevices игнорируется, так как PresetApplicationService сам получает список устройств
+        PresetApplicationService.applyPreset(project, preset, setSize, setDpi)
     }
     
     private fun applyPresetToDevices(preset: DevicePreset) {

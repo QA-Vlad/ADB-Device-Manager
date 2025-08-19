@@ -658,9 +658,10 @@ object AdbService {
             device.executeShellCommand("dumpsys window | grep mCurrentFocus", receiver, PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             
             val output = receiver.output.trim()
-            PluginLogger.debug("Current focus output for device %s: %s", device.name, output)
+            PluginLogger.info(LogCategory.ADB_CONNECTION, "Current focus output for device %s: %s", device.name, output)
             
             if (output.isBlank() || output.contains("null")) {
+                PluginLogger.info(LogCategory.ADB_CONNECTION, "No focused app found (output is blank or null)")
                 return@runDeviceOperation null
             }
             
@@ -672,7 +673,7 @@ object AdbService {
             if (matcher.find()) {
                 val packageName = matcher.group(1)
                 val activityName = matcher.group(2)
-                PluginLogger.debug("Found focused app: %s/%s", packageName, activityName)
+                PluginLogger.info(LogCategory.ADB_CONNECTION, "Found focused app: %s/%s", packageName, activityName)
                 Pair(packageName, activityName)
             } else {
                 // Альтернативный паттерн для других форматов вывода
@@ -681,9 +682,10 @@ object AdbService {
                 if (altMatcher.find()) {
                     val packageName = altMatcher.group(1)
                     val activityName = altMatcher.group(2)
-                    PluginLogger.debug("Found focused app (alt pattern): %s/%s", packageName, activityName)
+                    PluginLogger.info(LogCategory.ADB_CONNECTION, "Found focused app (alt pattern): %s/%s", packageName, activityName)
                     Pair(packageName, activityName)
                 } else {
+                    PluginLogger.info(LogCategory.ADB_CONNECTION, "No focused app found - patterns did not match output: %s", output)
                     null
                 }
             }
@@ -693,13 +695,16 @@ object AdbService {
     fun stopApp(device: IDevice, packageName: String): Result<Unit> {
         return runDeviceOperation(device.name, "stop app $packageName") {
             val command = "am force-stop $packageName"
+            PluginLogger.info(LogCategory.ADB_CONNECTION, "Stopping app %s on device %s", packageName, device.name)
             device.executeShellCommand(command, NullOutputReceiver(), PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             PluginLogger.commandExecuted(command, device.name, true)
+            PluginLogger.info(LogCategory.ADB_CONNECTION, "App %s stopped on device %s", packageName, device.name)
         }
     }
     
     fun startApp(device: IDevice, packageName: String, activityName: String): Result<Unit> {
         return runDeviceOperation(device.name, "start app $packageName/$activityName") {
+            PluginLogger.info(LogCategory.ADB_CONNECTION, "Starting app %s/%s on device %s", packageName, activityName, device.name)
             val fullActivityName = if (activityName.startsWith(".")) {
                 "$packageName$activityName"
             } else {
@@ -708,11 +713,13 @@ object AdbService {
             val command = "am start -n $packageName/$fullActivityName"
             device.executeShellCommand(command, NullOutputReceiver(), PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             PluginLogger.commandExecuted(command, device.name, true)
+            PluginLogger.info(LogCategory.ADB_CONNECTION, "App %s started on device %s", packageName, device.name)
         }
     }
     
     fun isSystemApp(device: IDevice, packageName: String): Result<Boolean> {
         return runDeviceOperation(device.name, "check if system app $packageName") {
+            PluginLogger.info(LogCategory.ADB_CONNECTION, "Checking if %s is a system app on device %s", packageName, device.name)
             // Проверяем, является ли приложение системным
             val receiver = CollectingOutputReceiver()
             device.executeShellCommand("pm list packages -s | grep $packageName", receiver, PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
@@ -733,7 +740,15 @@ object AdbService {
                 "com.huawei.android.launcher"
             )
             
-            isSystem || knownLaunchers.contains(packageName)
+            val result = isSystem || knownLaunchers.contains(packageName)
+            PluginLogger.info(LogCategory.ADB_CONNECTION, 
+                "App %s is %s (system check: %s, launcher check: %s)", 
+                packageName, 
+                if (result) "a system app" else "NOT a system app",
+                isSystem,
+                knownLaunchers.contains(packageName)
+            )
+            result
         }
     }
     
