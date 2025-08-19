@@ -520,16 +520,28 @@ class ScrcpyCompatibilityDialog(
         }
         
         val file = File(path)
+        val isWindows = System.getProperty("os.name").startsWith("Windows")
         
-        // Проверяем, является ли это ZIP архивом
-        if (file.isFile && file.name.endsWith(".zip", ignoreCase = true) && file.exists()) {
-            val isWindows = System.getProperty("os.name").startsWith("Windows")
-            val extractedPath = handleZipArchive(file, isWindows)
-            if (extractedPath != null) {
-                path = extractedPath
-                scrcpyPathField.text = path
-            } else {
-                return
+        // Проверяем, является ли это архивом
+        when {
+            file.isFile && file.name.endsWith(".zip", ignoreCase = true) && file.exists() -> {
+                val extractedPath = handleZipArchive(file, isWindows)
+                if (extractedPath != null) {
+                    path = extractedPath
+                    scrcpyPathField.text = path
+                } else {
+                    return
+                }
+            }
+            file.isFile && (file.name.endsWith(".tar.gz", ignoreCase = true) || 
+                           file.name.endsWith(".tgz", ignoreCase = true)) && file.exists() -> {
+                val extractedPath = handleTarGzArchive(file, isWindows)
+                if (extractedPath != null) {
+                    path = extractedPath
+                    scrcpyPathField.text = path
+                } else {
+                    return
+                }
             }
         }
         
@@ -620,13 +632,15 @@ class ScrcpyCompatibilityDialog(
         // FileChooserDescriptor(chooseFiles, chooseFolders, chooseJars, chooseJarsAsFiles, chooseJarContents, chooseMultiple)
         val descriptor = FileChooserDescriptor(true, true, true, true, false, false).apply {
             title = "Select Scrcpy Executable, Folder Or Archive"
-            description = "Select the scrcpy executable file, the folder containing it, or a ZIP archive"
+            description = "Select the scrcpy executable file, the folder containing it, or an archive (ZIP, TAR.GZ)"
             
             // Filter to show only relevant files
             withFileFilter { virtualFile ->
                 when {
                     virtualFile.isDirectory -> true
                     virtualFile.extension?.equals("zip", ignoreCase = true) == true -> true
+                    virtualFile.name.endsWith(".tar.gz", ignoreCase = true) -> true
+                    virtualFile.name.endsWith(".tgz", ignoreCase = true) -> true
                     isWindows && virtualFile.extension?.equals("exe", ignoreCase = true) == true -> true
                     !isWindows && virtualFile.name.equals("scrcpy", ignoreCase = true) -> true
                     else -> false
@@ -668,14 +682,25 @@ class ScrcpyCompatibilityDialog(
 
         val selectedIoFile = File(chosenFile.path)
         
-        // Handle ZIP archives
-        if (selectedIoFile.isFile && selectedIoFile.name.endsWith(".zip", ignoreCase = true)) {
-            PluginLogger.info(LogCategory.GENERAL, "User selected ZIP archive: %s", selectedIoFile.absolutePath)
-            val extractedPath = handleZipArchive(selectedIoFile, isWindows)
-            if (extractedPath != null) {
-                return extractedPath
+        // Handle archives
+        when {
+            selectedIoFile.isFile && selectedIoFile.name.endsWith(".zip", ignoreCase = true) -> {
+                PluginLogger.info(LogCategory.GENERAL, "User selected ZIP archive: %s", selectedIoFile.absolutePath)
+                val extractedPath = handleZipArchive(selectedIoFile, isWindows)
+                if (extractedPath != null) {
+                    return extractedPath
+                }
+                return null
             }
-            return null
+            selectedIoFile.isFile && (selectedIoFile.name.endsWith(".tar.gz", ignoreCase = true) || 
+                                     selectedIoFile.name.endsWith(".tgz", ignoreCase = true)) -> {
+                PluginLogger.info(LogCategory.GENERAL, "User selected TAR.GZ archive: %s", selectedIoFile.absolutePath)
+                val extractedPath = handleTarGzArchive(selectedIoFile, isWindows)
+                if (extractedPath != null) {
+                    return extractedPath
+                }
+                return null
+            }
         }
 
         if (selectedIoFile.isFile && selectedIoFile.name.equals(scrcpyName, ignoreCase = true)) {
@@ -849,6 +874,11 @@ class ScrcpyCompatibilityDialog(
                 // Возвращаем путь к директории, содержащей scrcpy
                 val pathToReturn = extractedScrcpy.parentFile.absolutePath
                 
+                // На macOS удаляем атрибут карантина после извлечения
+                if (System.getProperty("os.name").contains("Mac", ignoreCase = true)) {
+                    removeQuarantineAttribute(pathToReturn)
+                }
+                
                 JOptionPane.showMessageDialog(
                     this.contentPane,
                     "Archive extracted successfully!\nScrcpy path has been set to:\n$pathToReturn",
@@ -885,6 +915,93 @@ class ScrcpyCompatibilityDialog(
         } catch (_: Exception) {
             return false
         }
+    }
+    
+    private fun handleTarGzArchive(tarGzFile: File, isWindows: Boolean): String? {
+        PluginLogger.info(LogCategory.GENERAL, "Processing TAR.GZ archive: %s", tarGzFile.absolutePath)
+        
+        try {
+            val targetDir = File(tarGzFile.parentFile, tarGzFile.nameWithoutExtension.removeSuffix(".tar"))
+            if (!targetDir.exists()) {
+                targetDir.mkdirs()
+            }
+            
+            // Extract using tar command (available on all Unix systems and modern Windows)
+            val extractCommand = if (isWindows) {
+                // Windows 10+ has tar built-in
+                listOf("tar", "-xzf", tarGzFile.absolutePath, "-C", targetDir.absolutePath)
+            } else {
+                // Unix/Linux/macOS
+                listOf("tar", "-xzf", tarGzFile.absolutePath, "-C", targetDir.absolutePath)
+            }
+            
+            val process = ProcessBuilder(extractCommand).start()
+            val success = process.waitFor(30, TimeUnit.SECONDS)
+            
+            if (!success || process.exitValue() != 0) {
+                val error = process.errorStream.bufferedReader().use { it.readText() }
+                JOptionPane.showMessageDialog(
+                    this.contentPane,
+                    "Failed to extract TAR.GZ archive:\n$error",
+                    "Extraction Failed",
+                    JOptionPane.ERROR_MESSAGE
+                )
+                return null
+            }
+            
+            // Find scrcpy in extracted files
+            val scrcpyFileName = if (isWindows) "scrcpy.exe" else "scrcpy"
+            val scrcpyFile = findFileRecursively(targetDir, scrcpyFileName)
+            
+            if (scrcpyFile != null && scrcpyFile.exists()) {
+                val pathToReturn = scrcpyFile.parentFile.absolutePath
+                
+                // На macOS удаляем атрибут карантина после извлечения
+                if (System.getProperty("os.name").contains("Mac", ignoreCase = true)) {
+                    removeQuarantineAttribute(pathToReturn)
+                }
+                
+                JOptionPane.showMessageDialog(
+                    this.contentPane,
+                    "Archive extracted successfully!\nScrcpy path has been set to:\n$pathToReturn",
+                    "Extraction Complete",
+                    JOptionPane.INFORMATION_MESSAGE
+                )
+                
+                return pathToReturn
+            } else {
+                JOptionPane.showMessageDialog(
+                    this.contentPane,
+                    "Could not find $scrcpyFileName in the extracted archive.",
+                    "Invalid Archive",
+                    JOptionPane.ERROR_MESSAGE
+                )
+                return null
+            }
+            
+        } catch (e: Exception) {
+            JOptionPane.showMessageDialog(
+                this.contentPane,
+                "Failed to extract TAR.GZ archive: ${e.message}",
+                "Extraction Failed",
+                JOptionPane.ERROR_MESSAGE
+            )
+            return null
+        }
+    }
+    
+    private fun findFileRecursively(dir: File, fileName: String): File? {
+        if (!dir.exists() || !dir.isDirectory) return null
+        
+        for (file in dir.listFiles() ?: emptyArray()) {
+            if (file.isFile && file.name.equals(fileName, ignoreCase = true)) {
+                return file
+            } else if (file.isDirectory) {
+                val found = findFileRecursively(file, fileName)
+                if (found != null) return found
+            }
+        }
+        return null
     }
     
     private fun removeQuarantineAttribute(path: String) {
