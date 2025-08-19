@@ -309,13 +309,30 @@ object AdbService {
             device.executeShellCommand("wm density", receiver, PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             
             val output = receiver.output.trim()
-            // Формат вывода: "Physical density: 480" или "Override density: 480"
-            val dpiPattern = Pattern.compile(PluginConfig.Patterns.DPI_OUTPUT_PATTERN)
-            val matcher = dpiPattern.matcher(output)
+            PluginLogger.info(LogCategory.ADB_CONNECTION, "wm density output for device %s: %s", device.name, output)
             
-            if (matcher.find()) {
-                val dpi = matcher.group(1).toInt()
-                PluginLogger.debug("Current DPI for device %s: %d", device.name, dpi)
+            // Формат вывода может содержать несколько строк:
+            // "Physical density: 480"
+            // "Override density: 560"
+            // Если есть Override, используем его, иначе Physical
+            
+            // Сначала ищем Override density
+            val overridePattern = Pattern.compile("Override density: (\\d+)")
+            val overrideMatcher = overridePattern.matcher(output)
+            
+            if (overrideMatcher.find()) {
+                val dpi = overrideMatcher.group(1).toInt()
+                PluginLogger.info(LogCategory.ADB_CONNECTION, "Found override DPI for device %s: %d", device.name, dpi)
+                return@runDeviceOperation dpi
+            }
+            
+            // Если нет Override, ищем Physical
+            val physicalPattern = Pattern.compile("Physical density: (\\d+)")
+            val physicalMatcher = physicalPattern.matcher(output)
+            
+            if (physicalMatcher.find()) {
+                val dpi = physicalMatcher.group(1).toInt()
+                PluginLogger.info(LogCategory.ADB_CONNECTION, "Found physical DPI for device %s: %d", device.name, dpi)
                 dpi
             } else {
                 throw Exception("Could not parse density from output: $output")

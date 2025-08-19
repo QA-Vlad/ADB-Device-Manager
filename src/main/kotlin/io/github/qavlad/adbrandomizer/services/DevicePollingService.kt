@@ -104,9 +104,10 @@ class DevicePollingService(private val project: Project) {
                     existing.copy(
                         wifiDevice = device,
                         ipAddress = ipAddress ?: existing.ipAddress,
-                        // Обновляем параметры экрана если они не были установлены
-                        currentResolution = existing.currentResolution ?: currentResolution,
-                        currentDpi = existing.currentDpi ?: currentDpi,
+                        // Всегда обновляем текущие параметры экрана новыми значениями (они могли измениться)
+                        currentResolution = currentResolution ?: existing.currentResolution,
+                        currentDpi = currentDpi ?: existing.currentDpi,
+                        // Дефолтные значения обновляем только если они не были установлены
                         defaultResolution = existing.defaultResolution ?: defaultResolution,
                         defaultDpi = existing.defaultDpi ?: defaultDpi,
                         isSelectedForAdb = selectedDevices.contains(baseSerial) // Восстанавливаем состояние чекбокса
@@ -115,10 +116,12 @@ class DevicePollingService(private val project: Project) {
                     existing.copy(
                         usbDevice = device,
                         ipAddress = ipAddress ?: existing.ipAddress,
+                        // Всегда обновляем текущие параметры экрана новыми значениями (они могли измениться)
                         currentResolution = currentResolution ?: existing.currentResolution,
                         currentDpi = currentDpi ?: existing.currentDpi,
-                        defaultResolution = defaultResolution ?: existing.defaultResolution,
-                        defaultDpi = defaultDpi ?: existing.defaultDpi,
+                        // Дефолтные значения обновляем только если они не были установлены
+                        defaultResolution = existing.defaultResolution ?: defaultResolution,
+                        defaultDpi = existing.defaultDpi ?: defaultDpi,
                         isSelectedForAdb = selectedDevices.contains(baseSerial) // Восстанавливаем состояние чекбокса
                     )
                 }
