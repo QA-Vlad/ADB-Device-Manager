@@ -223,7 +223,8 @@ class ScrcpyCompatibilityDialog(
         return when (problemType) {
             ProblemType.NOT_FOUND -> when {
                 osName.contains("mac") -> listOf(
-                    "Homebrew:" to "brew install scrcpy"
+                    "Homebrew:" to "brew install scrcpy",
+                    "MacPorts:" to "sudo port install scrcpy"
                 )
                 osName.contains("windows") -> listOf(
                     "Chocolatey:" to "choco install scrcpy",
@@ -240,7 +241,8 @@ class ScrcpyCompatibilityDialog(
             }
             else -> when {
                 osName.contains("mac") -> listOf(
-                    "Homebrew:" to "brew upgrade scrcpy"
+                    "Homebrew:" to "brew upgrade scrcpy",
+                    "MacPorts:" to "sudo port selfupdate && sudo port upgrade scrcpy"
                 )
                 osName.contains("windows") -> listOf(
                     "Chocolatey:" to "choco upgrade scrcpy",
