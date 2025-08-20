@@ -1,6 +1,6 @@
 package io.github.qavlad.adbrandomizer.services
 
-import com.intellij.openapi.util.SystemInfo
+import io.github.qavlad.adbrandomizer.utils.AdbPathResolver
 import io.github.qavlad.adbrandomizer.utils.PluginLogger
 import java.io.IOException
 
@@ -43,14 +43,12 @@ object AdbServerService {
      * Возвращает команду для остановки ADB сервера в зависимости от ОС
      */
     private fun getKillServerCommand(): List<String> {
-        return when {
-            SystemInfo.isWindows -> listOf("adb", "kill-server")
-            SystemInfo.isMac -> listOf("adb", "kill-server")
-            SystemInfo.isLinux -> listOf("adb", "kill-server")
-            else -> {
-                PluginLogger.warn("Unknown operating system, using default adb command")
-                listOf("adb", "kill-server")
-            }
+        val adbPath = AdbPathResolver.findAdbExecutable()
+        if (adbPath == null) {
+            PluginLogger.error("ADB executable not found in system")
+            throw IOException("ADB executable not found. Please ensure ADB is installed and accessible.")
         }
+        
+        return listOf(adbPath, "kill-server")
     }
 }
