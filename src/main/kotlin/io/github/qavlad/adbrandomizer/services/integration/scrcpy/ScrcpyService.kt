@@ -44,6 +44,11 @@ object ScrcpyService {
     private val recentlyStartedProcesses = mutableMapOf<Long, String>() // PID -> serialNumber
     // Устройства, для которых scrcpy был намеренно остановлен (например, при отключении Wi-Fi)
     private val intentionallyStopped = mutableSetOf<String>()
+    
+    // Очередь запуска scrcpy процессов и флаг активного запуска
+    private val launchQueue = mutableListOf<() -> Unit>()
+    private var isLaunching = false
+    private val launchLock = Object()
 
     fun findScrcpyExecutable(): String? {
         // 1. Проверяем путь из настроек плагина (если пользователь явно задал)
@@ -654,6 +659,36 @@ object ScrcpyService {
         }
     }
 
+    /**
+     * Обрабатывает очередь запуска scrcpy процессов
+     */
+    private fun processLaunchQueue() {
+        synchronized(launchLock) {
+            if (isLaunching || launchQueue.isEmpty()) {
+                return
+            }
+            isLaunching = true
+        }
+        
+        Thread {
+            while (true) {
+                val task = synchronized(launchLock) {
+                    if (launchQueue.isEmpty()) {
+                        isLaunching = false
+                        return@Thread
+                    }
+                    launchQueue.removeAt(0)
+                }
+                
+                // Выполняем задачу запуска
+                task.invoke()
+                
+                // Добавляем задержку между запусками, чтобы избежать конфликтов
+                Thread.sleep(2000) // 2 секунды между запусками
+            }
+        }.start()
+    }
+    
     fun launchScrcpy(scrcpyPath: String, serialNumber: String, project: Project): Boolean {
         println("ADB_Randomizer: launchScrcpy called for device: $serialNumber")
         println("ADB_Randomizer: Stack trace:")
@@ -661,22 +696,56 @@ object ScrcpyService {
             println("  at ${it.className}.${it.methodName}(${it.fileName}:${it.lineNumber})")
         }
         
-        try {
-            // Проверяем, не было ли устройство намеренно остановлено
-            if (wasIntentionallyStopped(serialNumber)) {
-                println("ADB_Randomizer: Device $serialNumber was intentionally stopped, not launching scrcpy")
-                PluginLogger.info(LogCategory.SCRCPY, "Device %s was intentionally stopped, not launching scrcpy", serialNumber)
-                return false
-            }
-            
-            if (scrcpyPath.isBlank() || serialNumber.isBlank()) {
-                PluginLogger.info(LogCategory.SCRCPY, "Empty scrcpy path or serial number provided")
-                return false
-            }
+        // Проверяем базовые условия сразу
+        if (wasIntentionallyStopped(serialNumber)) {
+            println("ADB_Randomizer: Device $serialNumber was intentionally stopped, not launching scrcpy")
+            PluginLogger.info(LogCategory.SCRCPY, "Device %s was intentionally stopped, not launching scrcpy", serialNumber)
+            return false
+        }
+        
+        if (scrcpyPath.isBlank() || serialNumber.isBlank()) {
+            PluginLogger.info(LogCategory.SCRCPY, "Empty scrcpy path or serial number provided")
+            return false
+        }
 
-            val scrcpyFile = File(scrcpyPath)
-            if (!scrcpyFile.exists() || !scrcpyFile.canExecute()) {
-                PluginLogger.info(LogCategory.SCRCPY, "Scrcpy executable not found or not executable at: %s", scrcpyPath)
+        val scrcpyFile = File(scrcpyPath)
+        if (!scrcpyFile.exists() || !scrcpyFile.canExecute()) {
+            PluginLogger.info(LogCategory.SCRCPY, "Scrcpy executable not found or not executable at: %s", scrcpyPath)
+            return false
+        }
+        
+        // Добавляем задачу в очередь
+        var result = false
+        val latch = java.util.concurrent.CountDownLatch(1)
+        
+        synchronized(launchLock) {
+            launchQueue.add {
+                result = launchScrcpyInternal(scrcpyPath, serialNumber, project)
+                latch.countDown()
+            }
+            println("ADB_Randomizer: Added scrcpy launch to queue for device: $serialNumber, queue size: ${launchQueue.size}")
+        }
+        
+        // Запускаем обработку очереди
+        processLaunchQueue()
+        
+        // Ждём завершения нашей задачи
+        try {
+            latch.await(30, TimeUnit.SECONDS)
+        } catch (_: InterruptedException) {
+            PluginLogger.warn(LogCategory.SCRCPY, "Launch timeout for device %s", serialNumber)
+        }
+        
+        return result
+    }
+    
+    private fun launchScrcpyInternal(scrcpyPath: String, serialNumber: String, project: Project): Boolean {
+        println("ADB_Randomizer: Starting actual scrcpy launch for device: $serialNumber")
+        try {
+            // Проверяем ещё раз на случай если статус изменился пока ждали в очереди
+            if (wasIntentionallyStopped(serialNumber)) {
+                println("ADB_Randomizer: Device $serialNumber was intentionally stopped while in queue, skipping launch")
+                PluginLogger.info(LogCategory.SCRCPY, "Device %s was intentionally stopped while in queue, skipping launch", serialNumber)
                 return false
             }
 
