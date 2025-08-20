@@ -39,8 +39,7 @@ object ScrcpyService {
     // Хранилище активных scrcpy процессов по серийному номеру устройства
     private val activeScrcpyProcesses = mutableMapOf<String, Process>()
     private var lastLaunchResult: LaunchResult = LaunchResult.SUCCESS
-    // Хранилище устройств, которые потеряли авторизацию
-    private val unauthorizedDevices = mutableSetOf<String>()
+
     // Хранилище недавно запущенных процессов (временное)
     private val recentlyStartedProcesses = mutableMapOf<Long, String>() // PID -> serialNumber
     // Устройства, для которых scrcpy был намеренно остановлен (например, при отключении Wi-Fi)
@@ -93,6 +92,13 @@ object ScrcpyService {
     
     fun isScrcpyActiveForDevice(serialNumber: String): Boolean {
         val process = activeScrcpyProcesses[serialNumber]
+        
+        // Если процесс завершился, удаляем его из мапы
+        if (process != null && !process.isAlive) {
+            activeScrcpyProcesses.remove(serialNumber)
+            PluginLogger.debug(LogCategory.SCRCPY, "Removed dead scrcpy process for device %s from map", serialNumber)
+        }
+        
         val isActive = process != null && process.isAlive
         
         // Логируем все активные процессы для отладки
@@ -119,30 +125,40 @@ object ScrcpyService {
      * Помечает устройство как намеренно остановленное
      * Используется для предотвращения показа диалога об ошибке при отключении Wi-Fi
      */
-    fun markAsIntentionallyStopped(serialNumber: String) {
+    /**
+     * Помечает ТОЛЬКО указанный serial number как намеренно остановленный, не трогая связанные
+     */
+    fun markSingleSerialAsIntentionallyStopped(serialNumber: String) {
         intentionallyStopped.add(serialNumber)
-        // Убираем флаг через некоторое время (чтобы не накапливались)
+        // Убираем флаг через некоторое время
         Thread {
-            Thread.sleep(10000) // 10 секунд должно быть достаточно
+            Thread.sleep(5000)
             intentionallyStopped.remove(serialNumber)
         }.start()
     }
-    
+
     /**
      * Проверяет, есть ли ЛЮБЫЕ процессы scrcpy для устройства (включая внешние)
      */
     fun hasAnyScrcpyProcessForDevice(serialNumber: String): Boolean {
         PluginLogger.info(LogCategory.SCRCPY, "=== Checking for ANY scrcpy processes for device: %s ===", serialNumber)
         
-        // Сначала проверяем наши процессы
-        if (isScrcpyActiveForDevice(serialNumber)) {
-            PluginLogger.info(LogCategory.SCRCPY, "Found our scrcpy process for device: %s", serialNumber)
-            return true
+        // Получаем все связанные serial numbers
+        val relatedSerials = findRelatedSerialNumbers(serialNumber)
+        PluginLogger.info(LogCategory.SCRCPY, "Checking for scrcpy processes for related serials: %s", 
+            relatedSerials.joinToString(", "))
+        
+        // Проверяем наши процессы для всех связанных serial numbers
+        for (serial in relatedSerials) {
+            if (isScrcpyActiveForDevice(serial)) {
+                PluginLogger.info(LogCategory.SCRCPY, "Found our scrcpy process for serial: %s", serial)
+                return true
+            }
         }
         
-        PluginLogger.info(LogCategory.SCRCPY, "No our scrcpy process found, checking external processes...")
+        PluginLogger.info(LogCategory.SCRCPY, "No our scrcpy processes found, checking external processes...")
         
-        // Затем проверяем внешние процессы
+        // Затем проверяем внешние процессы для всех связанных serial numbers
         return try {
             val isWindows = System.getProperty("os.name").startsWith("Windows")
             val command = if (isWindows) {
@@ -163,20 +179,31 @@ object ScrcpyService {
                     if (line.startsWith("CommandLine=") && line.contains("scrcpy")) {
                         foundAnyScrcpy = true
                         PluginLogger.debug(LogCategory.SCRCPY, "Found scrcpy process: %s", line)
-                        if (line.contains(serialNumber)) {
-                            hasExternalScrcpy = true
-                            PluginLogger.info(LogCategory.SCRCPY, "Found external scrcpy process for device %s: %s", serialNumber, line)
+                        // Проверяем все связанные serial numbers
+                        for (serial in relatedSerials) {
+                            if (line.contains(serial)) {
+                                hasExternalScrcpy = true
+                                PluginLogger.info(LogCategory.SCRCPY, "Found external scrcpy process for serial %s: %s", serial, line)
+                                break
+                            }
                         }
                     }
                 }
                 if (foundAnyScrcpy && !hasExternalScrcpy) {
-                    PluginLogger.info(LogCategory.SCRCPY, "Found scrcpy processes but none matched device %s", serialNumber)
+                    PluginLogger.info(LogCategory.SCRCPY, "Found scrcpy processes but none matched related serials: %s", 
+                        relatedSerials.joinToString(", "))
                 }
             } else {
                 output.lines().forEach { line ->
-                    if (line.contains("scrcpy") && line.contains(serialNumber)) {
-                        hasExternalScrcpy = true
-                        PluginLogger.debug(LogCategory.SCRCPY, "Found external scrcpy process for device %s", serialNumber)
+                    if (line.contains("scrcpy")) {
+                        // Проверяем все связанные serial numbers
+                        for (serial in relatedSerials) {
+                            if (line.contains(serial)) {
+                                hasExternalScrcpy = true
+                                PluginLogger.debug(LogCategory.SCRCPY, "Found external scrcpy process for serial %s", serial)
+                                break
+                            }
+                        }
                     }
                 }
             }
@@ -189,7 +216,12 @@ object ScrcpyService {
         }
     }
     
-    fun stopScrcpyForDevice(serialNumber: String): Boolean {
+    /**
+     * Останавливает ТОЛЬКО конкретный scrcpy процесс для указанного serial number, не трогая связанные
+     */
+    fun stopScrcpyForSingleSerial(serialNumber: String): Boolean {
+        PluginLogger.info(LogCategory.SCRCPY, "Stopping scrcpy for single serial: %s", serialNumber)
+        
         val process = activeScrcpyProcesses.remove(serialNumber)
         if (process != null && process.isAlive) {
             try {
@@ -206,13 +238,177 @@ object ScrcpyService {
                 if (!process.waitFor(5, TimeUnit.SECONDS)) {
                     process.destroyForcibly()
                 }
-                PluginLogger.info(LogCategory.SCRCPY, "Stopped scrcpy for device: %s", serialNumber)
+                PluginLogger.info(LogCategory.SCRCPY, "Stopped scrcpy for single serial: %s", serialNumber)
                 return true
             } catch (e: Exception) {
-                PluginLogger.info(LogCategory.SCRCPY, "Error stopping scrcpy for device %s: %s", serialNumber, e.message)
+                PluginLogger.info(LogCategory.SCRCPY, "Error stopping scrcpy for single serial %s: %s", serialNumber, e.message)
+                return false
             }
         }
         return false
+    }
+    
+    /**
+     * Останавливает все scrcpy процессы для устройства, включая связанные (USB и Wi-Fi)
+     */
+    fun stopScrcpyForDevice(serialNumber: String): Boolean {
+        PluginLogger.info(LogCategory.SCRCPY, "Stopping scrcpy for device: %s", serialNumber)
+        
+        // Получаем все связанные serial numbers для этого устройства
+        val relatedSerials = findRelatedSerialNumbers(serialNumber)
+        PluginLogger.info(LogCategory.SCRCPY, "Found related serial numbers for %s: %s", 
+            serialNumber, relatedSerials.joinToString(", "))
+        
+        var stoppedAny = false
+        
+        // Останавливаем процессы для всех связанных serial numbers
+        relatedSerials.forEach { serial ->
+            val process = activeScrcpyProcesses.remove(serial)
+            if (process != null && process.isAlive) {
+                try {
+                    // Помечаем что остановка намеренная
+                    intentionallyStopped.add(serial)
+                    // Убираем флаг через некоторое время (чтобы не накапливались)
+                    Thread {
+                        Thread.sleep(5000)
+                        intentionallyStopped.remove(serial)
+                    }.start()
+                    
+                    process.destroy()
+                    // Даём процессу время на завершение
+                    if (!process.waitFor(5, TimeUnit.SECONDS)) {
+                        process.destroyForcibly()
+                    }
+                    PluginLogger.info(LogCategory.SCRCPY, "Stopped scrcpy for serial: %s", serial)
+                    stoppedAny = true
+                } catch (e: Exception) {
+                    PluginLogger.info(LogCategory.SCRCPY, "Error stopping scrcpy for serial %s: %s", serial, e.message)
+                }
+            }
+        }
+        
+        return stoppedAny
+    }
+    
+    /**
+     * Проверяет, являются ли два serial numbers связанными (одно устройство)
+     */
+    fun areSerialNumbersRelated(serial1: String, serial2: String): Boolean {
+        if (serial1 == serial2) return true
+        
+        // Проверяем, являются ли они USB и Wi-Fi версиями одного устройства
+        val relatedToFirst = findRelatedSerialNumbers(serial1)
+        return relatedToFirst.contains(serial2)
+    }
+    
+    /**
+     * Получает все активные scrcpy serial numbers для устройства и его связанных подключений
+     */
+    fun getActiveScrcpySerials(serialNumber: String): Set<String> {
+        val activeSerials = mutableSetOf<String>()
+        val relatedSerials = findRelatedSerialNumbers(serialNumber)
+        
+        // Проверяем какие из связанных серийников имеют активные процессы
+        relatedSerials.forEach { serial ->
+            if (isScrcpyActiveForDevice(serial)) {
+                activeSerials.add(serial)
+                PluginLogger.debug(LogCategory.SCRCPY, "Found active scrcpy for serial: %s", serial)
+            }
+        }
+        
+        PluginLogger.info(LogCategory.SCRCPY, 
+            "Active scrcpy serials for device %s: %s", 
+            serialNumber, activeSerials.joinToString(", "))
+        
+        return activeSerials
+    }
+    
+    /**
+     * Находит все связанные serial numbers для устройства (USB и Wi-Fi версии)
+     */
+    private fun findRelatedSerialNumbers(serialNumber: String): Set<String> {
+        val relatedSerials = mutableSetOf(serialNumber)
+        
+        // Получаем информацию о всех подключенных устройствах
+        val devicesResult = AdbService.getAllDeviceSerials()
+        val allDevices = devicesResult.getOrNull() ?: emptyList()
+        
+        PluginLogger.debug(LogCategory.SCRCPY, "All connected devices: %s", allDevices.joinToString(", "))
+        
+        // Если это Wi-Fi подключение (содержит IP адрес)
+        if (serialNumber.contains(":")) {
+            // Ищем USB версию этого же устройства
+            // Для этого нужно получить базовый serial number из Wi-Fi устройства
+            val baseSerial = getBaseSerialFromWifi(serialNumber)
+            if (baseSerial != null) {
+                // Добавляем USB версию если она подключена
+                if (allDevices.contains(baseSerial)) {
+                    relatedSerials.add(baseSerial)
+                    PluginLogger.debug(LogCategory.SCRCPY, "Found USB version: %s for Wi-Fi: %s", baseSerial, serialNumber)
+                }
+            }
+            
+            // Также проверяем активные процессы scrcpy
+            activeScrcpyProcesses.keys.forEach { activeSerial ->
+                if (!activeSerial.contains(":") && allDevices.contains(activeSerial)) {
+                    // Проверяем, является ли это тем же устройством
+                    val wifiSerial = getWifiSerialForUsb(activeSerial)
+                    if (wifiSerial == serialNumber) {
+                        relatedSerials.add(activeSerial)
+                        PluginLogger.debug(LogCategory.SCRCPY, "Found related USB from active processes: %s", activeSerial)
+                    }
+                }
+            }
+        } else {
+            // Если это USB подключение, ищем Wi-Fi версии
+            val wifiSerial = getWifiSerialForUsb(serialNumber)
+            if (wifiSerial != null && allDevices.contains(wifiSerial)) {
+                relatedSerials.add(wifiSerial)
+                PluginLogger.debug(LogCategory.SCRCPY, "Found Wi-Fi version: %s for USB: %s", wifiSerial, serialNumber)
+            }
+            
+            // Также проверяем активные процессы scrcpy для Wi-Fi версий
+            activeScrcpyProcesses.keys.forEach { activeSerial ->
+                if (activeSerial.contains(":")) {
+                    // Проверяем, является ли это Wi-Fi версией нашего устройства
+                    val baseSerial = getBaseSerialFromWifi(activeSerial)
+                    if (baseSerial == serialNumber) {
+                        relatedSerials.add(activeSerial)
+                        PluginLogger.debug(LogCategory.SCRCPY, "Found related Wi-Fi from active processes: %s", activeSerial)
+                    }
+                }
+            }
+        }
+        
+        return relatedSerials
+    }
+    
+    /**
+     * Получает базовый serial number для Wi-Fi устройства
+     */
+    private fun getBaseSerialFromWifi(wifiSerial: String): String? {
+        // Используем ADB для получения информации об устройстве
+        val deviceInfo = AdbService.getDeviceInfo(wifiSerial)
+        return deviceInfo.getOrNull()?.displaySerialNumber
+    }
+    
+    /**
+     * Получает Wi-Fi serial для USB устройства, если оно подключено по Wi-Fi
+     */
+    private fun getWifiSerialForUsb(usbSerial: String): String? {
+        // Получаем все Wi-Fi устройства и ищем то, у которого базовый serial совпадает
+        val devicesResult = AdbService.getAllDeviceSerials()
+        val allDevices = devicesResult.getOrNull() ?: emptyList()
+        
+        for (device in allDevices) {
+            if (device.contains(":")) {
+                val baseSerial = getBaseSerialFromWifi(device)
+                if (baseSerial == usbSerial) {
+                    return device
+                }
+            }
+        }
+        return null
     }
     
     /**
@@ -456,73 +652,6 @@ object ScrcpyService {
         } catch (e: Exception) {
             PluginLogger.warn(LogCategory.SCRCPY, "Error checking ADB stability: %s", e.message ?: "Unknown")
         }
-    }
-    
-    fun restartScrcpyForDevice(serialNumber: String, project: Project): Boolean {
-        PluginLogger.info(LogCategory.SCRCPY, "Restarting scrcpy for device: %s", serialNumber)
-        
-        // Проверяем, не было ли устройство намеренно остановлено
-        if (wasIntentionallyStopped(serialNumber)) {
-            PluginLogger.info(LogCategory.SCRCPY, "Device %s was intentionally stopped, skipping restart", serialNumber)
-            return false
-        }
-        
-        // Останавливаем текущий процесс из плагина (но не помечаем как намеренную остановку при рестарте)
-        val process = activeScrcpyProcesses.remove(serialNumber)
-        if (process != null && process.isAlive) {
-            try {
-                process.destroy()
-                if (!process.waitFor(5, TimeUnit.SECONDS)) {
-                    process.destroyForcibly()
-                }
-                PluginLogger.info(LogCategory.SCRCPY, "Stopped scrcpy for restart: %s", serialNumber)
-            } catch (e: Exception) {
-                PluginLogger.info(LogCategory.SCRCPY, "Error stopping scrcpy for restart: %s", e.message)
-            }
-        }
-        
-        // Останавливаем внешние процессы scrcpy для этого устройства
-        stopExternalScrcpyProcesses(serialNumber)
-        
-        // Увеличенная задержка для стабилизации после остановки процессов
-        Thread.sleep(3000)
-        
-        // Проверяем и стабилизируем ADB соединение перед запуском scrcpy
-        ensureAdbStable()
-        
-        // Проверяем, что устройство все еще авторизовано
-        if (!AdbService.isDeviceAuthorized(serialNumber)) {
-            PluginLogger.warn(LogCategory.SCRCPY, "Device %s is not authorized after stopping external processes", serialNumber)
-            // Даем больше времени для восстановления соединения
-            Thread.sleep(3000)
-            
-            // Проверяем еще раз
-            if (!AdbService.isDeviceAuthorized(serialNumber)) {
-                PluginLogger.error(LogCategory.SCRCPY, "Device %s is still unauthorized, cannot restart scrcpy", null, serialNumber)
-                ApplicationManager.getApplication().invokeLater {
-                    NotificationUtils.showError(
-                        project,
-                        "Device $serialNumber lost authorization. Please re-authorize USB debugging and then manually start mirroring."
-                    )
-                }
-                // Сохраняем информацию о том, что устройство потеряло авторизацию
-                unauthorizedDevices.add(serialNumber)
-                return false
-            } else {
-                // Если устройство было ранее неавторизовано, но теперь авторизовано - убираем из списка
-                unauthorizedDevices.remove(serialNumber)
-            }
-        }
-        
-        // Находим путь к scrcpy
-        val scrcpyPath = findScrcpyExecutable()
-        if (scrcpyPath == null) {
-            PluginLogger.info(LogCategory.SCRCPY, "Cannot restart scrcpy - executable not found")
-            return false
-        }
-        
-        // Запускаем новый процесс
-        return launchScrcpy(scrcpyPath, serialNumber, project)
     }
 
     fun launchScrcpy(scrcpyPath: String, serialNumber: String, project: Project): Boolean {
@@ -1053,6 +1182,11 @@ object ScrcpyService {
                     println("ADB_Randomizer: Scrcpy process for device $serialNumber exited with code: $exitCode")
                     PluginLogger.info(LogCategory.SCRCPY, "Scrcpy for device %s closed with exit code: %s", serialNumber, exitCode)
                     
+                    // Удаляем процесс из активных после завершения
+                    activeScrcpyProcesses.remove(serialNumber)
+                    println("ADB_Randomizer: Removed scrcpy process for device $serialNumber from active map")
+                    println("ADB_Randomizer: Remaining active scrcpy processes: ${activeScrcpyProcesses.keys.joinToString(", ")}")
+                    
                     // Проверяем, была ли остановка намеренной
                     if (wasIntentionallyStopped(serialNumber)) {
                         println("ADB_Randomizer: Scrcpy was intentionally stopped for device $serialNumber, not triggering error handling")
@@ -1063,8 +1197,6 @@ object ScrcpyService {
                     
                     outputReader.join(1000)
                     errorReader.join(1000)
-                    // Удаляем процесс из активных после завершения
-                    activeScrcpyProcesses.remove(serialNumber)
                 } catch (_: InterruptedException) {
                     PluginLogger.info(LogCategory.SCRCPY, "Scrcpy monitoring interrupted for device: %s", serialNumber)
                     Thread.currentThread().interrupt()

@@ -4,6 +4,7 @@ import com.android.ddmlib.CollectingOutputReceiver
 import com.android.ddmlib.IDevice
 import com.android.ddmlib.NullOutputReceiver
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.project.ProjectManager
 import io.github.qavlad.adbrandomizer.config.PluginConfig
 import io.github.qavlad.adbrandomizer.core.Result
 import io.github.qavlad.adbrandomizer.utils.AdbPathResolver
@@ -32,22 +33,6 @@ object AdbService {
     fun getConnectedDevices(): Result<List<IDevice>> {
         return runBlocking {
             AdbConnectionManager.getConnectedDevices()
-        }
-    }
-    
-    fun isDeviceAuthorized(serialNumber: String): Boolean {
-        return try {
-            val devicesResult = getConnectedDevices()
-            if (devicesResult is Result.Success) {
-                devicesResult.data.any { device ->
-                    device.serialNumber == serialNumber && device.isOnline
-                }
-            } else {
-                false
-            }
-        } catch (e: Exception) {
-            PluginLogger.error("Error checking device authorization", e)
-            false
         }
     }
 
@@ -503,11 +488,8 @@ object AdbService {
 
     fun connectWifi(@Suppress("UNUSED_PARAMETER") project: Project?, ipAddress: String, port: Int = 5555): Result<Boolean> {
         return runAdbOperation("connect to Wi-Fi device $ipAddress:$port") {
-            val adbPath = AdbPathResolver.findAdbExecutable()
-            if (adbPath == null) {
-                throw Exception("ADB path not found")
-            }
-            
+            val adbPath = AdbPathResolver.findAdbExecutable() ?: throw Exception("ADB path not found")
+
             // Проверяем настройку автопереключения Wi-Fi
             val settings = PluginSettings.instance
             var actualIpAddress = ipAddress
@@ -669,41 +651,337 @@ object AdbService {
         }
     }
     
+    // Тестовый метод для отладки проблемы с определением активного приложения при включенном scrcpy
+    fun debugGetCurrentApp(device: IDevice): Result<String> {
+        return runDeviceOperation(device.name, "debug get current app") {
+            println("ADB_Randomizer: ====== DEBUG GET CURRENT APP TEST ======")
+            println("ADB_Randomizer: Testing both methods for device: ${device.serialNumber}")
+            
+            // Метод 1: mCurrentFocus
+            val receiver1 = CollectingOutputReceiver()
+            device.executeShellCommand("dumpsys window | grep mCurrentFocus", receiver1, PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            val output1 = receiver1.output.trim()
+            println("ADB_Randomizer: Method 1 (mCurrentFocus): [$output1]")
+            
+            // Метод 2: mResumedActivity
+            val receiver2 = CollectingOutputReceiver()
+            device.executeShellCommand("dumpsys activity activities | grep mResumedActivity", receiver2, PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            val output2 = receiver2.output.trim()
+            println("ADB_Randomizer: Method 2 (mResumedActivity): [$output2]")
+            
+            // Метод 3: mFocusedApp
+            val receiver3 = CollectingOutputReceiver()
+            device.executeShellCommand("dumpsys window | grep mFocusedApp", receiver3, PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            val output3 = receiver3.output.trim()
+            println("ADB_Randomizer: Method 3 (mFocusedApp): [$output3]")
+            
+            // Метод 4: Recent tasks
+            val receiver4 = CollectingOutputReceiver()
+            device.executeShellCommand("dumpsys activity recents | grep 'Recent #0' -A 2", receiver4, PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            val output4 = receiver4.output.trim()
+            println("ADB_Randomizer: Method 4 (Recent tasks): [$output4]")
+            
+            println("ADB_Randomizer: ====== END DEBUG ======")
+            
+            "Debug output printed to console"
+        }
+    }
+    
+    /**
+     * Проверяет, является ли приложение критически важным системным приложением,
+     * которое не следует пытаться перезапускать
+     */
+    private fun isEssentialSystemApp(packageName: String): Boolean {
+        return packageName == "com.android.systemui" ||
+               packageName == "com.android.launcher" ||
+               packageName == "com.sec.android.app.launcher" ||
+               packageName == "com.miui.home" || // MIUI launcher
+               packageName == "com.android.settings" ||
+               packageName == "com.android.phone" ||
+               packageName == "com.android.contacts" ||
+               packageName == "com.android.mms" ||
+               packageName == "com.android.dialer"
+    }
+    
+    /**
+     * Получает список всех подключенных устройств (только serial numbers)
+     */
+    fun getAllDeviceSerials(): Result<List<String>> {
+        return runAdbOperation("get all device serials") {
+            val adbExecutable = AdbPathResolver.findAdbExecutable() ?: throw Exception("ADB not found")
+            val command = listOf(adbExecutable, "devices")
+            val process = ProcessBuilder(command).start()
+            
+            val output = process.inputStream.bufferedReader().use { it.readText() }
+            val exitCode = process.waitFor(5, TimeUnit.SECONDS)
+            
+            if (!exitCode) {
+                throw Exception("ADB devices command timed out")
+            }
+            
+            val devices = mutableListOf<String>()
+            val lines = output.lines()
+            
+            for (line in lines) {
+                // Пропускаем заголовок и пустые строки
+                if (line.startsWith("List of devices") || line.isBlank()) continue
+                
+                // Формат: serialnumber\tdevice
+                val parts = line.split("\t")
+                if (parts.size >= 2 && parts[1].contains("device")) {
+                    devices.add(parts[0])
+                }
+            }
+            
+            PluginLogger.debug(LogCategory.ADB_CONNECTION, "Found devices: %s", devices.joinToString(", "))
+            devices
+        }
+    }
+    
+    /**
+     * Получает информацию об устройстве по serial number
+     */
+    fun getDeviceInfo(serialNumber: String): Result<DeviceInfo?> {
+        return runAdbOperation("get device info") {
+            val project = ProjectManager.getInstance().openProjects.firstOrNull()
+            if (project == null) {
+                PluginLogger.warn(LogCategory.ADB_CONNECTION, "No open project found for getting device info")
+                return@runAdbOperation null
+            }
+            
+            // Получаем все устройства через AdbServiceAsync
+            val devicesRaw = runBlocking {
+                AdbServiceAsync.getConnectedDevicesAsync(project).getOrNull() ?: emptyList()
+            }
+            
+            // Преобразуем в DeviceInfo и ищем нужное устройство
+            val devices = devicesRaw.map { device ->
+                DeviceInfo(device, null)
+            }
+            
+            // Ищем устройство по serial number
+            devices.find { device ->
+                device.logicalSerialNumber == serialNumber || 
+                device.displaySerialNumber == serialNumber
+            }
+        }
+    }
+    
+    fun getRecentTask(device: IDevice): Result<Pair<String, String>?> {
+        return runDeviceOperation(device.name, "get recent task") {
+            val receiver = CollectingOutputReceiver()
+            // Получаем несколько последних задач для анализа
+            device.executeShellCommand("dumpsys activity recents | grep -E 'Recent #[0-2]' -A 5", receiver, PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            
+            val output = receiver.output.trim()
+            
+            println("ADB_Randomizer: === GET RECENT TASK ===")
+            println("ADB_Randomizer: Device: ${device.name} (${device.serialNumber})")
+            println("ADB_Randomizer: Raw output: [$output]")
+            
+            if (output.isBlank()) {
+                println("ADB_Randomizer: No recent task found")
+                return@runDeviceOperation null
+            }
+            
+            // Разбиваем вывод на задачи
+            val tasks = output.split("Recent #").filter { it.isNotBlank() }
+            
+            // Ищем первую не-системную задачу
+            for (task in tasks) {
+                // Ищем affinity в выводе - это обычно package name
+                // Пример: affinity=10295:org.coursera.android
+                val affinityPattern = Pattern.compile("affinity=(?:\\d+:)?([a-zA-Z0-9._]+)")
+                val affinityMatcher = affinityPattern.matcher(task)
+                
+                if (affinityMatcher.find()) {
+                    val packageName = affinityMatcher.group(1)
+                    println("ADB_Randomizer: Checking recent task package: $packageName")
+                    
+                    // Пропускаем только критически важные системные приложения
+                    // Chrome, YouTube Music, Gemini и т.д. - это обычные приложения!
+                    if (!isEssentialSystemApp(packageName)) {
+                        println("ADB_Randomizer: Found suitable recent task: $packageName")
+                        
+                        // Пытаемся получить главную активность приложения
+                        val launcherReceiver = CollectingOutputReceiver()
+                        device.executeShellCommand(
+                            "cmd package resolve-activity --brief $packageName | tail -n 1",
+                            launcherReceiver,
+                            PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS,
+                            TimeUnit.SECONDS
+                        )
+                        
+                        val launcherOutput = launcherReceiver.output.trim()
+                        
+                        // Парсим вывод для получения активности
+                        // Формат: packageName/activityName
+                        if (launcherOutput.contains("/")) {
+                            val parts = launcherOutput.split("/")
+                            if (parts.size == 2) {
+                                val activityName = parts[1]
+                                println("ADB_Randomizer: Found launcher activity: $activityName")
+                                return@runDeviceOperation Pair(packageName, activityName)
+                            }
+                        }
+                        
+                        // Если не удалось получить активность, возвращаем с дефолтной
+                        println("ADB_Randomizer: Using default launcher activity")
+                        return@runDeviceOperation Pair(packageName, ".MainActivity")
+                    } else {
+                        println("ADB_Randomizer: Skipping system task: $packageName")
+                    }
+                }
+            }
+            
+            println("ADB_Randomizer: No suitable recent task found")
+            return@runDeviceOperation null
+        }
+    }
+    
+    fun getTopActivity(device: IDevice): Result<Pair<String, String>?> {
+        return runDeviceOperation(device.name, "get top activity") {
+            val receiver = CollectingOutputReceiver()
+            // Используем dumpsys activity для получения топ активности
+            device.executeShellCommand("dumpsys activity activities | grep mResumedActivity", receiver, PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            
+            val output = receiver.output.trim()
+            
+            println("ADB_Randomizer: === GET TOP ACTIVITY (Alternative Method) ===")
+            println("ADB_Randomizer: Device: ${device.name} (${device.serialNumber})")
+            println("ADB_Randomizer: Raw output from 'dumpsys activity activities | grep mResumedActivity': [$output]")
+            
+            if (output.isBlank()) {
+                println("ADB_Randomizer: No resumed activity found")
+                return@runDeviceOperation null
+            }
+            
+            // Паттерн для извлечения package и activity из mResumedActivity
+            // Пример: mResumedActivity: ActivityRecord{1234567 u0 com.example.app/.MainActivity t123}
+            val pattern = Pattern.compile("ActivityRecord\\{[^}]+\\s+u\\d+\\s+([^/]+)/(\\S+)")
+            val matcher = pattern.matcher(output)
+            
+            if (matcher.find()) {
+                val packageName = matcher.group(1)
+                val activityName = matcher.group(2)
+                println("ADB_Randomizer: Found top activity: $packageName/$activityName")
+                Pair(packageName, activityName)
+            } else {
+                println("ADB_Randomizer: Pattern did not match for mResumedActivity")
+                null
+            }
+        }
+    }
+    
     fun getCurrentFocusedApp(device: IDevice): Result<Pair<String, String>?> {
         return runDeviceOperation(device.name, "get current focused app") {
             val receiver = CollectingOutputReceiver()
             device.executeShellCommand("dumpsys window | grep mCurrentFocus", receiver, PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             
             val output = receiver.output.trim()
+            
+            // Добавляем детальное логирование
+            println("ADB_Randomizer: === GET CURRENT FOCUSED APP ===")
+            println("ADB_Randomizer: Device: ${device.name} (${device.serialNumber})")
+            println("ADB_Randomizer: Raw output from 'dumpsys window | grep mCurrentFocus': [$output]")
+            println("ADB_Randomizer: Output length: ${output.length}")
+            println("ADB_Randomizer: Output is blank: ${output.isBlank()}")
+            
             PluginLogger.info(LogCategory.ADB_CONNECTION, "Current focus output for device %s: %s", device.name, output)
             
-            if (output.isBlank() || output.contains("null")) {
-                PluginLogger.info(LogCategory.ADB_CONNECTION, "No focused app found (output is blank or null)")
+            if (output.isBlank()) {
+                println("ADB_Randomizer: No focused app found (output is blank)")
+                PluginLogger.info(LogCategory.ADB_CONNECTION, "No focused app found (output is blank)")
                 return@runDeviceOperation null
             }
             
+            // Обрабатываем многострочный вывод - берем последнюю непустую строку, которая содержит Window
+            val lines = output.lines()
+            val validLine = lines.lastOrNull { line -> 
+                line.contains("Window{") && !line.contains("mCurrentFocus=null")
+            }
+            
+            if (validLine == null) {
+                println("ADB_Randomizer: No valid mCurrentFocus line found")
+                println("ADB_Randomizer: All lines: ${lines.joinToString(" | ")}")
+                // Пробуем альтернативный метод
+                println("ADB_Randomizer: Falling back to getTopActivity method...")
+                val topActivityResult = getTopActivity(device)
+                val topActivity = topActivityResult.getOrNull()
+                if (topActivity != null) {
+                    println("ADB_Randomizer: Successfully got activity from alternative method: ${topActivity.first}/${topActivity.second}")
+                    return@runDeviceOperation topActivity
+                } else {
+                    println("ADB_Randomizer: Alternative method also failed to get activity")
+                    return@runDeviceOperation null
+                }
+            }
+            
+            println("ADB_Randomizer: Processing line: $validLine")
+            
             // Паттерн для извлечения package и activity из mCurrentFocus
             // Пример: mCurrentFocus=Window{1234567 u0 com.example.app/.MainActivity}
-            val pattern = Pattern.compile("mCurrentFocus=Window\\{[^}]+\\s+u\\d+\\s+([^/]+)/([^}\\s]+)}")
-            val matcher = pattern.matcher(output)
+            val pattern = Pattern.compile("Window\\{[^}]+\\s+u\\d+\\s+([^/]+)/([^}\\s]+)}")
+            val matcher = pattern.matcher(validLine)
             
             if (matcher.find()) {
                 val packageName = matcher.group(1)
                 val activityName = matcher.group(2)
+                println("ADB_Randomizer: Pattern matched! Package: $packageName, Activity: $activityName")
+                
+                // Проверяем только специфические системные диалоги и оверлеи
+                // НЕ проверяем Chrome, YouTube и другие обычные приложения!
+                if (packageName == "com.android.vending" || // Google Play Store dialogs
+                    packageName == "com.google.android.gms" || // Google Services
+                    packageName == "com.android.systemui") { // System UI overlays
+                    
+                    println("ADB_Randomizer: Detected system overlay/dialog: $packageName")
+                    println("ADB_Randomizer: Looking for actual app behind the dialog...")
+                    
+                    // Пытаемся получить реальное приложение из Recent tasks
+                    val recentTaskResult = getRecentTask(device)
+                    val recentTask = recentTaskResult.getOrNull()
+                    
+                    if (recentTask != null) {
+                        println("ADB_Randomizer: Found actual app from recent tasks: ${recentTask.first}/${recentTask.second}")
+                        return@runDeviceOperation recentTask
+                    } else {
+                        println("ADB_Randomizer: Could not find actual app from recent tasks")
+                        // Возвращаем системное приложение, оно будет отфильтровано позже
+                        PluginLogger.info(LogCategory.ADB_CONNECTION, "Found focused app: %s/%s", packageName, activityName)
+                        return@runDeviceOperation Pair(packageName, activityName)
+                    }
+                }
+                
                 PluginLogger.info(LogCategory.ADB_CONNECTION, "Found focused app: %s/%s", packageName, activityName)
                 Pair(packageName, activityName)
             } else {
+                println("ADB_Randomizer: Pattern did not match, trying alternative pattern...")
                 // Альтернативный паттерн для других форматов вывода
                 val altPattern = Pattern.compile("([a-zA-Z0-9._]+)/([a-zA-Z0-9._]+)")
-                val altMatcher = altPattern.matcher(output)
+                val altMatcher = altPattern.matcher(validLine)
                 if (altMatcher.find()) {
                     val packageName = altMatcher.group(1)
                     val activityName = altMatcher.group(2)
+                    println("ADB_Randomizer: Alternative pattern matched! Package: $packageName, Activity: $activityName")
                     PluginLogger.info(LogCategory.ADB_CONNECTION, "Found focused app (alt pattern): %s/%s", packageName, activityName)
                     Pair(packageName, activityName)
                 } else {
-                    PluginLogger.info(LogCategory.ADB_CONNECTION, "No focused app found - patterns did not match output: %s", output)
-                    null
+                    println("ADB_Randomizer: Neither pattern matched the line: $validLine")
+                    println("ADB_Randomizer: Falling back to getTopActivity method...")
+                    PluginLogger.info(LogCategory.ADB_CONNECTION, "No focused app found - patterns did not match line: %s", validLine)
+                    
+                    // Если не удалось получить фокусное приложение через mCurrentFocus,
+                    // пробуем альтернативный метод через mResumedActivity
+                    val topActivityResult = getTopActivity(device)
+                    val topActivity = topActivityResult.getOrNull()
+                    if (topActivity != null) {
+                        println("ADB_Randomizer: Successfully got activity from alternative method: ${topActivity.first}/${topActivity.second}")
+                        topActivity
+                    } else {
+                        println("ADB_Randomizer: Alternative method also failed to get activity")
+                        null
+                    }
                 }
             }
         }

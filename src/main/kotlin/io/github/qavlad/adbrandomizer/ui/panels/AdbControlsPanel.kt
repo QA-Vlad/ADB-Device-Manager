@@ -294,6 +294,8 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
     }
 
     private fun resetAllDevices(devices: List<IDevice>, resetSize: Boolean, resetDpi: Boolean, indicator: ProgressIndicator) {
+        val settings = PluginSettings.instance
+        
         devices.forEach { device ->
             indicator.text = "Resetting ${device.name}..."
             
@@ -304,6 +306,43 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                     device.name, size?.let { "${it.first}x${it.second}" } ?: "null")
                 size
             } else null
+
+            // Сохраняем активное приложение ПЕРЕД сбросом, если будет изменение размера
+            var activeAppBeforeChange: Pair<String, String>? = null
+            if (settings.restartActiveAppOnResolutionChange && resetSize && currentSizeBefore != null) {
+                PluginLogger.info(LogCategory.UI_EVENTS, "Checking active app before reset on device: %s", device.serialNumber)
+                val focusedAppResult = AdbService.getCurrentFocusedApp(device)
+                val focusedApp = focusedAppResult.getOrNull()
+                
+                if (focusedApp != null) {
+                    PluginLogger.info(LogCategory.UI_EVENTS, 
+                        "Found focused app on device %s: %s/%s", 
+                        device.serialNumber, focusedApp.first, focusedApp.second
+                    )
+                    
+                    // Пропускаем только критически важные системные приложения
+                    val isEssentialSystem = focusedApp.first == "com.android.systemui" ||
+                                          focusedApp.first == "com.android.launcher" ||
+                                          focusedApp.first == "com.sec.android.app.launcher" ||
+                                          focusedApp.first == "com.miui.home" || // MIUI launcher
+                                          focusedApp.first == "com.android.settings" ||
+                                          focusedApp.first == "com.android.phone" ||
+                                          focusedApp.first == "com.android.dialer"
+                    
+                    if (!isEssentialSystem) {
+                        activeAppBeforeChange = focusedApp
+                        PluginLogger.info(LogCategory.UI_EVENTS, 
+                            "Will restart app %s on device %s after reset", 
+                            focusedApp.first, device.serialNumber
+                        )
+                    } else {
+                        PluginLogger.info(LogCategory.UI_EVENTS,
+                            "Skipping essential system app %s on device %s",
+                            focusedApp.first, device.serialNumber
+                        )
+                    }
+                }
+            }
             
             // Выполняем сброс
             if (resetSize) {
@@ -325,84 +364,22 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                 PluginLogger.debug(LogCategory.UI_EVENTS, "Current size after reset for device %s: %s", 
                     device.name, currentSizeAfter?.let { "${it.first}x${it.second}" } ?: "null")
                 
-                // Проверяем активность scrcpy
-                // Для Wi-Fi устройств нужно использовать логический серийный номер
-                val allDevices = getAllDevicesFromModel()
-                val deviceInfo = allDevices.find { it.device?.serialNumber == device.serialNumber }
-                val serialNumber = deviceInfo?.logicalSerialNumber ?: device.serialNumber
-                
-                PluginLogger.debug(LogCategory.UI_EVENTS, "Checking scrcpy for device: physical serial=%s, logical serial=%s", 
-                    device.serialNumber, serialNumber)
-                
-                // Проверяем как наши, так и внешние процессы scrcpy
-                val isOurScrcpyActive = ScrcpyService.isScrcpyActiveForDevice(serialNumber)
-                val hasAnyScrcpy = ScrcpyService.hasAnyScrcpyProcessForDevice(serialNumber)
-                
-                PluginLogger.debug(LogCategory.UI_EVENTS, "Scrcpy check for device %s: our=%s, any=%s", 
-                    serialNumber, isOurScrcpyActive, hasAnyScrcpy)
-                
-                // Проверяем, нужно ли перезапустить scrcpy
-                // Перезапускаем если:
-                // 1. Размер изменился после сброса ИЛИ
-                // 2. Размер был кастомным (не дефолтным) перед сбросом
-                val sizeChanged = currentSizeAfter != null && currentSizeBefore != currentSizeAfter
-                
-                // Получаем дефолтный размер для сравнения
-                val defaultSizeResult = AdbService.getDefaultSize(device)
-                val defaultSize = defaultSizeResult.getOrNull()
-                val wasCustomSize = defaultSize != null && currentSizeBefore != defaultSize
-                
-                PluginLogger.debug(LogCategory.UI_EVENTS, 
-                    "Reset analysis for device %s: before=%sx%s, after=%sx%s, default=%sx%s, changed=%s, wasCustom=%s", 
-                    serialNumber,
-                    currentSizeBefore.first, currentSizeBefore.second,
-                    currentSizeAfter?.first ?: 0, currentSizeAfter?.second ?: 0,
-                    defaultSize?.first ?: 0, defaultSize?.second ?: 0,
-                    sizeChanged, wasCustomSize
+                // Используем новый сервис для обработки всех перезапусков
+                val restartResult = ResolutionChangeRestartService.handleSingleDeviceResolutionChange(
+                    project,
+                    device,
+                    currentSizeBefore,
+                    currentSizeAfter,
+                    activeAppBeforeChange // передаем сохраненное приложение
                 )
                 
-                val settings = PluginSettings.instance
-                // Перезапускаем если есть ЛЮБОЙ процесс scrcpy (наш или внешний)
-                if (settings.restartScrcpyOnResolutionChange && hasAnyScrcpy && (sizeChanged || wasCustomSize)) {
-                    PluginLogger.debug(LogCategory.UI_EVENTS, 
-                        "Restarting scrcpy for device %s (sizeChanged=%s, wasCustomSize=%s, ourScrcpy=%s, anyScrcpy=%s)", 
-                        serialNumber, sizeChanged, wasCustomSize, isOurScrcpyActive, true
-                    )
-                    
-                    // Перезапускаем scrcpy в отдельном потоке
-                    Thread {
-                        Thread.sleep(500) // Даём время на стабилизацию
-                        val restartResult = ScrcpyService.restartScrcpyForDevice(serialNumber, project)
-                        PluginLogger.debug(LogCategory.UI_EVENTS, "Scrcpy restart result for device %s: %s", 
-                            serialNumber, restartResult)
-                    }.start()
-                } else {
-                    PluginLogger.debug(LogCategory.UI_EVENTS, 
-                        "Scrcpy restart not needed for device %s (hasAnyScrcpy=%s, sizeChanged=%s, wasCustomSize=%s, settingEnabled=%s)", 
-                        serialNumber, hasAnyScrcpy, sizeChanged, wasCustomSize, settings.restartScrcpyOnResolutionChange
-                    )
-                }
-                
-                // Check and restart Running Devices if needed (Android Studio only)
-                AndroidStudioIntegrationService.instance?.let { androidService ->
-                    if (settings.restartRunningDevicesOnResolutionChange && (sizeChanged || wasCustomSize)) {
-                        if (androidService.isRunningDevicesActive(device)) {
-                            PluginLogger.debug(LogCategory.UI_EVENTS, 
-                                "Restarting Running Devices for device %s", serialNumber
-                            )
-                            
-                            // Restart Running Devices in a separate thread
-                            Thread {
-                                Thread.sleep(500) // Give time for stabilization
-                                val restartResult = androidService.restartRunningDevices(device)
-                                PluginLogger.debug(LogCategory.UI_EVENTS, 
-                                    "Running Devices restart result for device %s: %s", 
-                                    serialNumber, restartResult
-                                )
-                            }.start()
-                        }
-                    }
-                }
+                PluginLogger.debug(LogCategory.UI_EVENTS, 
+                    "Restart result for device %s: apps=%d, scrcpy=%d, runningDevices=%d", 
+                    device.serialNumber,
+                    restartResult.appsRestarted,
+                    restartResult.scrcpyRestarted,
+                    restartResult.runningDevicesRestarted
+                )
             }
         }
     }
@@ -431,9 +408,72 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
         if (activeDevice != null) {
             object : Task.Backgroundable(project, "Resetting screen size") {
                 override fun run(indicator: ProgressIndicator) {
+                    val settings = PluginSettings.instance
+                    
+                    // Получаем текущий размер перед сбросом
+                    val currentSizeBefore = AdbService.getCurrentSize(activeDevice).getOrNull()
+                    
+                    // Сохраняем активное приложение ПЕРЕД сбросом
+                    var activeAppBeforeChange: Pair<String, String>? = null
+                    if (settings.restartActiveAppOnResolutionChange && currentSizeBefore != null) {
+                        println("ADB_Randomizer: Getting focused app before reset on device ${activeDevice.serialNumber}")
+                        
+                        // Временно вызываем отладочный метод для диагностики проблемы с scrcpy
+                        AdbService.debugGetCurrentApp(activeDevice)
+                        
+                        val focusedAppResult = AdbService.getCurrentFocusedApp(activeDevice)
+                        val focusedApp = focusedAppResult.getOrNull()
+                        
+                        if (focusedApp != null) {
+                            println("ADB_Randomizer: Found focused app: ${focusedApp.first}/${focusedApp.second}")
+                            
+                            // Пропускаем только критически важные системные приложения
+                            // Google Assistant, Chrome и другие приложения должны перезапускаться!
+                            val isEssentialSystem = focusedApp.first == "com.android.systemui" ||
+                                                   focusedApp.first == "com.android.launcher" ||
+                                                   focusedApp.first == "com.sec.android.app.launcher" ||
+                                                   focusedApp.first == "com.miui.home" || // MIUI launcher
+                                                   focusedApp.first == "com.android.settings" ||
+                                                   focusedApp.first == "com.android.phone" ||
+                                                   focusedApp.first == "com.android.dialer"
+                            
+                            if (!isEssentialSystem) {
+                                activeAppBeforeChange = focusedApp
+                                println("ADB_Randomizer: Saved app ${focusedApp.first} for restart after size reset on device ${activeDevice.serialNumber}")
+                            } else {
+                                println("ADB_Randomizer: App ${focusedApp.first} is essential system app, skipping")
+                            }
+                        } else {
+                            println("ADB_Randomizer: No focused app found")
+                        }
+                    } else {
+                        println("ADB_Randomizer: Not checking for active app - restartActiveAppOnResolutionChange=${settings.restartActiveAppOnResolutionChange}, currentSizeBefore=$currentSizeBefore")
+                    }
+                    
+                    // Выполняем сброс
                     AdbService.resetSize(activeDevice)
                     DeviceStateService.handleReset(resetSize = true, resetDpi = false)
                     PresetsDialogUpdateNotifier.notifyUpdate()
+                    
+                    // Получаем новый размер после сброса
+                    Thread.sleep(1000) // Даем время на применение
+                    val currentSizeAfter = AdbService.getCurrentSize(activeDevice).getOrNull()
+                    
+                    // Обрабатываем перезапуски
+                    val restartResult = ResolutionChangeRestartService.handleSingleDeviceResolutionChange(
+                        project,
+                        activeDevice,
+                        currentSizeBefore,
+                        currentSizeAfter,
+                        activeAppBeforeChange
+                    )
+                    
+                    PluginLogger.info(LogCategory.UI_EVENTS, 
+                        "Device size reset restart result: apps=%d, scrcpy=%d, runningDevices=%d", 
+                        restartResult.appsRestarted,
+                        restartResult.scrcpyRestarted,
+                        restartResult.runningDevicesRestarted
+                    )
                     
                     ApplicationManager.getApplication().invokeLater {
                         NotificationUtils.showSuccess(project, "Screen size reset to default")
@@ -473,10 +513,56 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
         if (activeDevice != null) {
             object : Task.Backgroundable(project, "Applying device changes") {
                 override fun run(indicator: ProgressIndicator) {
+                    val settings = PluginSettings.instance
                     var success = true
                     val messages = mutableListOf<String>()
                     
+                    // Получаем текущий размер ПЕРЕД изменением
+                    val currentSizeBefore = if (newSize != null) {
+                        AdbService.getCurrentSize(activeDevice).getOrNull()
+                    } else null
+                    
+                    // Сохраняем активное приложение ПЕРЕД изменением размера
+                    var activeAppBeforeChange: Pair<String, String>? = null
+                    if (settings.restartActiveAppOnResolutionChange && newSize != null) {
+                        println("ADB_Randomizer: Getting focused app before size change on device ${activeDevice.serialNumber}")
+                        val focusedAppResult = AdbService.getCurrentFocusedApp(activeDevice)
+                        val focusedApp = focusedAppResult.getOrNull()
+                        
+                        if (focusedApp != null) {
+                            println("ADB_Randomizer: Found focused app: ${focusedApp.first}/${focusedApp.second}")
+                            // Пропускаем только критически важные системные приложения
+                            val isEssentialSystem = focusedApp.first == "com.android.systemui" ||
+                                                  focusedApp.first == "com.android.launcher" ||
+                                                  focusedApp.first == "com.sec.android.app.launcher" ||
+                                                  focusedApp.first == "com.miui.home" || // MIUI launcher
+                                                  focusedApp.first == "com.android.settings" ||
+                                                  focusedApp.first == "com.android.phone" ||
+                                                  focusedApp.first == "com.android.dialer"
+                            
+                            if (!isEssentialSystem) {
+                                activeAppBeforeChange = focusedApp
+                                println("ADB_Randomizer: Saved app ${focusedApp.first} for restart after size change on device ${activeDevice.serialNumber}")
+                                PluginLogger.info(LogCategory.UI_EVENTS, 
+                                    "Saved app %s for restart after size change on device %s", 
+                                    focusedApp.first, activeDevice.serialNumber
+                                )
+                            } else {
+                                println("ADB_Randomizer: App ${focusedApp.first} is essential system app, skipping")
+                                PluginLogger.info(LogCategory.UI_EVENTS, 
+                                    "Skipping essential system app %s on device %s", 
+                                    focusedApp.first, activeDevice.serialNumber
+                                )
+                            }
+                        } else {
+                            println("ADB_Randomizer: No focused app found")
+                        }
+                    } else {
+                        println("ADB_Randomizer: Not checking for active app - restartActiveAppOnResolutionChange=${settings.restartActiveAppOnResolutionChange}, newSize=$newSize")
+                    }
+                    
                     // Применяем изменения размера
+                    var sizeChanged = false
                     newSize?.let { sizeStr ->
                         if (ValidationUtils.isValidScreenSize(sizeStr)) {
                             val parts = sizeStr.split("x")
@@ -485,6 +571,10 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                             val result = AdbService.setSize(activeDevice, width, height)
                             if (result.isSuccess()) {
                                 messages.add("Size set to $sizeStr")
+                                sizeChanged = true
+                                
+                                // Помечаем что пресет был применен для этого устройства
+                                DeviceStateService.markPresetApplied(activeDevice.serialNumber)
                             } else {
                                 success = false
                                 messages.add("Failed to set size")
@@ -513,6 +603,27 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                     }
                     
                     PresetsDialogUpdateNotifier.notifyUpdate()
+                    
+                    // Обрабатываем перезапуски если размер был изменен
+                    if (sizeChanged && currentSizeBefore != null) {
+                        Thread.sleep(1000) // Даем время на применение
+                        val currentSizeAfter = AdbService.getCurrentSize(activeDevice).getOrNull()
+                        
+                        val restartResult = ResolutionChangeRestartService.handleSingleDeviceResolutionChange(
+                            project,
+                            activeDevice,
+                            currentSizeBefore,
+                            currentSizeAfter,
+                            activeAppBeforeChange
+                        )
+                        
+                        PluginLogger.info(LogCategory.UI_EVENTS, 
+                            "Device changes restart result: apps=%d, scrcpy=%d, runningDevices=%d", 
+                            restartResult.appsRestarted,
+                            restartResult.scrcpyRestarted,
+                            restartResult.runningDevicesRestarted
+                        )
+                    }
                     
                     ApplicationManager.getApplication().invokeLater {
                         if (success) {
@@ -556,17 +667,21 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                     if (ScrcpyService.isScrcpyActiveForDevice(serial)) {
                         println("ADB_Randomizer: Found active scrcpy for device: $serial, stopping it...")
                         PluginLogger.warn(LogCategory.SCRCPY, "Stopping scrcpy before disconnecting Wi-Fi device: %s", serial)
-                        ScrcpyService.stopScrcpyForDevice(serial)
+                        // Используем новый метод для остановки только Wi-Fi процесса
+                        ScrcpyService.stopScrcpyForSingleSerial(serial)
                         scrcpyStopped = true
                         break
                     }
                 }
                 
-                // Даже если scrcpy не найден, помечаем все возможные серийные номера как намеренно остановленные
+                // Помечаем только Wi-Fi серийные номера как намеренно остановленные
                 // чтобы предотвратить попытки запуска scrcpy после отключения
                 for (serial in possibleSerials) {
-                    ScrcpyService.markAsIntentionallyStopped(serial)
-                    println("ADB_Randomizer: Marked $serial as intentionally stopped")
+                    // Помечаем только если это Wi-Fi serial (содержит ":")
+                    if (serial.contains(":")) {
+                        ScrcpyService.markSingleSerialAsIntentionallyStopped(serial)
+                        println("ADB_Randomizer: Marked $serial as intentionally stopped")
+                    }
                 }
                 
                 if (scrcpyStopped) {

@@ -11,15 +11,16 @@ import io.github.qavlad.adbrandomizer.ui.services.TableStateTracker
 import io.github.qavlad.adbrandomizer.utils.PluginLogger
 import io.github.qavlad.adbrandomizer.utils.logging.LogCategory
 import io.github.qavlad.adbrandomizer.settings.PluginSettings
-import io.github.qavlad.adbrandomizer.services.integration.scrcpy.ScrcpyService
 import javax.swing.SwingUtilities
 
 object PresetApplicationService {
     
     fun applyPreset(project: Project, preset: DevicePreset, setSize: Boolean, setDpi: Boolean, currentTablePosition: Int? = null, selectedDevices: List<IDevice>? = null) {
-        PluginLogger.debug(LogCategory.PRESET_SERVICE, "applyPreset called - preset: %s, currentTablePosition: %s", preset.label, currentTablePosition)
+        println("ADB_Randomizer: applyPreset called - preset: ${preset.label}, setSize: $setSize, setDpi: $setDpi")
         object : Task.Backgroundable(project, "Applying preset") {
             override fun run(indicator: ProgressIndicator) {
+                val settings = PluginSettings.instance
+                println("ADB_Randomizer: Settings - restartApp: ${settings.restartActiveAppOnResolutionChange}, restartScrcpy: ${settings.restartScrcpyOnResolutionChange}")
                 val presetData = validateAndParsePresetData(preset, setSize, setDpi) ?: return
                 
                 // Используем переданный список устройств или получаем все подключенные
@@ -152,31 +153,18 @@ object PresetApplicationService {
             presetData.dpi?.toString() ?: "null"
         )
         
-        // Collect devices that need Running Devices restart
-        val devicesNeedingRunningDevicesRestart = mutableListOf<IDevice>()
-        
-        // Collect devices that need scrcpy restart
-        val devicesNeedingScrcpyRestart = mutableListOf<String>()
-        
-        // Сохраняем информацию о том, изменилось ли разрешение для каждого устройства
-        val devicesWithResolutionChange = mutableSetOf<IDevice>()
-        
-        // Сохраняем активные приложения для каждого устройства перед изменением разрешения
-        val devicesWithActiveApps = mutableMapOf<IDevice, Pair<String, String>>()
+        // Собираем информацию о разрешениях ДО применения пресета
+        val resolutionContexts = mutableMapOf<IDevice, ResolutionChangeRestartService.ResolutionChangeContext>()
+        val activeAppsBeforeChange = mutableMapOf<IDevice, Pair<String, String>>()
         val settings = PluginSettings.instance
         
-        PluginLogger.info(LogCategory.PRESET_SERVICE, 
-            "Settings: restartScrcpyOnResolutionChange=%s, restartActiveAppOnResolutionChange=%s",
-            settings.restartScrcpyOnResolutionChange,
-            settings.restartActiveAppOnResolutionChange
-        )
-        
-        // Сначала проверяем, какие устройства будут иметь изменение разрешения
+        // Сначала собираем контексты изменения разрешения и активные приложения для всех устройств
         if (presetData.width != null && presetData.height != null) {
             devices.forEach { device ->
                 // Получаем текущее разрешение для сравнения
                 val currentSizeResult = AdbService.getCurrentSize(device)
                 val currentSize = currentSizeResult.getOrNull()
+                val defaultSize = AdbService.getDefaultSize(device).getOrNull()
                 
                 PluginLogger.info(LogCategory.PRESET_SERVICE, 
                     "Checking resolution change for device %s: current=%s, target=%dx%d", 
@@ -193,20 +181,60 @@ object PresetApplicationService {
                 // Это нужно для случаев когда применяется тот же пресет повторно
                 val wasRecentlyApplied = DeviceStateService.wasPresetRecentlyApplied(device.serialNumber)
                 
-                if (resolutionWillChange || wasRecentlyApplied) {
-                    devicesWithResolutionChange.add(device)
-                    if (resolutionWillChange) {
-                        PluginLogger.info(LogCategory.PRESET_SERVICE, 
-                            "Resolution WILL change for device %s: %dx%d -> %dx%d", 
-                            device.serialNumber, currentSize?.first ?: 0, currentSize?.second ?: 0, 
-                            presetData.width, presetData.height
-                        )
+                val targetSize = Pair(presetData.width, presetData.height)
+                
+                // Создаем контекст изменения разрешения
+                val context = ResolutionChangeRestartService.ResolutionChangeContext(
+                    device = device,
+                    sizeBefore = currentSize,
+                    sizeAfter = targetSize, // После применения будет целевое разрешение
+                    defaultSize = defaultSize,
+                    wasCustomSize = defaultSize != null && currentSize != null && currentSize != defaultSize,
+                    hasResolutionChanged = resolutionWillChange || wasRecentlyApplied
+                )
+                
+                resolutionContexts[device] = context
+                
+                // Сохраняем активное приложение ПЕРЕД изменением, если разрешение изменится
+                if ((resolutionWillChange || wasRecentlyApplied) && settings.restartActiveAppOnResolutionChange) {
+                    println("ADB_Randomizer: Checking active app before change on device: ${device.serialNumber}")
+                    val focusedAppResult = AdbService.getCurrentFocusedApp(device)
+                    val focusedApp = focusedAppResult.getOrNull()
+                    
+                    if (focusedApp != null) {
+                        println("ADB_Randomizer: Found focused app on device ${device.serialNumber}: ${focusedApp.first}/${focusedApp.second}")
+                        
+                        // Пропускаем только критически важные системные приложения
+                        val isEssentialSystem = focusedApp.first == "com.android.systemui" ||
+                                              focusedApp.first == "com.android.launcher" ||
+                                              focusedApp.first == "com.sec.android.app.launcher" ||
+                                              focusedApp.first == "com.miui.home" || // MIUI launcher
+                                              focusedApp.first == "com.android.settings" ||
+                                              focusedApp.first == "com.android.phone" ||
+                                              focusedApp.first == "com.android.dialer"
+                        
+                        if (!isEssentialSystem) {
+                            activeAppsBeforeChange[device] = focusedApp
+                            println("ADB_Randomizer: Will restart app ${focusedApp.first} on device ${device.serialNumber} after resolution change")
+                        } else {
+                            println("ADB_Randomizer: Skipping essential system app ${focusedApp.first} on device ${device.serialNumber}")
+                        }
                     } else {
-                        PluginLogger.info(LogCategory.PRESET_SERVICE, 
-                            "Device %s marked for restart due to recent preset application (resolution already %dx%d)", 
-                            device.serialNumber, presetData.width, presetData.height
-                        )
+                        println("ADB_Randomizer: No focused app found on device ${device.serialNumber}")
                     }
+                }
+                
+                if (resolutionWillChange) {
+                    PluginLogger.info(LogCategory.PRESET_SERVICE, 
+                        "Resolution WILL change for device %s: %dx%d -> %dx%d", 
+                        device.serialNumber, currentSize?.first ?: 0, currentSize?.second ?: 0, 
+                        presetData.width, presetData.height
+                    )
+                } else if (wasRecentlyApplied) {
+                    PluginLogger.info(LogCategory.PRESET_SERVICE, 
+                        "Device %s marked for restart due to recent preset application (resolution already %dx%d)", 
+                        device.serialNumber, presetData.width, presetData.height
+                    )
                 } else {
                     PluginLogger.info(LogCategory.PRESET_SERVICE, 
                         "Resolution will NOT change for device %s (already %dx%d, not recently applied)", 
@@ -220,70 +248,6 @@ object PresetApplicationService {
                 presetData.width?.toString() ?: "null",
                 presetData.height?.toString() ?: "null"
             )
-        }
-        
-        // Сохраняем активные приложения только для устройств с изменением разрешения
-        PluginLogger.info(LogCategory.PRESET_SERVICE, 
-            "=== APP RESTART CHECK START ===\nrestartActiveAppOnResolutionChange: %s\ndevicesWithResolutionChange count: %d\ndevices: %s", 
-            settings.restartActiveAppOnResolutionChange, 
-            devicesWithResolutionChange.size,
-            devicesWithResolutionChange.joinToString(", ") { it.serialNumber }
-        )
-        
-        if (settings.restartActiveAppOnResolutionChange && devicesWithResolutionChange.isNotEmpty()) {
-            PluginLogger.info(LogCategory.PRESET_SERVICE, "Will check for active apps on %d devices", devicesWithResolutionChange.size)
-            devicesWithResolutionChange.forEach { device ->
-                PluginLogger.info(LogCategory.PRESET_SERVICE, "Checking active app on device: %s", device.serialNumber)
-                // Получаем активное приложение
-                val focusedAppResult = AdbService.getCurrentFocusedApp(device)
-                
-                focusedAppResult.onError { exception, message ->
-                    PluginLogger.error("Failed to get focused app for device ${device.serialNumber}", 
-                        exception, message ?: "")
-                }
-                
-                val focusedApp = focusedAppResult.getOrNull()
-                PluginLogger.info(LogCategory.PRESET_SERVICE, 
-                    "getCurrentFocusedApp result for device %s: %s", 
-                    device.serialNumber, 
-                    focusedApp?.let { "${it.first}/${it.second}" } ?: "NULL"
-                )
-                
-                if (focusedApp != null) {
-                    PluginLogger.info(LogCategory.PRESET_SERVICE, 
-                        "Found focused app on device %s: %s/%s", 
-                        device.serialNumber, focusedApp.first, focusedApp.second
-                    )
-                    
-                    // Проверяем, не является ли это системным приложением
-                    val isSystemResult = AdbService.isSystemApp(device, focusedApp.first)
-                    val isSystem = isSystemResult.getOrNull() ?: false
-                    
-                    if (!isSystem) {
-                        devicesWithActiveApps[device] = focusedApp
-                        PluginLogger.info(LogCategory.PRESET_SERVICE, 
-                            "Will restart app %s on device %s after resolution change", 
-                            focusedApp.first, device.serialNumber
-                        )
-                    } else {
-                        PluginLogger.info(LogCategory.PRESET_SERVICE, 
-                            "Skipping system app %s on device %s", 
-                            focusedApp.first, device.serialNumber
-                        )
-                    }
-                } else {
-                    PluginLogger.info(LogCategory.PRESET_SERVICE, 
-                        "No focused app found on device %s", 
-                        device.serialNumber
-                    )
-                }
-            }
-        } else {
-            if (!settings.restartActiveAppOnResolutionChange) {
-                PluginLogger.info(LogCategory.PRESET_SERVICE, 
-                    "Active app restart is disabled in settings"
-                )
-            }
         }
         
         // Сохраняем состояния автоповорота для всех устройств перед применением пресетов
@@ -394,76 +358,6 @@ object PresetApplicationService {
                 
                 // Дополнительная задержка после установки размера
                 Thread.sleep(500)
-                
-                // Собираем информацию о необходимости перезапуска scrcpy
-                PluginLogger.info(LogCategory.PRESET_SERVICE, 
-                    "Checking scrcpy restart for device %s: restartScrcpyOnResolutionChange=%s, resolutionChanged=%s", 
-                    device.serialNumber,
-                    settings.restartScrcpyOnResolutionChange,
-                    devicesWithResolutionChange.contains(device)
-                )
-                
-                if (settings.restartScrcpyOnResolutionChange && devicesWithResolutionChange.contains(device)) {
-                    val serialNumber = device.serialNumber
-                    // Проверяем любые процессы scrcpy (наши или внешние)
-                    val hasScrcpy = ScrcpyService.hasAnyScrcpyProcessForDevice(serialNumber)
-                    PluginLogger.info(LogCategory.PRESET_SERVICE, 
-                        "Scrcpy process check for device %s: hasAnyScrcpy=%s", 
-                        serialNumber, hasScrcpy
-                    )
-                    
-                    if (hasScrcpy) {
-                        PluginLogger.info(LogCategory.PRESET_SERVICE, 
-                            "Found scrcpy process for device %s, will restart after resolution change", 
-                            serialNumber
-                        )
-                        devicesNeedingScrcpyRestart.add(serialNumber)
-                    } else {
-                        PluginLogger.info(LogCategory.PRESET_SERVICE, 
-                            "No scrcpy processes found for device %s", 
-                            serialNumber
-                        )
-                    }
-                } else if (!devicesWithResolutionChange.contains(device)) {
-                    PluginLogger.info(LogCategory.PRESET_SERVICE, 
-                        "Skipping scrcpy restart for device %s - resolution did not change", 
-                        device.serialNumber
-                    )
-                } else {
-                    PluginLogger.info(LogCategory.PRESET_SERVICE, 
-                        "Scrcpy restart is disabled in settings"
-                    )
-                }
-                
-                // Check if Running Devices restart is needed (Android Studio only)
-                // Only restart if resolution actually changed AND there's an active tab for this device
-                AndroidStudioIntegrationService.instance?.let { androidService ->
-                    when {
-                        !devicesWithResolutionChange.contains(device) -> {
-                            PluginLogger.info(LogCategory.PRESET_SERVICE, 
-                                "Skipping Running Devices restart for device %s - resolution did not change", 
-                                device.serialNumber
-                            )
-                        }
-                        settings.restartRunningDevicesOnResolutionChange && 
-                        androidService.hasActiveDeviceTab(device) -> {
-                            PluginLogger.info(LogCategory.PRESET_SERVICE, 
-                                "Running Devices has active tab for device %s with resolution change, will restart after all devices are processed", 
-                                device.serialNumber
-                            )
-                            devicesNeedingRunningDevicesRestart.add(device)
-                        }
-                        else -> {
-                            // Running Devices restart is disabled or no active tab
-                            PluginLogger.info(LogCategory.PRESET_SERVICE, 
-                                "Running Devices restart not needed for device %s (disabled=%s, no active tab=%s)", 
-                                device.serialNumber,
-                                !settings.restartRunningDevicesOnResolutionChange,
-                                !androidService.hasActiveDeviceTab(device)
-                            )
-                        }
-                    }
-                }
             }
             
             if (presetData.dpi != null) {
@@ -471,164 +365,20 @@ object PresetApplicationService {
             }
         }
         
-        // Restart apps, Running Devices and scrcpy in the correct order
-        // Order: Restart apps → Close scrcpy → Close Running Devices → Start Running Devices → Start scrcpy
-        if (devicesNeedingRunningDevicesRestart.isNotEmpty() || devicesNeedingScrcpyRestart.isNotEmpty() || devicesWithActiveApps.isNotEmpty()) {
-            Thread {
-                // Step 1: Перезапускаем активные приложения ПЕРВЫМИ
-                if (devicesWithActiveApps.isNotEmpty()) {
-                    PluginLogger.info(LogCategory.PRESET_SERVICE, 
-                        "Step 1: Restarting active apps for %d devices", 
-                        devicesWithActiveApps.size
-                    )
-                    
-                    Thread.sleep(1000) // Даём время на стабилизацию после изменения разрешения
-                    PluginLogger.info(LogCategory.PRESET_SERVICE, 
-                        "Beginning app restart process for %d devices", 
-                        devicesWithActiveApps.size
-                    )
-                    
-                    devicesWithActiveApps.forEach { (device, appInfo) ->
-                        val (packageName, activityName) = appInfo
-                        PluginLogger.info(LogCategory.PRESET_SERVICE, 
-                            "Attempting to restart app %s on device %s", 
-                            packageName, device.serialNumber
-                        )
-                        
-                        // Останавливаем приложение
-                        val stopResult = AdbService.stopApp(device, packageName)
-                        stopResult.onError { exception, message ->
-                            PluginLogger.error("Failed to stop app $packageName on device ${device.serialNumber}", 
-                                exception, message ?: "")
-                        }
-                        
-                        if (stopResult.isSuccess()) {
-                            PluginLogger.info(LogCategory.PRESET_SERVICE, 
-                                "Successfully stopped app %s, waiting before restart", 
-                                packageName
-                            )
-                            Thread.sleep(500) // Небольшая задержка между остановкой и запуском
-                            
-                            // Запускаем приложение заново
-                            val startResult = AdbService.startApp(device, packageName, activityName)
-                            startResult.onError { exception, message ->
-                                PluginLogger.error("Failed to start app $packageName on device ${device.serialNumber}", 
-                                    exception, message ?: "")
-                            }
-                            
-                            if (startResult.isSuccess()) {
-                                PluginLogger.info(LogCategory.PRESET_SERVICE, 
-                                    "Successfully restarted app %s on device %s", 
-                                    packageName, device.serialNumber
-                                )
-                            } else {
-                                PluginLogger.error(LogCategory.PRESET_SERVICE, 
-                                    "Failed to start app %s on device %s", null,
-                                    packageName, device.serialNumber
-                                )
-                            }
-                        } else {
-                            PluginLogger.error(LogCategory.PRESET_SERVICE, 
-                                "Failed to stop app %s on device %s", null,
-                                packageName, device.serialNumber
-                            )
-                        }
-                    }
-                    
-                    PluginLogger.info(LogCategory.PRESET_SERVICE, 
-                        "All apps restart attempts completed"
-                    )
-                    
-                    // Даём время приложениям полностью запуститься перед перезапуском UI
-                    Thread.sleep(1000)
-                }
-                
-                // Step 2: Close all scrcpy processes (if any need restart)
-                if (devicesNeedingScrcpyRestart.isNotEmpty()) {
-                    PluginLogger.info(LogCategory.PRESET_SERVICE, 
-                        "Step 2: Closing scrcpy for %d devices", 
-                        devicesNeedingScrcpyRestart.size
-                    )
-                    
-                    // Close all scrcpy processes in parallel
-                    val closeThreads = devicesNeedingScrcpyRestart.map { serialNumber ->
-                        Thread {
-                            ScrcpyService.stopScrcpyForDevice(serialNumber)
-                            PluginLogger.debug(LogCategory.PRESET_SERVICE, 
-                                "Closed scrcpy for device %s", serialNumber
-                            )
-                        }
-                    }
-                    closeThreads.forEach { it.start() }
-                    closeThreads.forEach { it.join() }
-                    
-                    // Small delay after closing
-                    Thread.sleep(500)
-                    PluginLogger.info(LogCategory.PRESET_SERVICE, "All scrcpy processes closed")
-                }
-                
-                // Step 3: Restart Running Devices (this will close and reopen tabs)
-                if (devicesNeedingRunningDevicesRestart.isNotEmpty()) {
-                    AndroidStudioIntegrationService.instance?.let { androidService ->
-                        PluginLogger.info(LogCategory.PRESET_SERVICE, 
-                            "Step 3: Restarting Running Devices for %d devices", 
-                            devicesNeedingRunningDevicesRestart.size
-                        )
-                        
-                        androidService.restartRunningDevicesForMultiple(devicesNeedingRunningDevicesRestart)
-                        
-                        // Wait for Running Devices to fully restart
-                        Thread.sleep(2000)
-                        PluginLogger.info(LogCategory.PRESET_SERVICE, 
-                            "Running Devices restart completed"
-                        )
-                    }
-                }
-                
-                // Step 4: Start scrcpy processes after everything is ready
-                if (devicesNeedingScrcpyRestart.isNotEmpty()) {
-                    PluginLogger.info(LogCategory.PRESET_SERVICE, 
-                        "Step 4: Starting scrcpy for %d devices sequentially with delays", 
-                        devicesNeedingScrcpyRestart.size
-                    )
-                    
-                    val scrcpyPath = ScrcpyService.findScrcpyExecutable()
-                    if (scrcpyPath == null) {
-                        PluginLogger.error(LogCategory.PRESET_SERVICE, 
-                            "Cannot restart scrcpy - executable not found", null, ""
-                        )
-                    } else {
-                        // Start scrcpy processes sequentially with small delays to avoid ADB port conflicts
-                        devicesNeedingScrcpyRestart.forEachIndexed { index, serialNumber ->
-                            PluginLogger.debug(LogCategory.PRESET_SERVICE, 
-                                "Starting scrcpy for device %s (%d of %d)", 
-                                serialNumber, index + 1, devicesNeedingScrcpyRestart.size
-                            )
-                            
-                            // Launch scrcpy directly since we already stopped it earlier
-                            val startResult = ScrcpyService.launchScrcpy(scrcpyPath, serialNumber, project)
-                            
-                            PluginLogger.info(LogCategory.PRESET_SERVICE, 
-                                "Scrcpy start result for device %s: %s", 
-                                serialNumber, if (startResult) "SUCCESS" else "FAILED"
-                            )
-                            
-                            // Add delay between starts to avoid port conflicts (except for the last one)
-                            if (index < devicesNeedingScrcpyRestart.size - 1) {
-                                Thread.sleep(1000) // 1 second delay between launches
-                                PluginLogger.debug(LogCategory.PRESET_SERVICE, 
-                                    "Waiting before starting next scrcpy process"
-                                )
-                            }
-                        }
-                    }
-                    
-                    PluginLogger.info(LogCategory.PRESET_SERVICE, 
-                        "All scrcpy processes start attempts completed"
-                    )
-                }
-            }.start()
-        }
+        // Используем новый сервис для обработки всех перезапусков
+        val restartResult = ResolutionChangeRestartService.handleResolutionChangeRestarts(
+            project,
+            devices,
+            resolutionContexts,
+            activeAppsBeforeChange // передаем сохраненные приложения
+        )
+        
+        PluginLogger.info(LogCategory.PRESET_SERVICE, 
+            "Restart result: apps=%d, scrcpy=%d, runningDevices=%d", 
+            restartResult.appsRestarted,
+            restartResult.scrcpyRestarted,
+            restartResult.runningDevicesRestarted
+        )
         
         // Восстанавливаем автоповорот для устройств, у которых он был включен
         if (devicesWithAutoRotation.isNotEmpty()) {
