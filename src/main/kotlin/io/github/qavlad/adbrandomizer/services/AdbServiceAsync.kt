@@ -3,6 +3,8 @@ package io.github.qavlad.adbrandomizer.services
 import com.android.ddmlib.IDevice
 import com.intellij.openapi.project.Project
 import io.github.qavlad.adbrandomizer.core.Result
+import io.github.qavlad.adbrandomizer.utils.DeviceConnectionUtils
+import io.github.qavlad.adbrandomizer.utils.PluginLogger
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -26,16 +28,27 @@ object AdbServiceAsync {
 
     fun deviceFlow(project: Project, intervalMs: Long = 2000): Flow<List<DeviceInfo>> = flow {
         while (currentCoroutineContext().isActive) {
-            val devices = AdbService.getConnectedDevices(project).getOrNull() ?: emptyList()
-            val deviceInfos = coroutineScope {
-                devices.map { device ->
-                    async {
-                        val ip = AdbService.getDeviceIpAddress(device).getOrNull()
-                        DeviceInfo(device, ip)
-                    }
-                }.awaitAll()
+            try {
+                val devices = AdbService.getConnectedDevices(project).getOrNull() ?: emptyList()
+                val deviceInfos = coroutineScope {
+                    devices.map { device ->
+                        async {
+                            // Получаем IP только если устройство онлайн и не является Wi-Fi устройством
+                            val ip = if (device.isOnline && !DeviceConnectionUtils.isWifiConnection(device.serialNumber)) {
+                                AdbService.getDeviceIpAddress(device).getOrNull()
+                            } else {
+                                null
+                            }
+                            DeviceInfo(device, ip)
+                        }
+                    }.awaitAll()
+                }
+                emit(deviceInfos)
+            } catch (e: Exception) {
+                // Логируем ошибку, но не прерываем поток
+                PluginLogger.debug("Error in device flow: ${e.message}")
+                emit(emptyList())
             }
-            emit(deviceInfos)
             delay(intervalMs)
         }
     }.flowOn(Dispatchers.IO)

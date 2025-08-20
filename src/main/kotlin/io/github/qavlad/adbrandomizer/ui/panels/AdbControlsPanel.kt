@@ -714,19 +714,31 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                 indicator.isIndeterminate = true
                 indicator.text = "Stopping ADB server..."
                 
+                // Блокируем обновления на время рестарта
+                devicePollingService.setAdbRestarting(true)
+                
                 val success = AdbServerService.killAdbServer()
+                
+                // Даём время ADB серверу корректно завершиться
+                if (success) {
+                    Thread.sleep(1000) // Ждём 1 секунду после убийства сервера
+                }
                 
                 ApplicationManager.getApplication().invokeLater {
                     if (success) {
                         NotificationUtils.showSuccess(project, "ADB server killed successfully")
-                        // Форсируем обновление списка устройств через небольшую задержку
-                        Timer(500) {
+                        // Форсируем обновление списка устройств через увеличенную задержку
+                        Timer(2000) { // Увеличиваем задержку до 2 секунд
+                            // Снимаем блокировку и обновляем устройства
+                            devicePollingService.setAdbRestarting(false)
                             devicePollingService.forceCombinedUpdate()
                         }.apply {
                             isRepeats = false
                             start()
                         }
                     } else {
+                        // В случае ошибки тоже снимаем блокировку
+                        devicePollingService.setAdbRestarting(false)
                         NotificationUtils.showError(project, "Failed to kill ADB server")
                     }
                 }

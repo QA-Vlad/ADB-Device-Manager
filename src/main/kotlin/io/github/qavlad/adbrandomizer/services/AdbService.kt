@@ -37,9 +37,24 @@ object AdbService {
     }
 
     fun getDeviceIpAddress(device: IDevice): Result<String> {
+        // Проверяем, что устройство подключено и готово
+        if (!device.isOnline) {
+            return Result.Error(Exception("Device ${device.name} is not online"))
+        }
+        
         return runDeviceOperation(device.name, "get IP address") {
             val receiver = CollectingOutputReceiver()
-            device.executeShellCommand("ip route", receiver, PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            try {
+                device.executeShellCommand("ip route", receiver, PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            } catch (e: Exception) {
+                // Если произошла ошибка соединения, возвращаем ошибку без логирования warning
+                if (e.message?.contains("Connection reset") == true || 
+                    e.message?.contains("device offline") == true ||
+                    e.message?.contains("device not found") == true) {
+                    throw Exception("Device connection lost during IP retrieval")
+                }
+                throw e
+            }
             
             val output = receiver.output
             PluginLogger.debug("IP route output for device %s: %s", device.name, output)
@@ -83,7 +98,17 @@ object AdbService {
                 throw Exception("No usable IP address found in ip route output")
             }
         }.onError { exception, message ->
-            PluginLogger.warn("IP route method failed for device %s: %s", device.name, message ?: exception.message)
+            // Не логируем warning для ожидаемых ошибок соединения
+            val errorMsg = message ?: exception.message ?: ""
+            if (errorMsg.contains("connection lost", ignoreCase = true) ||
+                errorMsg.contains("connection reset", ignoreCase = true) ||
+                errorMsg.contains("device offline", ignoreCase = true) ||
+                errorMsg.contains("device not found", ignoreCase = true) ||
+                errorMsg.contains("is not online", ignoreCase = true)) {
+                PluginLogger.debug("Device %s disconnected during IP retrieval", device.name)
+            } else {
+                PluginLogger.warn("IP route method failed for device %s: %s", device.name, errorMsg)
+            }
         }.flatMap {
             // Fallback на старый метод
             getDeviceIpAddressFallback(device)
@@ -91,6 +116,11 @@ object AdbService {
     }
     
     private fun getDeviceIpAddressFallback(device: IDevice): Result<String> {
+        // Проверяем состояние устройства перед попыткой получить IP
+        if (!device.isOnline) {
+            return Result.Error(Exception("Device ${device.name} is not online"))
+        }
+        
         return runDeviceOperation(device.name, "get IP address fallback") {
             // Список возможных Wi-Fi интерфейсов для проверки
             val wifiInterfaces = PluginConfig.Network.WIFI_INTERFACES
@@ -104,6 +134,16 @@ object AdbService {
 
             // Fallback: пытаемся получить IP через другие методы
             getIpAddressFallbackOld(device).getOrThrow()
+        }.onError { exception, message ->
+            // Не логируем warning для ожидаемых ошибок соединения
+            val errorMsg = message ?: exception.message ?: ""
+            if (!errorMsg.contains("connection lost", ignoreCase = true) &&
+                !errorMsg.contains("connection reset", ignoreCase = true) &&
+                !errorMsg.contains("device offline", ignoreCase = true) &&
+                !errorMsg.contains("device not found", ignoreCase = true) &&
+                !errorMsg.contains("is not online", ignoreCase = true)) {
+                PluginLogger.warn("IP fallback method failed for device %s: %s", device.name, errorMsg)
+            }
         }
     }
 

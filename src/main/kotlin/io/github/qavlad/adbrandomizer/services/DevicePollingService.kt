@@ -16,10 +16,26 @@ class DevicePollingService(private val project: Project) {
     
     // Сохраняем состояние чекбоксов между обновлениями
     private val selectedDevices = mutableSetOf<String>()
+    
+    // Флаг блокировки обновлений во время рестарта ADB сервера
+    @Volatile
+    private var isAdbRestarting = false
 
     fun stopDevicePolling() {
         pollingJob?.cancel()
         pollingJob = null
+    }
+    
+    /**
+     * Устанавливает флаг блокировки обновлений на время рестарта ADB
+     */
+    fun setAdbRestarting(restarting: Boolean) {
+        isAdbRestarting = restarting
+        if (restarting) {
+            PluginLogger.info("DevicePollingService: ADB restart started, blocking updates")
+        } else {
+            PluginLogger.info("DevicePollingService: ADB restart completed, resuming updates")
+        }
     }
     
     /**
@@ -31,17 +47,21 @@ class DevicePollingService(private val project: Project) {
         
         pollingJob = pollingScope.launch {
             try {
-                // 1. Мгновенно получить первый список устройств
-                val firstDevicesRaw = AdbServiceAsync.getConnectedDevicesAsync(project).getOrNull() ?: emptyList()
-                val firstDevices = firstDevicesRaw.map { DeviceInfo(it, null) }
-                val firstCombined = combineDevices(firstDevices)
-                SwingUtilities.invokeLater { onDevicesUpdated(firstCombined) }
+                // 1. Мгновенно получить первый список устройств (если не рестартит ADB)
+                if (!isAdbRestarting) {
+                    val firstDevicesRaw = AdbServiceAsync.getConnectedDevicesAsync(project).getOrNull() ?: emptyList()
+                    val firstDevices = firstDevicesRaw.map { DeviceInfo(it, null) }
+                    val firstCombined = combineDevices(firstDevices)
+                    SwingUtilities.invokeLater { onDevicesUpdated(firstCombined) }
+                }
                 
                 // 2. Далее — Flow с периодическим обновлением
                 AdbServiceAsync.deviceFlow(project, PluginConfig.UI.DEVICE_POLLING_INTERVAL_MS.toLong())
                     .collect { deviceInfos ->
-                        val combined = combineDevices(deviceInfos)
-                        SwingUtilities.invokeLater { onDevicesUpdated(combined) }
+                        if (!isAdbRestarting) {
+                            val combined = combineDevices(deviceInfos)
+                            SwingUtilities.invokeLater { onDevicesUpdated(combined) }
+                        }
                     }
             } catch (e: CancellationException) {
                 throw e
@@ -55,6 +75,12 @@ class DevicePollingService(private val project: Project) {
      * Форсирует немедленное обновление списка объединённых устройств
      */
     fun forceCombinedUpdate() {
+        // Не обновляем во время рестарта ADB
+        if (isAdbRestarting) {
+            PluginLogger.info("DevicePollingService: Skipping force update - ADB is restarting")
+            return
+        }
+        
         lastCombinedUpdateCallback?.let { callback ->
             pollingScope.launch {
                 try {

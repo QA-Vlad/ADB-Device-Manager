@@ -14,6 +14,10 @@ object AdbServerService {
      */
     fun killAdbServer(): Boolean {
         return try {
+            // Сначала отключаем все устройства
+            disconnectAll()
+            
+            // Затем убиваем сервер
             val command = getKillServerCommand()
             PluginLogger.info("Executing ADB kill-server command: ${command.joinToString(" ")}")
             
@@ -36,6 +40,39 @@ object AdbServerService {
             PluginLogger.error("ADB kill-server command was interrupted", e)
             Thread.currentThread().interrupt()
             false
+        }
+    }
+    
+    /**
+     * Отключает все подключенные устройства
+     */
+    private fun disconnectAll(): Boolean {
+        return try {
+            val adbPath = AdbPathResolver.findAdbExecutable()
+            if (adbPath == null) {
+                PluginLogger.error("ADB executable not found in system")
+                return false
+            }
+            
+            val command = listOf(adbPath, "disconnect")
+            PluginLogger.info("Executing ADB disconnect command: ${command.joinToString(" ")}")
+            
+            val processBuilder = ProcessBuilder(command)
+            val process = processBuilder.start()
+            val exitCode = process.waitFor()
+            
+            val success = exitCode == 0
+            if (success) {
+                PluginLogger.info("Disconnected all devices")
+            } else {
+                PluginLogger.warn("Failed to disconnect devices, exit code: $exitCode")
+            }
+            
+            success
+        } catch (e: Exception) {
+            PluginLogger.warn("Error disconnecting devices: ${e.message}")
+            // Не критичная ошибка, продолжаем
+            true
         }
     }
     
