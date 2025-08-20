@@ -38,6 +38,9 @@ object ScrcpyService {
     
     // Хранилище активных scrcpy процессов по серийному номеру устройства
     private val activeScrcpyProcesses = mutableMapOf<String, Process>()
+    
+    // Результаты запуска для каждого устройства (чтобы избежать конфликтов между параллельными запусками)
+    private val deviceLaunchResults = mutableMapOf<String, LaunchResult>()
     private var lastLaunchResult: LaunchResult = LaunchResult.SUCCESS
 
     // Хранилище недавно запущенных процессов (временное)
@@ -741,6 +744,15 @@ object ScrcpyService {
     
     private fun launchScrcpyInternal(scrcpyPath: String, serialNumber: String, project: Project): Boolean {
         println("ADB_Randomizer: Starting actual scrcpy launch for device: $serialNumber")
+        
+        // ВАЖНО: Сбрасываем состояние для данного устройства перед каждым запуском
+        // чтобы ошибки от предыдущих запусков не влияли на текущий
+        val previousResult = deviceLaunchResults[serialNumber]
+        println("ADB_Randomizer: Resetting launch result for device $serialNumber from $previousResult to SUCCESS")
+        deviceLaunchResults[serialNumber] = LaunchResult.SUCCESS
+        lastLaunchResult = LaunchResult.SUCCESS
+        lastInvalidFlagError = null
+        
         try {
             // Проверяем ещё раз на случай если статус изменился пока ждали в очереди
             if (wasIntentionallyStopped(serialNumber)) {
@@ -768,6 +780,10 @@ object ScrcpyService {
             // Получаем пользовательские флаги
             val customFlags = PluginSettings.instance.scrcpyCustomFlags
             val success = launchScrcpyWithFlags(scrcpyPath, serialNumber, adbPath, customFlags, project)
+            
+            // Получаем результат для конкретного устройства
+            val deviceResult = deviceLaunchResults[serialNumber] ?: lastLaunchResult
+            println("ADB_Randomizer: launchScrcpyWithFlags returned: success=$success, deviceResult=$deviceResult, lastLaunchResult=$lastLaunchResult")
 
             if (!success) {
                 // Проверяем, была ли остановка намеренной (например при отключении Wi-Fi)
@@ -779,8 +795,8 @@ object ScrcpyService {
                     return false
                 }
                 
-                // Проверяем причину неудачи
-                if (lastLaunchResult == LaunchResult.UNAUTHORIZED) {
+                // Проверяем причину неудачи (используем результат для конкретного устройства)
+                if (deviceResult == LaunchResult.UNAUTHORIZED) {
                     PluginLogger.error(LogCategory.SCRCPY, "Device %s is unauthorized", null, serialNumber)
                     ApplicationManager.getApplication().invokeLater {
                         NotificationUtils.showError(
@@ -790,16 +806,16 @@ object ScrcpyService {
                     }
                 } else {
                     // Показываем диалог совместимости только если проблема не в авторизации
+                    println("ADB_Randomizer: About to show scrcpy dialog. deviceResult=$deviceResult, lastInvalidFlagError=$lastInvalidFlagError")
                     println("ADB_Randomizer: Showing scrcpy compatibility dialog for device: $serialNumber")
-                    PluginLogger.error(LogCategory.SCRCPY, "Showing compatibility dialog for device: %s, lastLaunchResult: %s", null, serialNumber, lastLaunchResult.toString())
+                    PluginLogger.error(LogCategory.SCRCPY, "Showing compatibility dialog for device: %s, deviceResult: %s", null, serialNumber, deviceResult.toString())
                     var retry = false
                     val version = checkScrcpyVersion(scrcpyPath)
                     
-                    // Определяем тип проблемы на основе lastLaunchResult
-                    val problemType = when (lastLaunchResult) {
+                    // Определяем тип проблемы на основе результата для конкретного устройства
+                    val problemType = when (deviceResult) {
                         LaunchResult.ANDROID_15_INCOMPATIBLE -> ScrcpyCompatibilityDialog.ProblemType.ANDROID_15_INCOMPATIBLE
                         LaunchResult.INVALID_FLAGS -> ScrcpyCompatibilityDialog.ProblemType.INCOMPATIBLE
-                        LaunchResult.UNAUTHORIZED -> ScrcpyCompatibilityDialog.ProblemType.NOT_WORKING
                         else -> ScrcpyCompatibilityDialog.ProblemType.NOT_WORKING
                     }
                     
@@ -839,6 +855,7 @@ object ScrcpyService {
 
     private fun launchScrcpyWithFlags(scrcpyPath: String, serialNumber: String, adbPath: String, customFlags: String, project: Project): Boolean {
         // Сбрасываем результат перед началом попытки
+        deviceLaunchResults[serialNumber] = LaunchResult.SUCCESS
         lastLaunchResult = LaunchResult.SUCCESS
         lastInvalidFlagError = null
         
@@ -1150,6 +1167,7 @@ object ScrcpyService {
                             // Проверяем на проблему с Android 15
                             if (line.contains("NoSuchMethodException") && 
                                 line.contains("SurfaceControl.createDisplay")) {
+                                deviceLaunchResults[serialNumber] = LaunchResult.ANDROID_15_INCOMPATIBLE
                                 lastLaunchResult = LaunchResult.ANDROID_15_INCOMPATIBLE
                                 PluginLogger.info(LogCategory.SCRCPY, "Detected Android 15 compatibility issue")
                             }
@@ -1159,6 +1177,8 @@ object ScrcpyService {
                                 line.contains("Invalid", ignoreCase = true) ||
                                 line.contains("Could not parse", ignoreCase = true) ||
                                 line.contains("Unrecognized option", ignoreCase = true)) {
+                                println("ADB_Randomizer: Setting launch result to INVALID_FLAGS for device $serialNumber due to line: $line")
+                                deviceLaunchResults[serialNumber] = LaunchResult.INVALID_FLAGS
                                 lastLaunchResult = LaunchResult.INVALID_FLAGS
                                 lastInvalidFlagError = line
                             }
@@ -1193,18 +1213,45 @@ object ScrcpyService {
                 PluginLogger.info(LogCategory.SCRCPY, "Scrcpy process finished early. Exit code: %s", exitCode)
                 // Если обнаружен unauthorized, сохраняем флаг для последующей обработки
                 if (unauthorizedDetected) {
+                    deviceLaunchResults[serialNumber] = LaunchResult.UNAUTHORIZED
                     lastLaunchResult = LaunchResult.UNAUTHORIZED
                 }
                 // Если уже установлен INVALID_FLAGS или ANDROID_15_INCOMPATIBLE, не перезаписываем
-                if (lastLaunchResult != LaunchResult.INVALID_FLAGS && 
-                    lastLaunchResult != LaunchResult.ANDROID_15_INCOMPATIBLE && 
+                val currentResult = deviceLaunchResults[serialNumber] ?: LaunchResult.SUCCESS
+                if (currentResult != LaunchResult.INVALID_FLAGS && 
+                    currentResult != LaunchResult.ANDROID_15_INCOMPATIBLE && 
                     exitCode != 0) {
-                    // Проверяем, возможно это проблема с флагами
-                    lastLaunchResult = if (exitCode == 1 || exitCode == 2) {
-                        LaunchResult.INVALID_FLAGS
+                    
+                    // При exit code 1 или 2 проверяем, не отключилось ли устройство
+                    if (exitCode == 1 || exitCode == 2) {
+                        println("ADB_Randomizer: Checking if device $serialNumber is still connected after exit code $exitCode")
+                        val isDeviceConnected = checkIfDeviceConnected(serialNumber)
+                        if (!isDeviceConnected) {
+                            println("ADB_Randomizer: Device $serialNumber disconnected during early launch (exit code: $exitCode), marking as intentionally stopped")
+                            intentionallyStopped.add(serialNumber)
+                            
+                            // Показываем уведомление о разрыве соединения
+                            ApplicationManager.getApplication().invokeLater {
+                                val connectionType = if (serialNumber.contains(":")) "Wi-Fi" else "USB"
+                                NotificationUtils.showWarning(
+                                    "Device disconnected",
+                                    "Screen mirroring failed: $connectionType connection to device $serialNumber was lost"
+                                )
+                            }
+                            
+                            // Не устанавливаем INVALID_FLAGS, чтобы не показывать диалог
+                            deviceLaunchResults[serialNumber] = LaunchResult.FAILED
+                            lastLaunchResult = LaunchResult.FAILED
+                        } else {
+                            // Устройство подключено, значит проблема с флагами или другая ошибка
+                            println("ADB_Randomizer: Setting launch result to INVALID_FLAGS for device $serialNumber due to exit code: $exitCode (early exit)")
+                            deviceLaunchResults[serialNumber] = LaunchResult.INVALID_FLAGS
+                            lastLaunchResult = LaunchResult.INVALID_FLAGS
+                        }
                     } else {
                         // Устанавливаем общую ошибку запуска
-                        LaunchResult.FAILED
+                        deviceLaunchResults[serialNumber] = LaunchResult.FAILED
+                        lastLaunchResult = LaunchResult.FAILED
                     }
                 }
                 return exitCode == 0
@@ -1216,17 +1263,44 @@ object ScrcpyService {
                 val exitCode = process.exitValue()
                 PluginLogger.info(LogCategory.SCRCPY, "Scrcpy process closed after startup. Exit code: %s", exitCode)
                 if (unauthorizedDetected) {
+                    deviceLaunchResults[serialNumber] = LaunchResult.UNAUTHORIZED
                     lastLaunchResult = LaunchResult.UNAUTHORIZED
                 }
                 // Если уже установлен INVALID_FLAGS или ANDROID_15_INCOMPATIBLE, не перезаписываем
-                if (lastLaunchResult != LaunchResult.INVALID_FLAGS && 
-                    lastLaunchResult != LaunchResult.ANDROID_15_INCOMPATIBLE && 
+                val currentResult = deviceLaunchResults[serialNumber] ?: LaunchResult.SUCCESS
+                if (currentResult != LaunchResult.INVALID_FLAGS && 
+                    currentResult != LaunchResult.ANDROID_15_INCOMPATIBLE && 
                     exitCode != 0) {
-                    lastLaunchResult = if (exitCode == 1 || exitCode == 2) {
-                        LaunchResult.INVALID_FLAGS
+                    
+                    // При exit code 1 или 2 проверяем, не отключилось ли устройство
+                    if (exitCode == 1 || exitCode == 2) {
+                        val isDeviceConnected = checkIfDeviceConnected(serialNumber)
+                        if (!isDeviceConnected) {
+                            println("ADB_Randomizer: Device $serialNumber disconnected after startup (exit code: $exitCode), marking as intentionally stopped")
+                            intentionallyStopped.add(serialNumber)
+                            
+                            // Показываем уведомление о разрыве соединения
+                            ApplicationManager.getApplication().invokeLater {
+                                val connectionType = if (serialNumber.contains(":")) "Wi-Fi" else "USB"
+                                NotificationUtils.showWarning(
+                                    "Device disconnected",
+                                    "Screen mirroring failed: $connectionType connection to device $serialNumber was lost"
+                                )
+                            }
+                            
+                            // Не устанавливаем INVALID_FLAGS, чтобы не показывать диалог
+                            deviceLaunchResults[serialNumber] = LaunchResult.FAILED
+                            lastLaunchResult = LaunchResult.FAILED
+                        } else {
+                            // Устройство подключено, значит проблема с флагами или другая ошибка
+                            println("ADB_Randomizer: Setting launch result to INVALID_FLAGS for device $serialNumber due to exit code: $exitCode (after startup)")
+                            deviceLaunchResults[serialNumber] = LaunchResult.INVALID_FLAGS
+                            lastLaunchResult = LaunchResult.INVALID_FLAGS
+                        }
                     } else {
                         // Устанавливаем общую ошибку запуска
-                        LaunchResult.FAILED
+                        deviceLaunchResults[serialNumber] = LaunchResult.FAILED
+                        lastLaunchResult = LaunchResult.FAILED
                     }
                 }
                 return exitCode == 0
@@ -1236,6 +1310,7 @@ object ScrcpyService {
             println("ADB_Randomizer: Scrcpy started successfully for device: $serialNumber")
             
             // Сбрасываем флаг при успешном запуске
+            deviceLaunchResults[serialNumber] = LaunchResult.SUCCESS
             lastLaunchResult = LaunchResult.SUCCESS
             
             // Сохраняем процесс для возможности управления им
@@ -1253,6 +1328,8 @@ object ScrcpyService {
                     
                     // Удаляем процесс из активных после завершения
                     activeScrcpyProcesses.remove(serialNumber)
+                    // Очищаем результат запуска для этого устройства
+                    deviceLaunchResults.remove(serialNumber)
                     println("ADB_Randomizer: Removed scrcpy process for device $serialNumber from active map")
                     println("ADB_Randomizer: Remaining active scrcpy processes: ${activeScrcpyProcesses.keys.joinToString(", ")}")
                     
@@ -1262,6 +1339,22 @@ object ScrcpyService {
                         intentionallyStopped.remove(serialNumber)
                     } else if (exitCode != 0) {
                         println("ADB_Randomizer: Scrcpy exited with error for device $serialNumber, exit code: $exitCode")
+                        
+                        // Проверяем, подключено ли еще устройство
+                        if (!checkIfDeviceConnected(serialNumber)) {
+                            println("ADB_Randomizer: Device $serialNumber disconnected, showing notification instead of error dialog")
+                            // Помечаем как намеренно остановленное, чтобы не показывать диалог
+                            intentionallyStopped.add(serialNumber)
+                            
+                            // Показываем уведомление о разрыве соединения
+                            ApplicationManager.getApplication().invokeLater {
+                                val connectionType = if (serialNumber.contains(":")) "Wi-Fi" else "USB"
+                                NotificationUtils.showWarning(
+                                    "Device disconnected",
+                                    "Screen mirroring stopped: $connectionType connection to device $serialNumber was lost"
+                                )
+                            }
+                        }
                     }
                     
                     outputReader.join(1000)
@@ -1299,6 +1392,31 @@ object ScrcpyService {
         } catch (e: Exception) {
             PluginLogger.info(LogCategory.SCRCPY, "Could not get scrcpy version: %s", e.message)
             ""
+        }
+    }
+    
+    private fun checkIfDeviceConnected(serialNumber: String): Boolean {
+        return try {
+            // Получаем список всех подключенных устройств
+            when (val connectedDevices = AdbService.getAllDeviceSerials()) {
+                is Result.Success -> {
+                    val deviceList = connectedDevices.data
+                    val isConnected = deviceList.contains(serialNumber)
+                    
+                    println("ADB_Randomizer: Device $serialNumber connection check - connected: $isConnected")
+                    println("ADB_Randomizer: Currently connected devices: ${deviceList.joinToString(", ")}")
+                    
+                    isConnected
+                }
+                is Result.Error -> {
+                    // Если не удалось получить список устройств, считаем что устройство отключено
+                    println("ADB_Randomizer: Failed to get device list, assuming device $serialNumber is disconnected: ${connectedDevices.message}")
+                    false
+                }
+            }
+        } catch (e: Exception) {
+            println("ADB_Randomizer: Error checking device connection for $serialNumber: ${e.message}")
+            false
         }
     }
 }
