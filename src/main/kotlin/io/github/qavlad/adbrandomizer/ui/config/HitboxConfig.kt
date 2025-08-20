@@ -95,6 +95,7 @@ object HitboxConfigManager {
                 val hitbox = when (hitboxType) {
                     HitboxType.CONNECT -> cfg.previouslyConnected.connect
                     HitboxType.DELETE -> cfg.previouslyConnected.delete
+                    HitboxType.GROUP_INDICATOR -> cfg.previouslyConnected.groupIndicator ?: return null
                     else -> return null
                 }
                 
@@ -125,7 +126,8 @@ object HitboxConfigManager {
             ),
             previouslyConnected = PreviouslyConnectedHitboxes(
                 connect = HitboxRect(xFromRight = 48, yCenter = true, width = 65, height = 22), // 5 (padding) + 35 (delete) + 8 (gap) = 48
-                delete = HitboxRect(xFromRight = 5, yCenter = true, width = 35, height = 25) // 5 (padding) = 5
+                delete = HitboxRect(xFromRight = 5, yCenter = true, width = 35, height = 25), // 5 (padding) = 5
+                groupIndicator = HitboxRect(xOffset = 280, yOffset = 20, width = 35, height = 18)
             )
         )
     }
@@ -154,6 +156,7 @@ enum class HitboxType {
     WIFI_DISCONNECT,
     CONNECT,
     DELETE,
+    GROUP_INDICATOR,
     DEFAULT_SIZE_TOOLTIP,
     DEFAULT_DPI_TOOLTIP,
     USB_ICON_TOOLTIP,
@@ -195,7 +198,8 @@ data class ConnectedDevicesHitboxes(
  */
 data class PreviouslyConnectedHitboxes(
     val connect: HitboxRect,
-    val delete: HitboxRect
+    val delete: HitboxRect,
+    val groupIndicator: HitboxRect? = null
 )
 
 /**

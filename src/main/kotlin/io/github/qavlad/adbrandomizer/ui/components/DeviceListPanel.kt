@@ -34,6 +34,10 @@ sealed class DeviceListItem {
     data class Device(val info: DeviceInfo, val isConnected: Boolean) : DeviceListItem()
     data class CombinedDevice(val info: CombinedDeviceInfo) : DeviceListItem()
     data class WifiHistoryDevice(val entry: WifiDeviceHistoryService.WifiDeviceHistoryEntry) : DeviceListItem()
+    data class GroupedWifiHistoryDevice(
+        val entry: WifiDeviceHistoryService.WifiDeviceHistoryEntry,
+        val otherIPs: List<String>
+    ) : DeviceListItem()
 }
 
 class DeviceListPanel(
@@ -100,6 +104,28 @@ class DeviceListPanel(
                     when {
                         connectButtonRect.contains(cellRelativePoint) -> "Connect to this device via Wi-Fi"
                         deleteButtonRect.contains(cellRelativePoint) -> "Remove this device from Wi-Fi connection history"
+                        else -> null
+                    }
+                }
+                is DeviceListItem.GroupedWifiHistoryDevice -> {
+                    // Преобразуем координаты мыши относительно ячейки  
+                    val cellRelativePoint = Point(event.point.x - bounds.x, event.point.y - bounds.y)
+                    val cellBoundsAtOrigin = Rectangle(0, 0, bounds.width, bounds.height)
+                    val deleteButtonRect = getDeleteButtonRect(cellBoundsAtOrigin)
+                    val connectButtonRect = getConnectButtonRect(cellBoundsAtOrigin)
+                    
+                    // Проверяем, находится ли курсор над индикатором +N
+                    val indicatorRect = getGroupIndicatorRect(cellBoundsAtOrigin)
+                    
+                    when {
+                        connectButtonRect.contains(cellRelativePoint) -> "Connect to this device via Wi-Fi"
+                        deleteButtonRect.contains(cellRelativePoint) -> "Remove all IP addresses for this device from history"
+                        indicatorRect.contains(cellRelativePoint) -> {
+                            // Показываем все IP адреса в tooltip
+                            "<html>Other IP addresses for this device:<br>" +
+                            item.otherIPs.joinToString("<br>") { "• $it" } +
+                            "</html>"
+                        }
                         else -> null
                     }
                 }
@@ -379,6 +405,131 @@ class DeviceListPanel(
                         
                         panel
                     }
+                    is DeviceListItem.GroupedWifiHistoryDevice -> {
+                        // Создаем панель с BorderLayout для фиксированной позиции кнопок
+                        val panel = if (PluginSettings.instance.debugHitboxes) {
+                            createDebugGroupedWifiHistoryPanel(list)
+                        } else {
+                            JPanel(BorderLayout()).apply {
+                                border = BorderFactory.createEmptyBorder(2, 5, 2, 5)
+                                background = list.background
+                                isOpaque = true
+                            }
+                        }
+                        
+                        // Создаём панель с информацией без иконки Wi-Fi
+                        val infoPanel = JPanel(BorderLayout()).apply {
+                            isOpaque = false
+                            
+                            val textPanel = JPanel().apply {
+                                layout = BoxLayout(this, BoxLayout.Y_AXIS)
+                                isOpaque = false
+                            }
+                            
+                            // Первая строка - название и серийник (как у обычного WifiHistoryDevice)
+                            val firstLine = JLabel("${value.entry.displayName} (${value.entry.realSerialNumber ?: value.entry.logicalSerialNumber})").apply {
+                                font = font.deriveFont(font.style or Font.BOLD)
+                                alignmentX = LEFT_ALIGNMENT
+                            }
+                            textPanel.add(firstLine)
+                            
+                            // Вторая строка - Android версия, IP и индикатор группировки в одной панели
+                            val secondLinePanel = JPanel().apply {
+                                layout = BoxLayout(this, BoxLayout.X_AXIS)
+                                isOpaque = false
+                                alignmentX = LEFT_ALIGNMENT
+                                
+                                add(JLabel("Android ${value.entry.androidVersion} (API ${value.entry.apiLevel}) • ${value.entry.ipAddress}:${value.entry.port}").apply {
+                                    font = JBFont.small()
+                                    foreground = JBColor.GRAY
+                                })
+                                
+                                add(Box.createHorizontalStrut(5))
+                                
+                                // Добавляем индикатор количества других IP
+                                add(JLabel("+${value.otherIPs.size}").apply {
+                                    font = JBFont.small()
+                                    foreground = JBColor.GRAY
+                                    border = BorderFactory.createCompoundBorder(
+                                        BorderFactory.createLineBorder(JBColor.GRAY, 1, true),
+                                        BorderFactory.createEmptyBorder(1, 4, 1, 4)
+                                    )
+                                    toolTipText = "<html>${value.otherIPs.joinToString("<br>")}</html>"
+                                })
+                                
+                                add(Box.createHorizontalGlue())
+                            }
+                            secondLinePanel.alignmentX = LEFT_ALIGNMENT
+                            textPanel.add(secondLinePanel)
+                            
+                            add(textPanel, BorderLayout.CENTER)
+                        }
+                        
+                        // Создаём панель для кнопок справа с GridBagLayout для точного позиционирования
+                        val buttonsPanel = JPanel(GridBagLayout()).apply {
+                            isOpaque = false
+                            val gbc = GridBagConstraints().apply {
+                                gridy = 0
+                                insets = JBUI.emptyInsets()
+                                anchor = GridBagConstraints.CENTER
+                            }
+                            
+                            // Проверяем, находится ли курсор над кнопками
+                            val isDeleteHovered = getHoverState().hoveredDeviceIndex == index && 
+                                          getHoverState().hoveredButtonType == "DELETE"
+                            val isConnectHovered = getHoverState().hoveredDeviceIndex == index && 
+                                          getHoverState().hoveredButtonType == "WIFI_HISTORY_CONNECT"
+                            
+                            // Connect button (со стилем как у обычного WifiHistoryDevice)
+                            val connectButton = JButton("Connect").apply {
+                                isFocusable = false
+                                font = JBFont.small()
+                                preferredSize = Dimension(65, 22)
+                                isContentAreaFilled = true
+                                cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+                                toolTipText = "Connect to this device via Wi-Fi"
+                                
+                                // Зелёная рамка с эффектом при наведении
+                                border = if (isConnectHovered) {
+                                    BorderFactory.createCompoundBorder(
+                                        BorderFactory.createLineBorder(JBColor(Color(100, 200, 100), Color(120, 220, 120)), 2),
+                                        BorderFactory.createEmptyBorder(0, 0, 0, 0)
+                                    )
+                                } else {
+                                    BorderFactory.createLineBorder(JBColor(Color(50, 150, 50), Color(60, 180, 60)), 1)
+                                }
+                                
+                                if (isConnectHovered) {
+                                    background = JBColor(Color(230, 255, 230), Color(30, 80, 30))
+                                }
+                            }
+                            gbc.gridx = 0
+                            gbc.insets = JBUI.insetsRight(8) // 8px gap справа
+                            add(connectButton, gbc)
+                            
+                            // Delete button
+                            val deleteButton = JButton(DELETE_ICON).apply {
+                                isFocusable = false
+                                isContentAreaFilled = isDeleteHovered
+                                isBorderPainted = isDeleteHovered
+                                isRolloverEnabled = true
+                                toolTipText = "Remove all IP addresses for this device"
+                                preferredSize = Dimension(DELETE_BUTTON_WIDTH, DELETE_BUTTON_HEIGHT)
+                                if (isDeleteHovered) {
+                                    background = JBUI.CurrentTheme.ActionButton.hoverBackground()
+                                }
+                            }
+                            gbc.gridx = 1
+                            gbc.insets = JBUI.emptyInsets()
+                            add(deleteButton, gbc)
+                        }
+                        
+                        // Добавляем элементы в BorderLayout
+                        panel.add(infoPanel, BorderLayout.CENTER)
+                        panel.add(buttonsPanel, BorderLayout.EAST)
+                        
+                        panel
+                    }
                 }
             }
         }
@@ -439,9 +590,7 @@ class DeviceListPanel(
         
         val index = deviceList.locationToIndex(e.point)
         if (index == -1 || index >= deviceListModel.size()) return
-        val item = deviceListModel.getElementAt(index)
-        
-        when (item) {
+        when (val item = deviceListModel.getElementAt(index)) {
             is DeviceListItem.Device -> {
                 val bounds = deviceList.getCellBounds(index, index)
                 val deviceInfo = item.info
@@ -496,6 +645,49 @@ class DeviceListPanel(
                 val newButtonType = when {
                     connectButtonRect.contains(cellRelativePoint) -> "WIFI_HISTORY_CONNECT"
                     deleteButtonRect.contains(cellRelativePoint) -> "DELETE"
+                    else -> null
+                }
+                
+                if (newButtonType != null) {
+                    deviceList.cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+                    val newHoverState = HoverState(hoveredDeviceIndex = index, hoveredButtonType = newButtonType)
+                    if (getHoverState() != newHoverState) {
+                        setHoverState(newHoverState)
+                        deviceList.repaint()
+                    }
+                } else {
+                    deviceList.cursor = Cursor.getDefaultCursor()
+                    if (getHoverState().hoveredDeviceIndex == index) {
+                        setHoverState(HoverState.noHover())
+                        deviceList.repaint()
+                    }
+                }
+            }
+            is DeviceListItem.GroupedWifiHistoryDevice -> {
+                val bounds = deviceList.getCellBounds(index, index)
+                // Проверяем, что мышь действительно внутри границ ячейки
+                if (!bounds.contains(e.point)) {
+                    // Если мышь не в ячейке, сбрасываем состояние
+                    deviceList.cursor = Cursor.getDefaultCursor()
+                    if (getHoverState().hoveredDeviceIndex == index) {
+                        setHoverState(HoverState.noHover())
+                        deviceList.repaint()
+                    }
+                    return
+                }
+                
+                // Преобразуем координаты мыши относительно ячейки
+                val cellRelativePoint = Point(e.point.x - bounds.x, e.point.y - bounds.y)
+                // Для хитбоксов используем координаты относительно начала координат (0,0)
+                val cellBoundsAtOrigin = Rectangle(0, 0, bounds.width, bounds.height)
+                val deleteButtonRect = getDeleteButtonRect(cellBoundsAtOrigin)
+                val connectButtonRect = getConnectButtonRect(cellBoundsAtOrigin)
+                val indicatorRect = getGroupIndicatorRect(cellBoundsAtOrigin)
+                
+                val newButtonType = when {
+                    connectButtonRect.contains(cellRelativePoint) -> "WIFI_HISTORY_CONNECT"
+                    deleteButtonRect.contains(cellRelativePoint) -> "DELETE"
+                    indicatorRect.contains(cellRelativePoint) -> "GROUP_INDICATOR"
                     else -> null
                 }
                 
@@ -660,6 +852,28 @@ class DeviceListPanel(
                     }
                 }
             }
+            is DeviceListItem.GroupedWifiHistoryDevice -> {
+                val bounds = deviceList.getCellBounds(index, index)
+                // Преобразуем координаты мыши относительно ячейки
+                val cellRelativePoint = Point(e.point.x - bounds.x, e.point.y - bounds.y)
+                // Для хитбоксов используем координаты относительно начала координат (0,0)
+                val cellBoundsAtOrigin = Rectangle(0, 0, bounds.width, bounds.height)
+                val deleteButtonRect = getDeleteButtonRect(cellBoundsAtOrigin)
+                val connectButtonRect = getConnectButtonRect(cellBoundsAtOrigin)
+                
+                when {
+                    connectButtonRect.contains(cellRelativePoint) -> {
+                        PluginLogger.debug(LogCategory.UI_EVENTS, "Connect button clicked for grouped device!")
+                        // Подключаемся к устройству по Wi-Fi используя последний IP
+                        handleConnectHistoryDevice(item.entry)
+                    }
+                    deleteButtonRect.contains(cellRelativePoint) -> {
+                        PluginLogger.debug(LogCategory.UI_EVENTS, "Delete button clicked for grouped device!")
+                        // Удаляем все IP адреса для этого устройства
+                        handleDeleteGroupedHistoryDevice(item)
+                    }
+                }
+            }
             else -> return
         }
         deviceList.clearSelection()
@@ -689,20 +903,51 @@ class DeviceListPanel(
             }
             
             // 2. История Wi-Fi устройств (которые сейчас не подключены)
-            val historyDevices = WifiDeviceHistoryService.getHistory()
-                .filter { historyEntry ->
-                    // Показываем только те, которые сейчас не подключены по Wi-Fi
-                    devices.none { combined ->
-                        // Проверяем только Wi-Fi подключения
-                        combined.hasWifiConnection && 
-                        combined.wifiDevice?.ipAddress == historyEntry.ipAddress
-                    }
-                }
+            val history = WifiDeviceHistoryService.getHistory()
             
-            if (historyDevices.isNotEmpty()) {
+            // Получаем серийные номера подключенных устройств
+            val connectedSerials = devices.flatMap { device ->
+                val serials = mutableListOf<String>()
+                // Добавляем базовый серийник
+                serials.add(device.baseSerialNumber)
+                // Добавляем серийники от USB и Wi-Fi устройств
+                device.usbDevice?.let {
+                    serials.add(it.logicalSerialNumber)
+                    it.displaySerialNumber?.let { serial -> serials.add(serial) }
+                }
+                device.wifiDevice?.let {
+                    serials.add(it.logicalSerialNumber)
+                    it.displaySerialNumber?.let { serial -> serials.add(serial) }
+                }
+                serials
+            }.toSet()
+            
+            // Фильтруем историю - исключаем устройства, которые сейчас подключены
+            val notConnectedHistory = history.filter { historyEntry ->
+                val realSerial = historyEntry.realSerialNumber ?: historyEntry.logicalSerialNumber
+                realSerial !in connectedSerials
+            }
+            
+            // Группируем по реальному серийному номеру
+            val groupedBySerial = notConnectedHistory.groupBy { 
+                it.realSerialNumber ?: it.logicalSerialNumber 
+            }
+            
+            if (groupedBySerial.isNotEmpty()) {
                 deviceListModel.addElement(DeviceListItem.SectionHeader("Previously connected devices"))
-                historyDevices.forEach { entry ->
-                    deviceListModel.addElement(DeviceListItem.WifiHistoryDevice(entry))
+                
+                // Для каждой группы устройств с одинаковым серийником
+                groupedBySerial.forEach { (_, entries) ->
+                    // Берем последнюю запись (с самым свежим IP)
+                    val latestEntry = entries.last()
+                    
+                    // Если есть еще записи с другими IP, создаем модифицированную запись
+                    if (entries.size > 1) {
+                        val otherIPs = entries.dropLast(1).map { "${it.ipAddress}:${it.port}" }
+                        deviceListModel.addElement(DeviceListItem.GroupedWifiHistoryDevice(latestEntry, otherIPs))
+                    } else {
+                        deviceListModel.addElement(DeviceListItem.WifiHistoryDevice(latestEntry))
+                    }
                 }
             }
             
@@ -723,12 +968,41 @@ class DeviceListPanel(
             }
             // 2. Ранее подключённые по Wi-Fi
             val history = WifiDeviceHistoryService.getHistory()
-            val connectedSerials = devices.map { it.logicalSerialNumber }.toSet()
-            val notConnectedHistory = history.filter { it.logicalSerialNumber !in connectedSerials }
-            if (notConnectedHistory.isNotEmpty()) {
+            
+            // Получаем серийные номера подключенных устройств
+            val connectedSerials = devices.flatMap { device ->
+                listOfNotNull(
+                    device.logicalSerialNumber,
+                    device.displaySerialNumber
+                )
+            }.toSet()
+            
+            // Фильтруем историю - исключаем устройства, которые сейчас подключены
+            val notConnectedHistory = history.filter { historyEntry ->
+                val realSerial = historyEntry.realSerialNumber ?: historyEntry.logicalSerialNumber
+                realSerial !in connectedSerials
+            }
+            
+            // Группируем по реальному серийному номеру
+            val groupedBySerial = notConnectedHistory.groupBy { 
+                it.realSerialNumber ?: it.logicalSerialNumber 
+            }
+            
+            if (groupedBySerial.isNotEmpty()) {
                 deviceListModel.addElement(DeviceListItem.SectionHeader("Previously connected devices"))
-                notConnectedHistory.forEach {
-                    deviceListModel.addElement(DeviceListItem.WifiHistoryDevice(it))
+                
+                // Для каждой группы устройств с одинаковым серийником
+                groupedBySerial.forEach { (_, entries) ->
+                    // Берем последнюю запись (с самым свежим IP)
+                    val latestEntry = entries.last()
+                    
+                    // Если есть еще записи с другими IP, создаем модифицированную запись
+                    if (entries.size > 1) {
+                        val otherIPs = entries.dropLast(1).map { "${it.ipAddress}:${it.port}" }
+                        deviceListModel.addElement(DeviceListItem.GroupedWifiHistoryDevice(latestEntry, otherIPs))
+                    } else {
+                        deviceListModel.addElement(DeviceListItem.WifiHistoryDevice(latestEntry))
+                    }
                 }
             }
         }
@@ -834,8 +1108,31 @@ class DeviceListPanel(
     }
     
     /**
-     * Вычисляет прямоугольник кнопки подключения
+     * Вычисляет прямоугольник индикатора группировки +N
      */
+    private fun getGroupIndicatorRect(bounds: Rectangle): Rectangle {
+        // Пытаемся загрузить позицию из JSON конфигурации
+        return try {
+            HitboxConfigManager.getHitboxRect(
+                DeviceType.PREVIOUSLY_CONNECTED,
+                HitboxType.GROUP_INDICATOR,
+                bounds
+            ) ?: calculateFallbackGroupIndicatorRect(bounds)
+        } catch (e: Exception) {
+            PluginLogger.error(LogCategory.UI_EVENTS, "Failed to load group indicator rect from config", e)
+            calculateFallbackGroupIndicatorRect(bounds)
+        }
+    }
+    
+    private fun calculateFallbackGroupIndicatorRect(bounds: Rectangle): Rectangle {
+        // Резервные значения если конфигурация не загружена
+        val x = bounds.x + 280  // После IP:порт во второй строке
+        val y = bounds.y + 20   // Вторая строка  
+        val width = 35          // Ширина плашки с отступами
+        val height = 18         // Высота плашки
+        return Rectangle(x, y, width, height)
+    }
+    
     private fun getConnectButtonRect(bounds: Rectangle): Rectangle {
         // Пытаемся загрузить позицию из JSON конфигурации
         return try {
@@ -924,6 +1221,42 @@ class DeviceListPanel(
         }
     }
     
+    private fun handleDeleteGroupedHistoryDevice(item: DeviceListItem.GroupedWifiHistoryDevice) {
+        val skipConfirm = properties.getBoolean(CONFIRM_DELETE_KEY, false)
+        var doDelete = true
+        if (!skipConfirm) {
+            val checkbox = JCheckBox("Don't ask again")
+            val message = "Delete all ${item.otherIPs.size + 1} IP addresses for this device from history?"
+            val result = JOptionPane.showConfirmDialog(
+                this,
+                arrayOf(message, checkbox),
+                "Confirm deletion",
+                JOptionPane.YES_NO_OPTION,
+                JOptionPane.WARNING_MESSAGE
+            )
+            if (checkbox.isSelected) {
+                properties.setValue(CONFIRM_DELETE_KEY, true)
+            }
+            doDelete = result == JOptionPane.YES_OPTION
+        }
+        if (doDelete) {
+            val currentHistory = WifiDeviceHistoryService.getHistory()
+            val serialToRemove = item.entry.realSerialNumber ?: item.entry.logicalSerialNumber
+            
+            // Удаляем все записи с этим серийным номером
+            val newHistory = currentHistory.filterNot { historyEntry ->
+                val historySerial = historyEntry.realSerialNumber ?: historyEntry.logicalSerialNumber
+                historySerial == serialToRemove
+            }
+            
+            WifiDeviceHistoryService.saveHistory(newHistory)
+            // Обновляем список
+            updateDeviceList(getAllDevices())
+            // Форсируем обновление списка устройств
+            onForceUpdate()
+        }
+    }
+    
     /**
      * Создает панель с визуальной отладкой для Previously connected devices
      */
@@ -972,6 +1305,68 @@ class DeviceListPanel(
                     
                     g2d.drawString("CN", connectRect.x + 2, connectRect.y - 2)
                     g2d.drawString("DEL", deleteRect.x + 2, deleteRect.y - 2)
+                    
+                    g2d.dispose()
+                }
+            }
+        }
+    }
+    
+    /**
+     * Создает панель с визуальной отладкой для группированных Previously connected devices
+     */
+    private fun createDebugGroupedWifiHistoryPanel(
+        list: JList<out DeviceListItem>
+    ): JPanel {
+        return object : JPanel(BorderLayout()) {
+            init {
+                border = BorderFactory.createEmptyBorder(2, 5, 2, 5)
+                background = list.background
+                isOpaque = true
+            }
+            
+            override fun paint(g: Graphics) {
+                super.paint(g)
+                
+                // Рисуем хитбоксы поверх содержимого
+                if (PluginSettings.instance.debugHitboxes) {
+                    val g2d = g.create() as Graphics2D
+                    g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+                    
+                    // Используем те же методы, что и для обработки кликов
+                    val cellBoundsAtOrigin = Rectangle(0, 0, width, height)
+                    val connectRect = getConnectButtonRect(cellBoundsAtOrigin)
+                    val deleteRect = getDeleteButtonRect(cellBoundsAtOrigin)
+                    val indicatorRect = getGroupIndicatorRect(cellBoundsAtOrigin)
+                    
+                    // Настройка прозрачности
+                    g2d.composite = AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.3f)
+                    
+                    // Рисуем кнопку Connect - оранжевая
+                    g2d.color = JBColor.ORANGE
+                    g2d.fillRect(connectRect.x, connectRect.y, connectRect.width, connectRect.height)
+                    g2d.color = Color.ORANGE.darker()
+                    g2d.drawRect(connectRect.x, connectRect.y, connectRect.width, connectRect.height)
+                    
+                    // Рисуем кнопку Delete - красная
+                    g2d.color = JBColor.RED
+                    g2d.fillRect(deleteRect.x, deleteRect.y, deleteRect.width, deleteRect.height)
+                    g2d.color = Color.RED.darker()
+                    g2d.drawRect(deleteRect.x, deleteRect.y, deleteRect.width, deleteRect.height)
+                    
+                    // Рисуем индикатор +N - синий
+                    g2d.color = JBColor.BLUE
+                    g2d.fillRect(indicatorRect.x, indicatorRect.y, indicatorRect.width, indicatorRect.height)
+                    g2d.color = Color.BLUE.darker()
+                    g2d.drawRect(indicatorRect.x, indicatorRect.y, indicatorRect.width, indicatorRect.height)
+                    
+                    // Подписи
+                    g2d.composite = AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.8f)
+                    g2d.color = JBColor.BLACK
+                    g2d.font = Font("Arial", Font.PLAIN, 9)
+                    g2d.drawString("C", connectRect.x + 25, connectRect.y + 14)
+                    g2d.drawString("D", deleteRect.x + 9, deleteRect.y + 14)
+                    g2d.drawString("+N", indicatorRect.x + 10, indicatorRect.y + 12)
                     
                     g2d.dispose()
                 }
