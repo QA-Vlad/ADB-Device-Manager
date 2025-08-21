@@ -21,6 +21,18 @@ class DevicePollingService(private val project: Project) {
     // Сохраняем состояние чекбоксов между обновлениями
     private val selectedDevices = mutableSetOf<String>()
     
+    init {
+        // Загружаем сохранённые состояния чекбоксов при старте
+        val savedSelections = DeviceSelectionService.getSelections()
+        selectedDevices.addAll(
+            savedSelections
+                .filter { it.value }
+                .map { it.key }
+        )
+        PluginLogger.warn(LogCategory.DEVICE_POLLING, 
+            "Loaded %d saved device selections", savedSelections.size)
+    }
+    
     // Флаг блокировки обновлений во время рестарта ADB сервера
     @Volatile
     private var isAdbRestarting = false
@@ -95,10 +107,10 @@ class DevicePollingService(private val project: Project) {
                 AdbServiceAsync.deviceFlow(project, PluginConfig.UI.DEVICE_POLLING_INTERVAL_MS.toLong())
                     .collect { deviceInfos ->
                         if (!isAdbRestarting) {
-                            PluginLogger.warn(LogCategory.DEVICE_POLLING, "Periodic flow received %d devices", deviceInfos.size)
+                            PluginLogger.debug(LogCategory.DEVICE_POLLING, "Periodic flow received %d devices", deviceInfos.size)
                             val combined = combineDevices(deviceInfos)
                             SwingUtilities.invokeLater { 
-                                PluginLogger.warn(LogCategory.DEVICE_POLLING, "Periodic UI update with %d combined devices", combined.size)
+                                PluginLogger.debug(LogCategory.DEVICE_POLLING, "Periodic UI update with %d combined devices", combined.size)
                                 onDevicesUpdated(combined) 
                             }
                         } else {
@@ -160,7 +172,7 @@ class DevicePollingService(private val project: Project) {
         // Проверяем активные scrcpy процессы и поддерживаем TCP/IP
         maintainTcpIpForActiveScrcpy(devices)
         val maintainTime = System.currentTimeMillis() - startTime
-        PluginLogger.warn(LogCategory.DEVICE_POLLING, "maintainTcpIpForActiveScrcpy took %d ms", maintainTime)
+        PluginLogger.debug(LogCategory.DEVICE_POLLING, "maintainTcpIpForActiveScrcpy took %d ms", maintainTime)
         
         val combinedMap = mutableMapOf<String, CombinedDeviceInfo>()
         
@@ -219,7 +231,7 @@ class DevicePollingService(private val project: Project) {
                         
                         // Используем кэш если он свежий (меньше 60 секунд)
                         if (cached != null && (now - cached.timestamp) < 60000) {
-                            PluginLogger.warn(LogCategory.DEVICE_POLLING, 
+                            PluginLogger.debug(LogCategory.DEVICE_POLLING, 
                                 "Using cached params for device: %s (age: %d ms)", 
                                 device.displayName, now - cached.timestamp)
                             return@async Triple(device, 
@@ -337,11 +349,11 @@ class DevicePollingService(private val project: Project) {
             }
         }
         val paramsTime = System.currentTimeMillis() - paramsStartTime
-        PluginLogger.warn(LogCategory.DEVICE_POLLING, "Getting device params took %d ms for %d devices", paramsTime, devices.size)
+        PluginLogger.debug(LogCategory.DEVICE_POLLING, "Getting device params took %d ms for %d devices", paramsTime, devices.size)
         
         // Если это был первый запуск, запускаем асинхронное обновление текущих параметров
         if (paramsTime < 100 && devices.isNotEmpty()) { // Быстрое время означает что мы использовали только историю
-            PluginLogger.warn(LogCategory.DEVICE_POLLING, "Scheduling async update of current params after 2s delay")
+            PluginLogger.debug(LogCategory.DEVICE_POLLING, "Scheduling async update of current params after 2s delay")
             pollingScope.launch {
                 delay(2000) // Ждем 2 секунды чтобы UI успел отрисоваться
                 updateCurrentParamsAsync(devices)
@@ -376,7 +388,7 @@ class DevicePollingService(private val project: Project) {
                         // Дефолтные значения обновляем только если они не были установлены
                         defaultResolution = existing.defaultResolution ?: defaultResolution,
                         defaultDpi = existing.defaultDpi ?: defaultDpi,
-                        isSelectedForAdb = selectedDevices.contains(baseSerial) // Восстанавливаем состояние чекбокса
+                        isSelectedForAdb = DeviceSelectionService.isSelected(baseSerial) // Восстанавливаем состояние чекбокса
                     )
                 } else {
                     existing.copy(
@@ -389,7 +401,7 @@ class DevicePollingService(private val project: Project) {
                         // Дефолтные значения обновляем только если они не были установлены
                         defaultResolution = existing.defaultResolution ?: defaultResolution,
                         defaultDpi = existing.defaultDpi ?: defaultDpi,
-                        isSelectedForAdb = selectedDevices.contains(baseSerial) // Восстанавливаем состояние чекбокса
+                        isSelectedForAdb = DeviceSelectionService.isSelected(baseSerial) // Восстанавливаем состояние чекбокса
                     )
                 }
                 combinedMap[baseSerial] = updated
@@ -407,7 +419,7 @@ class DevicePollingService(private val project: Project) {
                     currentDpi = currentDpi,
                     defaultResolution = defaultResolution,
                     defaultDpi = defaultDpi,
-                    isSelectedForAdb = selectedDevices.contains(baseSerial) // Восстанавливаем состояние чекбокса
+                    isSelectedForAdb = DeviceSelectionService.isSelected(baseSerial) // Восстанавливаем состояние чекбокса
                 )
                 combinedMap[baseSerial] = combined
             }
@@ -435,7 +447,7 @@ class DevicePollingService(private val project: Project) {
      * Асинхронно обновляет текущие параметры устройств в фоне
      */
     private suspend fun updateCurrentParamsAsync(devices: List<DeviceInfo>) {
-        PluginLogger.warn(LogCategory.DEVICE_POLLING, "Starting async update of current params for %d devices", devices.size)
+        PluginLogger.debug(LogCategory.DEVICE_POLLING, "Starting async update of current params for %d devices", devices.size)
         
         coroutineScope {
             // Запускаем все запросы параллельно
@@ -471,7 +483,7 @@ class DevicePollingService(private val project: Project) {
                                     defaultDpi = cached?.defaultDpi
                                 )
                                 
-                                PluginLogger.warn(LogCategory.DEVICE_POLLING, 
+                                PluginLogger.debug(LogCategory.DEVICE_POLLING, 
                                     "Updated current params for %s: %s, DPI: %s",
                                     device.displayName,
                                     currentResolution?.toString() ?: "unchanged",
@@ -614,11 +626,16 @@ class DevicePollingService(private val project: Project) {
      * Обновляет состояние выбора устройства для ADB команд
      */
     fun updateDeviceSelection(baseSerialNumber: String, isSelected: Boolean) {
+        // Обновляем локальный кэш
         if (isSelected) {
             selectedDevices.add(baseSerialNumber)
         } else {
             selectedDevices.remove(baseSerialNumber)
         }
+        // Сохраняем состояние в постоянное хранилище
+        DeviceSelectionService.setSelection(baseSerialNumber, isSelected)
+        PluginLogger.warn(LogCategory.DEVICE_POLLING, 
+            "Updated device selection: %s = %s", baseSerialNumber, isSelected)
     }
 
     /**

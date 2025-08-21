@@ -35,11 +35,11 @@ object AdbServiceAsync {
         
         while (currentCoroutineContext().isActive) {
             try {
-                PluginLogger.warn(LogCategory.DEVICE_POLLING, "deviceFlow: Getting connected devices...")
+                PluginLogger.debug(LogCategory.DEVICE_POLLING, "deviceFlow: Getting connected devices...")
                 val startTime = System.currentTimeMillis()
                 val devices = AdbService.getConnectedDevices(project).getOrNull() ?: emptyList()
                 val getDevicesTime = System.currentTimeMillis() - startTime
-                PluginLogger.warn(LogCategory.DEVICE_POLLING, "deviceFlow: Got %d devices in %d ms", devices.size, getDevicesTime)
+                PluginLogger.debug(LogCategory.DEVICE_POLLING, "deviceFlow: Got %d devices in %d ms", devices.size, getDevicesTime)
                 
                 val ipStartTime = System.currentTimeMillis()
                 val deviceInfos = coroutineScope {
@@ -49,7 +49,7 @@ object AdbServiceAsync {
                             val ip = if (device.isOnline && !DeviceConnectionUtils.isWifiConnection(device.serialNumber)) {
                                 val ipResult = AdbService.getDeviceIpAddress(device)
                                 if (ipResult is Result.Error) {
-                                    PluginLogger.warn(LogCategory.DEVICE_POLLING, "Failed to get IP for %s", device.serialNumber)
+                                    PluginLogger.debug(LogCategory.DEVICE_POLLING, "Failed to get IP for %s", device.serialNumber)
                                 }
                                 ipResult.getOrNull()
                             } else {
@@ -60,7 +60,7 @@ object AdbServiceAsync {
                     }.awaitAll()
                 }
                 val ipTime = System.currentTimeMillis() - ipStartTime
-                PluginLogger.warn(LogCategory.DEVICE_POLLING, "deviceFlow: Got IPs for devices in %d ms", ipTime)
+                PluginLogger.debug(LogCategory.DEVICE_POLLING, "deviceFlow: Got IPs for devices in %d ms", ipTime)
                 
                 emit(deviceInfos)
                 
