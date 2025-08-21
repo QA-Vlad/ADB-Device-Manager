@@ -559,8 +559,12 @@ class DeviceListPanel(
             }
         })
         deviceList.addMouseListener(object : MouseAdapter() {
-            override fun mouseClicked(e: MouseEvent) {
-                handleMouseClick(e)
+            override fun mouseReleased(e: MouseEvent) {
+                // Используем mouseReleased вместо mouseClicked, чтобы клик срабатывал
+                // даже если мышь немного сместилась между нажатием и отпусканием
+                if (SwingUtilities.isLeftMouseButton(e)) {
+                    handleMouseClick(e)
+                }
             }
             override fun mouseExited(event: MouseEvent?) {
                 currentMousePosition = null
