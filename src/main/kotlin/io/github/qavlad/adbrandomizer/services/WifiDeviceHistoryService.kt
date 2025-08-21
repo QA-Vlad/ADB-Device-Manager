@@ -6,7 +6,6 @@ import com.intellij.ide.util.PropertiesComponent
 
 object WifiDeviceHistoryService {
     private const val HISTORY_KEY = "adbrandomizer.wifiDeviceHistory"
-    private val properties = PropertiesComponent.getInstance()
     private val gson = Gson()
 
     data class WifiDeviceHistoryEntry(
@@ -16,10 +15,14 @@ object WifiDeviceHistoryService {
         val androidVersion: String,
         val apiLevel: String,
         val logicalSerialNumber: String,
-        val realSerialNumber: String? = null  // Настоящий серийный номер устройства
+        val realSerialNumber: String? = null,  // Настоящий серийный номер устройства
+        val defaultResolutionWidth: Int? = null,  // Дефолтная ширина экрана
+        val defaultResolutionHeight: Int? = null, // Дефолтная высота экрана
+        val defaultDpi: Int? = null  // Дефолтный DPI
     )
 
     fun getHistory(): List<WifiDeviceHistoryEntry> {
+        val properties = PropertiesComponent.getInstance()
         val json = properties.getValue(HISTORY_KEY)
         if (json.isNullOrBlank()) return emptyList()
         return try {
@@ -45,8 +48,20 @@ object WifiDeviceHistoryService {
 
     fun saveHistory(list: List<WifiDeviceHistoryEntry>) {
         val json = gson.toJson(list)
+        val properties = PropertiesComponent.getInstance()
         properties.setValue(HISTORY_KEY, json)
     }
-
+    
+    fun getDeviceBySerialNumber(serialNumber: String): WifiDeviceHistoryEntry? {
+        return getHistory().find { 
+            it.realSerialNumber == serialNumber || it.logicalSerialNumber == serialNumber
+        }
+    }
+    
+    fun getDeviceByIpAddress(ipAddress: String): WifiDeviceHistoryEntry? {
+        return getHistory().find { 
+            it.ipAddress == ipAddress
+        }
+    }
 
 } 

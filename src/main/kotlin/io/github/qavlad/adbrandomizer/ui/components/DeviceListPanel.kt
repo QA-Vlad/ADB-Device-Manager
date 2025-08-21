@@ -544,7 +544,8 @@ class DeviceListPanel(
                 // Не делаем ничего - блокируем выделение
             }
         }
-        deviceList.emptyText.text = "No devices found"
+        deviceList.emptyText.text = "Scanning for devices..."
+        deviceList.emptyText.appendLine("Make sure ADB is running and devices are connected")
         val scrollPane = JBScrollPane(deviceList)
         scrollPane.border = BorderFactory.createEmptyBorder()
         add(headerPanel, BorderLayout.NORTH)
@@ -783,7 +784,11 @@ class DeviceListPanel(
                     }
                     buttonRects.editSizeRect?.contains(e.point) == true -> {
                         // Показываем диалог редактирования размера
-                        val currentSizeText = item.info.currentResolution?.let { "${it.first}x${it.second}" } ?: "N/A"
+                        val currentSizeText = when {
+                            item.info.isLoadingCurrentParams -> "Loading..."
+                            item.info.currentResolution != null -> "${item.info.currentResolution.first}x${item.info.currentResolution.second}"
+                            else -> "N/A"
+                        }
                         val newSize = JOptionPane.showInputDialog(
                             deviceList,
                             "Enter new size (e.g., 1080x1920):",
@@ -800,7 +805,11 @@ class DeviceListPanel(
                     }
                     buttonRects.editDpiRect?.contains(e.point) == true -> {
                         // Показываем диалог редактирования DPI
-                        val currentDpiText = item.info.currentDpi?.toString() ?: "N/A"
+                        val currentDpiText = when {
+                            item.info.isLoadingCurrentParams -> "Loading..."
+                            item.info.currentDpi != null -> item.info.currentDpi.toString()
+                            else -> "N/A"
+                        }
                         val newDpi = JOptionPane.showInputDialog(
                             deviceList,
                             "Enter new DPI (e.g., 320):",
@@ -896,6 +905,14 @@ class DeviceListPanel(
     fun updateCombinedDeviceList(devices: List<CombinedDeviceInfo>) {
         SwingUtilities.invokeLater {
             deviceListModel.clear()
+            
+            // Обновляем текст для пустого списка
+            if (devices.isEmpty() && deviceListModel.isEmpty()) {
+                deviceList.emptyText.clear()
+                deviceList.emptyText.text = "No devices found"
+                deviceList.emptyText.appendLine("Connect a device via USB or enable Wi-Fi debugging")
+            }
+            
             // 1. Подключённые устройства
             if (devices.isNotEmpty()) {
                 deviceListModel.addElement(DeviceListItem.SectionHeader("Connected devices"))

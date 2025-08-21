@@ -43,7 +43,7 @@ class CombinedDeviceRenderer(
     private fun loadUsbOffIcon(): Icon {
         
         // Пробуем разные способы загрузки
-        val attempts = listOf<() -> Icon?>(
+        val attempts = listOf(
             { IconLoader.getIcon("/icons/usb_off.svg", javaClass) },
             { IconLoader.findIcon("/icons/usb_off.svg", javaClass.classLoader) },
             { IconLoader.getIcon("/icons/usb_off.svg", CombinedDeviceRenderer::class.java) },
@@ -202,21 +202,6 @@ class CombinedDeviceRenderer(
             isOpaque = false
             maximumSize = Dimension(Int.MAX_VALUE, 20)
             alignmentX = Component.LEFT_ALIGNMENT
-        }
-        
-        // Логирование для отладки (ограничиваем спам)
-        if (device.hasWifiConnection && !device.hasUsbConnection) {
-            // Логируем только для Finepower или если имя содержит серийный номер
-            if (device.displayName.contains("Finepower", ignoreCase = true) || 
-                device.displayName.contains("TMMPH", ignoreCase = true) ||
-                device.displayName.contains(device.baseSerialNumber)) {
-                println("ADB_Randomizer: [Renderer] Wi-Fi device rendering:")
-                println("ADB_Randomizer: [Renderer]   - displayName: ${device.displayName}")
-                println("ADB_Randomizer: [Renderer]   - baseSerialNumber: ${device.baseSerialNumber}")
-                println("ADB_Randomizer: [Renderer]   - ipAddress: ${device.ipAddress}")
-                println("ADB_Randomizer: [Renderer]   - hasUsbConnection: ${device.hasUsbConnection}")
-                println("ADB_Randomizer: [Renderer]   - hasWifiConnection: ${device.hasWifiConnection}")
-            }
         }
         
         val nameText = "${device.displayName} (${device.baseSerialNumber})"
@@ -379,9 +364,9 @@ class CombinedDeviceRenderer(
             
             toolTipText = when {
                 icon == usbIcon && isActive -> "Connected via USB"
-                (icon === usbOffIcon || (icon == usbIcon && !isActive)) -> "USB not connected"
+                (icon == usbOffIcon || (icon == usbIcon && !isActive)) -> "USB not connected"
                 icon == wifiIcon && isActive -> "Connected via Wi-Fi"
-                (icon === wifiOffIcon || (icon == wifiIcon && !isActive)) -> "Wi-Fi not connected"
+                (icon == wifiOffIcon || (icon == wifiIcon && !isActive)) -> "Wi-Fi not connected"
                 else -> null
             }
         }
@@ -399,7 +384,7 @@ class CombinedDeviceRenderer(
         // Кнопка Mirror
         if (showMirror) {
             panel.add(Box.createHorizontalStrut(4))
-            val connectionType = if (icon == usbIcon || icon === usbOffIcon) "USB" else "Wi-Fi"
+            val connectionType = if (icon == usbIcon || icon == usbOffIcon) "USB" else "Wi-Fi"
             val tooltip = if (isMirrorEnabled) {
                 "Mirror screen via $connectionType"
             } else {
@@ -638,7 +623,11 @@ class CombinedDeviceRenderer(
         // Отступ между лейблом "Current Size:" и полем ввода  
         panel.add(Box.createHorizontalStrut(5))
         
-        val currentSizeText = device.currentResolution?.let { "${it.first}x${it.second}" } ?: "N/A"
+        val currentSizeText = when {
+            device.isLoadingCurrentParams -> "Loading..."
+            device.currentResolution != null -> "${device.currentResolution.first}x${device.currentResolution.second}"
+            else -> "N/A"
+        }
         val sizeField = JTextField(currentSizeText).apply {
             font = JBFont.small()
             preferredSize = Dimension(80, 20)
@@ -688,7 +677,11 @@ class CombinedDeviceRenderer(
         // Отступ между лейблом "Current DPI:" и полем ввода (компенсирует разницу в длине с "Default DPI:")
         panel.add(Box.createHorizontalStrut(6))
         
-        val currentDpiText = device.currentDpi?.toString() ?: "N/A"
+        val currentDpiText = when {
+            device.isLoadingCurrentParams -> "Loading..."
+            device.currentDpi != null -> device.currentDpi.toString()
+            else -> "N/A"
+        }
         val dpiField = JTextField(currentDpiText).apply {
             font = JBFont.small()
             preferredSize = Dimension(50, 20)

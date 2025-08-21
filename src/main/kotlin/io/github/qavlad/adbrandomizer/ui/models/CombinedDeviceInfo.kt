@@ -46,4 +46,12 @@ data class CombinedDeviceInfo(
     val hasModifiedDpi: Boolean
         get() = currentDpi != null && defaultDpi != null && 
                 currentDpi != defaultDpi
+    
+    /**
+     * Проверяет, загружаются ли текущие параметры
+     * (есть дефолтные, но нет текущих)
+     */
+    val isLoadingCurrentParams: Boolean
+        get() = (defaultResolution != null || defaultDpi != null) && 
+                currentResolution == null && currentDpi == null
 }

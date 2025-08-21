@@ -36,6 +36,7 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
 
     init {
         setupUI()
+        PluginLogger.info("AdbControlsPanel initialized, starting device polling...")
         startDevicePolling()
     }
 
@@ -85,7 +86,9 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
     }
 
     private fun startDevicePolling() {
+        PluginLogger.info("Starting device polling from AdbControlsPanel")
         devicePollingService.startCombinedDevicePolling { combinedDevices ->
+            PluginLogger.info("Device polling callback received %d combined devices", combinedDevices.size)
             deviceListPanel.updateCombinedDeviceList(combinedDevices)
         }
     }
