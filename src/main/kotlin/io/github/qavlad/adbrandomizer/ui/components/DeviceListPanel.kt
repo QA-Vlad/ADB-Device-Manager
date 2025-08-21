@@ -8,6 +8,7 @@ import com.intellij.util.ui.JBFont
 import com.intellij.ui.JBColor
 import io.github.qavlad.adbrandomizer.services.DeviceInfo
 import io.github.qavlad.adbrandomizer.services.WifiDeviceHistoryService
+import io.github.qavlad.adbrandomizer.services.AdbService
 import io.github.qavlad.adbrandomizer.ui.models.CombinedDeviceInfo
 import io.github.qavlad.adbrandomizer.ui.renderers.DeviceListRenderer
 import io.github.qavlad.adbrandomizer.ui.config.HitboxConfigManager
@@ -53,7 +54,8 @@ class DeviceListPanel(
     private val onResetDpi: (CombinedDeviceInfo) -> Unit = {},
     private val onApplyChanges: (CombinedDeviceInfo, String?, String?) -> Unit = { _, _, _ -> },
     private val onAdbCheckboxChanged: (CombinedDeviceInfo, Boolean) -> Unit = { _, _ -> },
-    private val onWifiConnectByIp: (String, Int) -> Unit = { _, _ -> } // Callback для подключения по IP
+    private val onWifiConnectByIp: (String, Int) -> Unit = { _, _ -> }, // Callback для подключения по IP
+    private val onParallelWifiConnect: ((List<Pair<String, Int>>) -> Unit)? = null // Callback для параллельного подключения
 ) : JPanel(BorderLayout()) {
 
     companion object {
@@ -864,8 +866,8 @@ class DeviceListPanel(
                 when {
                     connectButtonRect.contains(cellRelativePoint) -> {
                         PluginLogger.debug(LogCategory.UI_EVENTS, "Connect button clicked for grouped device!")
-                        // Подключаемся к устройству по Wi-Fi используя последний IP
-                        handleConnectHistoryDevice(item.entry)
+                        // Подключаемся ко всем IP адресам параллельно
+                        handleConnectGroupedHistoryDevice(item)
                     }
                     deleteButtonRect.contains(cellRelativePoint) -> {
                         PluginLogger.debug(LogCategory.UI_EVENTS, "Delete button clicked for grouped device!")
@@ -1254,6 +1256,113 @@ class DeviceListPanel(
             updateDeviceList(getAllDevices())
             // Форсируем обновление списка устройств
             onForceUpdate()
+        }
+    }
+    
+    /**
+     * Подключается ко всем IP адресам группированного устройства параллельно
+     */
+    private fun handleConnectGroupedHistoryDevice(item: DeviceListItem.GroupedWifiHistoryDevice) {
+        // Собираем все IP адреса устройства
+        val allIPs = mutableListOf<Pair<String, Int>>()
+        
+        // Добавляем основной IP
+        allIPs.add(item.entry.ipAddress to item.entry.port)
+        
+        // Добавляем остальные IP из группы otherIPs
+        item.otherIPs.forEach { ipWithPort ->
+            // Парсим IP:порт
+            val parts = ipWithPort.split(":")
+            if (parts.size == 2) {
+                val ip = parts[0]
+                val port = parts[1].toIntOrNull() ?: 5555
+                allIPs.add(ip to port)
+            }
+        }
+        
+        val deviceName = item.entry.displayName
+        val deviceSerial = item.entry.realSerialNumber ?: item.entry.logicalSerialNumber
+        
+        PluginLogger.debug("Attempting parallel connection to ${allIPs.size} IP addresses for device $deviceName ($deviceSerial)")
+        PluginLogger.debug("IP addresses to try: ${allIPs.joinToString(", ") { "${it.first}:${it.second}" }}")
+        
+        // Проверяем, подключено ли устройство по USB сейчас
+        val currentDevices = getAllDevices()
+        val usbDevice = currentDevices.find { device ->
+            !DeviceConnectionUtils.isWifiConnection(device.logicalSerialNumber) &&
+            (device.displaySerialNumber == deviceSerial || device.logicalSerialNumber == deviceSerial)
+        }
+        
+        if (usbDevice != null && usbDevice.device != null) {
+            // Устройство подключено по USB - сначала включаем TCP/IP
+            PluginLogger.debug("Device is connected via USB, enabling TCP/IP mode first")
+            Thread {
+                try {
+                    val tcpResult = AdbService.enableTcpIp(usbDevice.device, 5555)
+                    if (tcpResult.isSuccess()) {
+                        PluginLogger.debug("TCP/IP mode enabled successfully, waiting 2 seconds before connecting...")
+                        Thread.sleep(2000) // Даем время устройству переключиться
+                        
+                        // Теперь пробуем подключиться
+                        if (onParallelWifiConnect != null) {
+                            onParallelWifiConnect.invoke(allIPs)
+                        } else {
+                            allIPs.forEach { (ip, port) ->
+                                PluginLogger.debug("Initiating connection to $ip:$port for device $deviceName")
+                                onWifiConnectByIp(ip, port)
+                            }
+                        }
+                    } else {
+                        PluginLogger.debug("Failed to enable TCP/IP mode: ${tcpResult.getErrorMessage()}")
+                        // Все равно пробуем подключиться - может уже включено
+                        if (onParallelWifiConnect != null) {
+                            onParallelWifiConnect.invoke(allIPs)
+                        } else {
+                            allIPs.forEach { (ip, port) ->
+                                onWifiConnectByIp(ip, port)
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    PluginLogger.debug("Error enabling TCP/IP mode: ${e.message}")
+                }
+            }.start()
+        } else {
+            // Устройство не подключено по USB
+            PluginLogger.info("Device $deviceName not connected via USB, attempting direct Wi-Fi connection")
+            
+            // Пробуем подключиться напрямую - возможно TCP/IP уже включен
+            // Используем специальный callback для параллельного подключения
+            if (onParallelWifiConnect != null) {
+                onParallelWifiConnect.invoke(allIPs)
+            } else {
+                // Иначе используем обычный callback для каждого IP
+                allIPs.forEach { (ip, port) ->
+                    PluginLogger.debug("Attempting connection to $ip:$port for device $deviceName")
+                    onWifiConnectByIp(ip, port)
+                }
+            }
+            
+            // Показываем подсказку пользователю через 3 секунды если подключение не удалось
+            Thread {
+                Thread.sleep(3000)
+                SwingUtilities.invokeLater {
+                    // Проверяем, подключилось ли устройство
+                    val currentDevices = getAllDevices()
+                    val wifiConnected = currentDevices.any { device ->
+                        DeviceConnectionUtils.isWifiConnection(device.logicalSerialNumber) &&
+                        allIPs.any { (ip, port) -> device.logicalSerialNumber.contains("$ip:$port") }
+                    }
+                    
+                    if (!wifiConnected) {
+                        // Просто логируем, без диалога
+                        PluginLogger.info("""
+                            Failed to connect to device $deviceName via Wi-Fi.
+                            Device needs to be connected via USB first to enable TCP/IP mode.
+                        """.trimIndent())
+                    }
+                }
+            }.start()
         }
     }
     

@@ -5,10 +5,12 @@ package io.github.qavlad.adbrandomizer.services.integration.scrcpy
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.progress.ProcessCanceledException
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.project.ProjectManager
 import io.github.qavlad.adbrandomizer.config.PluginConfig
 import io.github.qavlad.adbrandomizer.core.Result
 import io.github.qavlad.adbrandomizer.services.AdbService
 import io.github.qavlad.adbrandomizer.services.PresetStorageService
+import io.github.qavlad.adbrandomizer.services.WifiDeviceHistoryService
 import io.github.qavlad.adbrandomizer.services.integration.scrcpy.ui.ScrcpyCompatibilityDialog
 import io.github.qavlad.adbrandomizer.settings.PluginSettings
 import io.github.qavlad.adbrandomizer.utils.AdbPathResolver
@@ -47,6 +49,9 @@ object ScrcpyService {
     private val recentlyStartedProcesses = mutableMapOf<Long, String>() // PID -> serialNumber
     // Устройства, для которых scrcpy был намеренно остановлен (например, при отключении Wi-Fi)
     private val intentionallyStopped = mutableSetOf<String>()
+
+    // Сохраняем последний project для автоматического перезапуска
+    private var lastProject: Project? = null
     
     // Очередь запуска scrcpy процессов и флаг активного запуска
     private val launchQueue = mutableListOf<() -> Unit>()
@@ -699,6 +704,9 @@ object ScrcpyService {
             println("  at ${it.className}.${it.methodName}(${it.fileName}:${it.lineNumber})")
         }
         
+        // Сохраняем project для возможного перезапуска
+        lastProject = project
+        
         // Проверяем базовые условия сразу
         if (wasIntentionallyStopped(serialNumber)) {
             println("ADB_Randomizer: Device $serialNumber was intentionally stopped, not launching scrcpy")
@@ -859,6 +867,11 @@ object ScrcpyService {
         lastLaunchResult = LaunchResult.SUCCESS
         lastInvalidFlagError = null
         
+        // Проверяем, не является ли это Wi-Fi устройством с дублирующимся USB подключением
+        if (serialNumber.contains(":")) {
+            checkAndHandleDuplicateUsbConnection(serialNumber, adbPath)
+        }
+        
         PluginLogger.info(LogCategory.SCRCPY, "Launching scrcpy with custom flags: %s", customFlags)
         
         // Создаём команду с базовыми параметрами
@@ -977,6 +990,77 @@ object ScrcpyService {
      * Фильтрует явно невалидные флаги на основе базовых правил
      * Использует ту же логику группировки, что и UI
      */
+    /**
+     * Проверяет и обрабатывает ситуацию с дублирующимся USB подключением для Wi-Fi устройства
+     */
+    private fun checkAndHandleDuplicateUsbConnection(wifiSerial: String, adbPath: String) {
+        try {
+            // Получаем IP адрес из serial (формат: IP:PORT)
+
+            PluginLogger.info(LogCategory.SCRCPY, "Checking for duplicate USB connection for Wi-Fi device: %s", wifiSerial)
+            
+            // Получаем список всех подключенных устройств
+            val devicesCmd = ProcessBuilder(adbPath, "devices", "-l").start()
+            val output = devicesCmd.inputStream.bufferedReader().use { it.readText() }
+            
+            // Ищем USB устройства с тем же именем модели
+            val lines = output.lines()
+            var wifiDeviceModel: String? = null
+            var wifiDeviceProduct: String? = null
+            var usbDuplicateSerial: String? = null
+            
+            for (line in lines) {
+                if (line.contains(wifiSerial)) {
+                    // Извлекаем модель устройства
+                    val modelPattern = Regex("model:(\\S+)")
+                    val modelMatch = modelPattern.find(line)
+                    if (modelMatch != null) {
+                        wifiDeviceModel = modelMatch.groupValues[1]
+                        PluginLogger.info(LogCategory.SCRCPY, "Wi-Fi device model: %s", wifiDeviceModel)
+                    }
+                    // Также извлекаем product для более точного сравнения
+                    val productPattern = Regex("product:(\\S+)")
+                    val productMatch = productPattern.find(line)
+                    if (productMatch != null) {
+                        wifiDeviceProduct = productMatch.groupValues[1]
+                        PluginLogger.info(LogCategory.SCRCPY, "Wi-Fi device product: %s", wifiDeviceProduct)
+                    }
+                }
+            }
+            
+            if (wifiDeviceModel != null) {
+                // Ищем USB устройство с такой же моделью
+                for (line in lines) {
+                    if (!line.contains(":") && line.contains("device")) {
+                        // Проверяем модель и product
+                        val hasMatchingModel = line.contains("model:$wifiDeviceModel")
+                        val hasMatchingProduct = wifiDeviceProduct?.let { line.contains("product:$it") } ?: false
+                        
+                        if (hasMatchingModel || hasMatchingProduct) {
+                            // Это USB устройство с той же моделью/продуктом
+                            val serial = line.substringBefore(" ").trim()
+                            if (serial.isNotEmpty() && serial != wifiSerial && !serial.contains(":")) {
+                                usbDuplicateSerial = serial
+                                PluginLogger.warn(LogCategory.SCRCPY, "Found duplicate USB device: %s for Wi-Fi device: %s", usbDuplicateSerial, wifiSerial)
+                                break
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Если найдено дублирующееся USB устройство, просто логируем предупреждение
+            // Не отключаем устройство, так как это может повлиять на Wi-Fi соединение
+            if (usbDuplicateSerial != null) {
+                PluginLogger.warn(LogCategory.SCRCPY, "Found duplicate USB device: %s for Wi-Fi device: %s. This may cause issues on older Android versions.", usbDuplicateSerial, wifiSerial)
+                // Scrcpy сам разберётся с выбором правильного устройства
+            }
+            
+        } catch (e: Exception) {
+            PluginLogger.warn(LogCategory.SCRCPY, "Error checking for duplicate connections: %s", e.message)
+        }
+    }
+    
     private fun filterObviouslyInvalidFlags(flags: List<String>): List<String> {
         val validFlags = mutableListOf<String>()
         val invalidGroups = mutableListOf<String>()
@@ -1227,16 +1311,31 @@ object ScrcpyService {
                         println("ADB_Randomizer: Checking if device $serialNumber is still connected after exit code $exitCode")
                         val isDeviceConnected = checkIfDeviceConnected(serialNumber)
                         if (!isDeviceConnected) {
-                            println("ADB_Randomizer: Device $serialNumber disconnected during early launch (exit code: $exitCode), marking as intentionally stopped")
-                            intentionallyStopped.add(serialNumber)
+                            println("ADB_Randomizer: Device $serialNumber disconnected during early launch (exit code: $exitCode)")
                             
-                            // Показываем уведомление о разрыве соединения
-                            ApplicationManager.getApplication().invokeLater {
-                                val connectionType = if (serialNumber.contains(":")) "Wi-Fi" else "USB"
-                                NotificationUtils.showWarning(
-                                    "Device disconnected",
-                                    "Screen mirroring failed: $connectionType connection to device $serialNumber was lost"
-                                )
+                            // Для Wi-Fi устройств пытаемся переподключить и перезапустить
+                            if (serialNumber.contains(":")) {
+                                // Проверяем, не подключено ли это же устройство по USB
+                                if (checkIfSameDeviceConnectedViaUsb(serialNumber)) {
+                                    println("ADB_Randomizer: Wi-Fi device disconnected but same device is connected via USB, not attempting reconnect")
+                                    intentionallyStopped.add(serialNumber)
+                                    // Не показываем диалог об ошибке
+                                    deviceLaunchResults[serialNumber] = LaunchResult.FAILED
+                                    lastLaunchResult = LaunchResult.FAILED
+                                } else {
+                                    println("ADB_Randomizer: Will try to reconnect and restart scrcpy for Wi-Fi device $serialNumber")
+                                    tryReconnectAndRestartScrcpy(serialNumber)
+                                    // НЕ помечаем как намеренно остановленное сразу, чтобы дать шанс на переподключение
+                                }
+                            } else {
+                                intentionallyStopped.add(serialNumber)
+                                // Показываем уведомление о разрыве соединения
+                                ApplicationManager.getApplication().invokeLater {
+                                    NotificationUtils.showWarning(
+                                        "Device disconnected",
+                                        "Screen mirroring failed: USB connection to device $serialNumber was lost"
+                                    )
+                                }
                             }
                             
                             // Не устанавливаем INVALID_FLAGS, чтобы не показывать диалог
@@ -1342,17 +1441,38 @@ object ScrcpyService {
                         
                         // Проверяем, подключено ли еще устройство
                         if (!checkIfDeviceConnected(serialNumber)) {
-                            println("ADB_Randomizer: Device $serialNumber disconnected, showing notification instead of error dialog")
-                            // Помечаем как намеренно остановленное, чтобы не показывать диалог
-                            intentionallyStopped.add(serialNumber)
+                            println("ADB_Randomizer: Device $serialNumber disconnected completely")
                             
-                            // Показываем уведомление о разрыве соединения
-                            ApplicationManager.getApplication().invokeLater {
-                                val connectionType = if (serialNumber.contains(":")) "Wi-Fi" else "USB"
-                                NotificationUtils.showWarning(
-                                    "Device disconnected",
-                                    "Screen mirroring stopped: $connectionType connection to device $serialNumber was lost"
-                                )
+                            // Для Wi-Fi устройств пытаемся переподключить и перезапустить
+                            if (serialNumber.contains(":")) {
+                                // Проверяем, не подключено ли это же устройство по USB
+                                if (checkIfSameDeviceConnectedViaUsb(serialNumber)) {
+                                    println("ADB_Randomizer: Wi-Fi device disconnected but same device is connected via USB, not attempting reconnect")
+                                    intentionallyStopped.add(serialNumber)
+                                    ApplicationManager.getApplication().invokeLater {
+                                        val project = lastProject
+                                        if (project != null) {
+                                            NotificationUtils.showInfo(
+                                                project,
+                                                "Screen mirroring stopped: Device is now connected via USB"
+                                            )
+                                        }
+                                    }
+                                } else {
+                                    println("ADB_Randomizer: Wi-Fi device disconnected, attempting reconnect and restart")
+                                    tryReconnectAndRestartScrcpy(serialNumber)
+                                }
+                            } else {
+                                // Помечаем как намеренно остановленное, чтобы не показывать диалог
+                                intentionallyStopped.add(serialNumber)
+                                
+                                // Показываем уведомление о разрыве соединения
+                                ApplicationManager.getApplication().invokeLater {
+                                    NotificationUtils.showWarning(
+                                        "Device disconnected",
+                                        "Screen mirroring stopped: USB connection to device $serialNumber was lost"
+                                    )
+                                }
                             }
                         }
                     }
@@ -1395,6 +1515,173 @@ object ScrcpyService {
         }
     }
     
+    /**
+     * Получает имя устройства из истории Wi-Fi подключений
+     */
+    private fun getDeviceNameFromHistory(wifiSerial: String): String? {
+        try {
+            val history = WifiDeviceHistoryService.getHistory()
+            val ipAddress = wifiSerial.substringBefore(":")
+            val historyEntry = history.find { 
+                it.ipAddress == ipAddress || it.logicalSerialNumber == wifiSerial
+            }
+            return historyEntry?.displayName
+        } catch (_: Exception) {
+            return null
+        }
+    }
+    
+    /**
+     * Пытается переподключить Wi-Fi устройство и перезапустить scrcpy
+     */
+    private fun tryReconnectAndRestartScrcpy(wifiSerial: String) {
+        println("ADB_Randomizer: Trying to reconnect and restart scrcpy for device: $wifiSerial")
+        
+        // Получаем имя устройства из истории или используем IP
+        val deviceName = getDeviceNameFromHistory(wifiSerial) ?: wifiSerial
+        
+        // Сразу показываем уведомление о начале процесса переподключения
+        ApplicationManager.getApplication().invokeLater {
+            val project = lastProject
+            if (project != null) {
+                NotificationUtils.showInfo(
+                    project,
+                    "Scrcpy will be restarted for $deviceName. Please wait..."
+                )
+            }
+        }
+        
+        Thread {
+            try {
+                // Извлекаем IP и порт
+                val ipAddress = wifiSerial.substringBefore(":")
+                val port = wifiSerial.substringAfter(":").toIntOrNull() ?: 5555
+                
+                PluginLogger.info(LogCategory.SCRCPY, 
+                    "[AUTO-RECONNECT] Attempting to reconnect device %s", 
+                    wifiSerial)
+                
+                // Делаем несколько попыток переподключения
+                var connected = false
+                var attempts = 0
+                val maxAttempts = 5
+                
+                while (!connected && attempts < maxAttempts) {
+                    attempts++
+                    
+                    // Ждём перед попыткой (первая попытка - сразу, потом увеличиваем задержку)
+                    if (attempts > 1) {
+                        Thread.sleep((attempts * 1000).toLong())
+                    }
+                    
+                    PluginLogger.info(LogCategory.SCRCPY, 
+                        "[AUTO-RECONNECT] Reconnection attempt %d/%d for %s", 
+                        attempts, maxAttempts, wifiSerial)
+                    
+                    val project = lastProject
+                    if (project != null) {
+                        val connectResult = AdbService.connectWifi(project, ipAddress, port)
+                        if (connectResult.isSuccess()) {
+                            connected = true
+                            PluginLogger.info(LogCategory.SCRCPY, 
+                                "[AUTO-RECONNECT] Successfully reconnected %s on attempt %d", 
+                                wifiSerial, attempts)
+                            
+                            // Ждём стабилизации соединения
+                            Thread.sleep(2000)
+                            
+                            // Перезапускаем scrcpy
+                            val scrcpyPath = findScrcpyExecutable()
+                            if (scrcpyPath != null) {
+                                // УБИРАЕМ из намеренно остановленных перед перезапуском
+                                intentionallyStopped.remove(wifiSerial)
+                                
+                                val success = launchScrcpy(scrcpyPath, wifiSerial, project)
+                                if (success) {
+                                    PluginLogger.info(LogCategory.SCRCPY, 
+                                        "[AUTO-RECONNECT] Successfully restarted scrcpy for %s", 
+                                        wifiSerial)
+                                    // Уведомление уже показано в начале
+                                } else {
+                                    PluginLogger.warn(LogCategory.SCRCPY, 
+                                        "[AUTO-RECONNECT] Failed to restart scrcpy for %s", 
+                                        wifiSerial)
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                if (!connected) {
+                    PluginLogger.warn(LogCategory.SCRCPY, 
+                        "[AUTO-RECONNECT] Failed to reconnect %s after %d attempts", 
+                        wifiSerial, maxAttempts)
+                    
+                    // Помечаем как намеренно остановленное, чтобы не показывать диалог ошибки
+                    intentionallyStopped.add(wifiSerial)
+                    
+                    ApplicationManager.getApplication().invokeLater {
+                        NotificationUtils.showWarning(
+                            "Failed to reconnect device",
+                            "Failed to restore connection to $deviceName after USB disconnection"
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                PluginLogger.warn(LogCategory.SCRCPY, 
+                    "[AUTO-RECONNECT] Error reconnecting device: %s", 
+                    e.message)
+                intentionallyStopped.add(wifiSerial)
+            }
+        }.start()
+    }
+    
+    /**
+     * Проверяет, подключено ли то же самое устройство по USB
+     */
+    private fun checkIfSameDeviceConnectedViaUsb(wifiSerial: String): Boolean {
+        try {
+            // Получаем IP из Wi-Fi serial
+            val ipAddress = wifiSerial.substringBefore(":")
+            
+            // Получаем информацию о Wi-Fi устройстве из истории
+            val wifiDeviceHistory = WifiDeviceHistoryService.getHistory()
+            val wifiDevice = wifiDeviceHistory.find { 
+                it.ipAddress == ipAddress || it.logicalSerialNumber == wifiSerial 
+            }
+            
+            if (wifiDevice == null) {
+                println("ADB_Randomizer: No history found for Wi-Fi device $wifiSerial")
+                return false
+            }
+            
+            // Получаем реальный серийный номер устройства
+            val realSerial = wifiDevice.realSerialNumber
+            if (realSerial.isNullOrBlank()) {
+                println("ADB_Randomizer: No real serial number found for Wi-Fi device $wifiSerial")
+                return false
+            }
+            
+            // Проверяем, подключено ли устройство с таким же серийным номером по USB
+            val connectedDevices = AdbService.getConnectedDevices(ProjectManager.getInstance().defaultProject)
+            val devices = connectedDevices.getOrNull() ?: emptyList()
+            
+            val usbConnected = devices.any { device ->
+                !device.serialNumber.contains(":") && // USB устройство (не Wi-Fi)
+                device.serialNumber == realSerial
+            }
+            
+            if (usbConnected) {
+                println("ADB_Randomizer: Same device (serial: $realSerial) is connected via USB")
+            }
+            
+            return usbConnected
+        } catch (e: Exception) {
+            println("ADB_Randomizer: Error checking USB duplication: ${e.message}")
+            return false
+        }
+    }
+
     private fun checkIfDeviceConnected(serialNumber: String): Boolean {
         return try {
             // Получаем список всех подключенных устройств

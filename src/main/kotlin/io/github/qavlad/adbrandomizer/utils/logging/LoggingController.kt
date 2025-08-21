@@ -87,11 +87,16 @@ object LoggingController {
         message: String,
         throwable: Throwable?
     ) {
-        // Логируем в системную консоль только для уровней DEBUG и выше в debug режиме
-        // или для ERROR всегда
+        // Логируем в системную консоль для важных категорий
         val shouldPrint = when {
             level == LogLevel.ERROR -> true
             PluginSettings.instance.debugMode && level.value >= LogLevel.DEBUG.value -> true
+            // Выводим INFO и WARN логи для важных категорий
+            (level == LogLevel.INFO || level == LogLevel.WARN) && 
+                (category == LogCategory.ADB_CONNECTION || 
+                 category == LogCategory.NETWORK || 
+                 category == LogCategory.SCRCPY ||
+                 category == LogCategory.DEVICE_STATE) -> true
             else -> false
         }
         

@@ -71,7 +71,8 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                 // Сохраняем состояние чекбокса чтобы оно не сбрасывалось при обновлении
                 devicePollingService.updateDeviceSelection(device.baseSerialNumber, isSelected)
             },
-            onWifiConnectByIp = { ipAddress, port -> connectDeviceViaWifiByIp(ipAddress, port) }
+            onWifiConnectByIp = { ipAddress, port -> connectDeviceViaWifiByIp(ipAddress, port) },
+            onParallelWifiConnect = { ipAddresses -> connectDeviceViaWifiParallel(ipAddresses) }
         )
         
         val splitPane = JSplitPane(JSplitPane.VERTICAL_SPLIT, buttonPanel, deviceListPanel).apply {
@@ -788,7 +789,19 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                     handleConnectionResult(success, ipAddress, port)
                 } catch (e: Exception) {
                     ApplicationManager.getApplication().invokeLater {
-                        NotificationUtils.showError(project, "Error connecting to device: ${e.message}")
+                        val errorMessage = when {
+                            e.message?.contains("not connected to Wi-Fi", ignoreCase = true) == true ||
+                            e.message?.contains("Empty ip route", ignoreCase = true) == true -> {
+                                """Device is not connected to Wi-Fi network.
+                                |
+                                |Please:
+                                |1. Connect the device to the same Wi-Fi network as your computer
+                                |2. Make sure Wi-Fi is turned on in device settings
+                                |3. Try again after connecting to Wi-Fi""".trimMargin()
+                            }
+                            else -> "Error connecting to device: ${e.message}"
+                        }
+                        NotificationUtils.showError(project, errorMessage)
                     }
                 }
             }
@@ -856,7 +869,19 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                     handleConnectionResult(success, ipAddress, port)
                 } catch (e: Exception) {
                     ApplicationManager.getApplication().invokeLater {
-                        NotificationUtils.showError(project, "Error connecting to device: ${e.message}")
+                        val errorMessage = when {
+                            e.message?.contains("not connected to Wi-Fi", ignoreCase = true) == true ||
+                            e.message?.contains("Empty ip route", ignoreCase = true) == true -> {
+                                """Device is not connected to Wi-Fi network.
+                                |
+                                |Please:
+                                |1. Connect the device to the same Wi-Fi network as your computer
+                                |2. Make sure Wi-Fi is turned on in device settings
+                                |3. Try again after connecting to Wi-Fi""".trimMargin()
+                            }
+                            else -> "Error connecting to device: ${e.message}"
+                        }
+                        NotificationUtils.showError(project, errorMessage)
                     }
                 }
             }
@@ -868,42 +893,83 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
             override fun run(indicator: ProgressIndicator) {
                 indicator.isIndeterminate = true
                 indicator.text = "Getting IP address for ${device.name}..."
+                PluginLogger.info(LogCategory.ADB_CONNECTION, "[UI] Getting IP address for device %s", device.name)
 
                 val ipResult = AdbService.getDeviceIpAddress(device)
                 val ipAddress = ipResult.getOrNull() ?: run {
-                    ipResult.onError { exception, _ ->
-                        PluginLogger.warn(LogCategory.ADB_CONNECTION, "Failed to get IP address for device %s: %s", device.name, exception.message)
+                    ipResult.onError { exception, message ->
+                        // Используем info вместо error для ожидаемых ситуаций
+                        if (message?.contains("not connected to Wi-Fi", ignoreCase = true) == true) {
+                            PluginLogger.info(LogCategory.ADB_CONNECTION, "[UI] Device %s is not connected to Wi-Fi", device.name)
+                        } else {
+                            PluginLogger.warn(LogCategory.ADB_CONNECTION, "[UI] Failed to get IP address for device %s: %s", device.name, message ?: exception.message)
+                        }
                     }
                     null
                 }
+                
+                PluginLogger.info(LogCategory.ADB_CONNECTION, "[UI] Device %s IP address: %s", device.name, ipAddress ?: "null")
+                
                 if (ipAddress.isNullOrBlank()) {
-                    NotificationUtils.showError(project, "Cannot find IP address for device ${device.name}. Make sure it's connected to Wi-Fi.")
+                    PluginLogger.info(LogCategory.ADB_CONNECTION, "[UI] IP address is null or blank for device %s", device.name)
+                    val errorMessage = """Device ${device.name} is not connected to Wi-Fi network.
+                        |
+                        |Please:
+                        |1. Connect the device to the same Wi-Fi network as your computer
+                        |2. Make sure Wi-Fi is turned on in device settings
+                        |3. Try again after connecting to Wi-Fi""".trimMargin()
+                    NotificationUtils.showError(project, errorMessage)
                     return
                 }
 
                 indicator.text = "Enabling TCP/IP mode on ${device.name}..."
+                PluginLogger.info(LogCategory.ADB_CONNECTION, "[UI] Starting TCP/IP enable process")
+                
                 try {
                     // Получаем IP до включения TCP/IP, чтобы убедиться что устройство подключено к Wi-Fi
+                    PluginLogger.info(LogCategory.ADB_CONNECTION, "[UI] Verifying device IP before TCP/IP enable...")
                     val ipBeforeResult = AdbService.getDeviceIpAddress(device)
                     val ipBeforeEnable = ipBeforeResult.getOrNull() ?: run {
                         ipBeforeResult.onError { exception, _ ->
-                            PluginLogger.warn(LogCategory.ADB_CONNECTION, "Failed to verify device IP before TCP/IP enable: %s", exception.message)
+                            PluginLogger.warn(LogCategory.ADB_CONNECTION, "[UI] Failed to verify device IP before TCP/IP enable", exception)
                         }
                         null
                     }
+                    
+                    PluginLogger.info(LogCategory.ADB_CONNECTION, "[UI] IP before TCP/IP enable: %s", ipBeforeEnable ?: "null")
+                    
                     if (ipBeforeEnable.isNullOrBlank()) {
+                        PluginLogger.info(LogCategory.ADB_CONNECTION, "[UI] Cannot get device IP before TCP/IP enable - device not connected to Wi-Fi")
                         ApplicationManager.getApplication().invokeLater {
-                            NotificationUtils.showError(project, "Cannot get device IP. Make sure Wi-Fi is enabled and connected.")
+                            val errorMessage = """Device is not connected to Wi-Fi network.
+                                |
+                                |Please:
+                                |1. Connect the device to the same Wi-Fi network as your computer
+                                |2. Make sure Wi-Fi is turned on in device settings
+                                |3. Try again after connecting to Wi-Fi""".trimMargin()
+                            NotificationUtils.showError(project, errorMessage)
                         }
                         return
                     }
                     
+                    // Сохраняем serial number устройства на случай если оно отключится после включения TCP/IP
+                    val deviceSerial = device.serialNumber
+                    
                     // Сначала включаем TCP/IP режим
+                    PluginLogger.info(LogCategory.ADB_CONNECTION, "[UI] Calling AdbService.enableTcpIp for device %s...", deviceSerial)
                     val tcpipResult = AdbService.enableTcpIp(device)
-                    tcpipResult.onError { exception, _ ->
-                        PluginLogger.warn(LogCategory.ADB_CONNECTION, "Failed to enable TCP/IP mode: %s", exception.message)
+                    
+                    if (!tcpipResult.isSuccess()) {
+                        tcpipResult.onError { exception, message ->
+                            PluginLogger.warn(LogCategory.ADB_CONNECTION, "[UI] Failed to enable TCP/IP mode: %s", message ?: exception.message)
+                            // Если не удалось включить TCP/IP, пробуем восстановить USB режим
+                            PluginLogger.info(LogCategory.ADB_CONNECTION, "[UI] Attempting to restore USB mode...")
+                            AdbService.disableTcpIp(deviceSerial)
+                        }
+                        return
+                    } else {
+                        PluginLogger.info(LogCategory.ADB_CONNECTION, "[UI] TCP/IP mode enabled or already was enabled on port 5555")
                     }
-                    PluginLogger.info("TCP/IP mode enabled on port 5555")
                     
                     // Даем устройству время на включение TCP/IP
                     Thread.sleep(PluginConfig.Network.TCPIP_ENABLE_DELAY_MS)
@@ -911,6 +977,7 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                     indicator.text = "Connecting to $ipAddress:5555..."
                     
                     // Первая попытка подключения
+                    PluginLogger.info("Starting first Wi-Fi connection attempt to %s", ipAddress)
                     val firstConnectResult = AdbService.connectWifi(project, ipAddress)
                     var success = firstConnectResult.getOrNull() ?: run {
                         firstConnectResult.onError { exception, _ ->
@@ -942,12 +1009,22 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                         }
                     }
                     
+                    PluginLogger.info("Connection result: success=%s for device %s at %s", success, device.name, ipAddress)
+                    
+                    // НЕ возвращаем в USB режим для Android 6 - пусть пользователь отключит кабель
+                    if (!success) {
+                        PluginLogger.warn(LogCategory.ADB_CONNECTION, "[UI] Wi-Fi connection failed for device %s. Try disconnecting USB cable.", deviceSerial)
+                        // НЕ отключаем TCP/IP автоматически
+                        // AdbService.disableTcpIp(deviceSerial)
+                    }
+                    
                     showWifiConnectionResult(success, device.name, ipAddress)
                 } catch (_: io.github.qavlad.adbrandomizer.exceptions.ManualWifiSwitchRequiredException) {
                     // Ручное переключение требуется - не показываем ошибку подключения
                     PluginLogger.info("Manual WiFi switch required for device ${device.name}")
                     // Уведомление уже показано в tryAutoSwitchWifi, ничего дополнительно не делаем
                 } catch (e: Exception) {
+                    PluginLogger.error("Error connecting to device", e)
                     NotificationUtils.showError(project, "Error connecting to device: ${e.message}")
                 }
             }
@@ -975,15 +1052,27 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                 )
             }
             NotificationUtils.showSuccess(project, "Successfully connected to $deviceName at $ipAddress.")
-            // Форсируем обновление списка устройств
-            devicePollingService.forceCombinedUpdate()
+            // Форсируем обновление списка устройств с небольшой задержкой
+            SwingUtilities.invokeLater {
+                // Небольшая задержка, чтобы дать время ADB обновить список устройств
+                Timer(500) {
+                    devicePollingService.forceCombinedUpdate()
+                }.apply {
+                    isRepeats = false
+                    start()
+                }
+            }
         } else {
             val message = """Failed to connect to $deviceName via Wi-Fi.
-                |Possible solutions:
+                |
+                |For Android 6 devices:
+                |TCP/IP mode is already enabled. Please disconnect the USB cable 
+                |and try connecting again via Wi-Fi.
+                |
+                |Other solutions:
                 |1. Make sure device is connected to the same Wi-Fi network
-                |2. Try unplugging and reconnecting the USB cable
-                |3. Check that 'USB debugging' is enabled in Developer Options
-                |4. Some devices require 'Wireless debugging' to be enabled separately""".trimMargin()
+                |2. Check that 'USB debugging' is enabled in Developer Options
+                |3. Some devices require 'Wireless debugging' to be enabled separately""".trimMargin()
             NotificationUtils.showError(project, message)
         }
     }
@@ -1059,6 +1148,125 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                 NotificationUtils.showError(project, "Failed to start screen mirroring for ${deviceInfo.displayName}")
             }
         }
+    }
+
+    /**
+     * Умное параллельное подключение к нескольким IP адресам
+     * Прерывается при успешном подключении или обнаружении верного IP с выключенным TCP/IP
+     */
+    fun connectDeviceViaWifiParallel(ipAddresses: List<Pair<String, Int>>) {
+        if (ipAddresses.isEmpty()) return
+        
+        object : Task.Backgroundable(project, "Connecting to device via Wi-Fi") {
+            @Volatile
+            private var shouldStop = false
+            private val connectionAttempts = mutableMapOf<String, String>() // IP -> status
+            
+            override fun run(indicator: ProgressIndicator) {
+                indicator.isIndeterminate = false
+                indicator.fraction = 0.0
+                indicator.text = "Attempting connection to ${ipAddresses.size} IP addresses..."
+                
+                val completedCount = java.util.concurrent.atomic.AtomicInteger(0)
+                val latch = java.util.concurrent.CountDownLatch(ipAddresses.size)
+                
+                ipAddresses.forEach { (ipAddress, port) ->
+                    Thread {
+                        try {
+                            if (!shouldStop) {
+                                connectionAttempts[ipAddress] = "connecting"
+                                PluginLogger.debug("Starting connection attempt to $ipAddress:$port")
+                                
+                                val connectResult = AdbService.connectWifi(project, ipAddress, port)
+                                
+                                if (connectResult.isSuccess()) {
+                                    val success = connectResult.getOrNull() ?: false
+                                    if (success) {
+                                        connectionAttempts[ipAddress] = "success"
+                                        PluginLogger.info("Successfully connected to $ipAddress:$port")
+                                        shouldStop = true // Останавливаем остальные попытки
+                                        
+                                        ApplicationManager.getApplication().invokeLater {
+                                            handleConnectionResult(true, ipAddress, port)
+                                        }
+                                    } else {
+                                        connectionAttempts[ipAddress] = "failed"
+                                        PluginLogger.debug("Connection failed for $ipAddress:$port")
+                                    }
+                                } else {
+                                    var errorMessage = ""
+                                    connectResult.onError { exception, _ ->
+                                        errorMessage = exception.message ?: ""
+                                    }
+                                    
+                                    // Проверяем типы ошибок
+                                    when {
+                                        errorMessage.contains("отверг запрос на подключение") ||
+                                        errorMessage.contains("Connection refused") ||
+                                        errorMessage.contains("10061") -> {
+                                            // IP верный, но TCP/IP не включен
+                                            connectionAttempts[ipAddress] = "tcp_disabled"
+                                            PluginLogger.info("Found correct IP $ipAddress but TCP/IP is disabled")
+                                            shouldStop = true // Останавливаем остальные попытки
+                                            
+                                            ApplicationManager.getApplication().invokeLater {
+                                                NotificationUtils.showWarning(
+                                                    project,
+                                                    "Found device at $ipAddress but Wi-Fi debugging is disabled. Connect via USB and click Connect to enable it."
+                                                )
+                                            }
+                                        }
+                                        errorMessage.contains("timed out") ||
+                                        errorMessage.contains("timeout") -> {
+                                            // Таймаут - вероятно неверный IP или устройство недоступно
+                                            connectionAttempts[ipAddress] = "timeout"
+                                            PluginLogger.debug("Connection timeout for $ipAddress:$port")
+                                        }
+                                        else -> {
+                                            connectionAttempts[ipAddress] = "error"
+                                            PluginLogger.debug("Connection error for $ipAddress:$port: $errorMessage")
+                                        }
+                                    }
+                                }
+                            }
+                        } catch (e: Exception) {
+                            connectionAttempts[ipAddress] = "exception"
+                            PluginLogger.debug("Exception during connection to $ipAddress:$port: ${e.message}")
+                        } finally {
+                            val completed = completedCount.incrementAndGet()
+                            indicator.fraction = completed.toDouble() / ipAddresses.size
+                            indicator.text = "Attempted $completed of ${ipAddresses.size} connections..."
+                            latch.countDown()
+                        }
+                    }.start()
+                }
+                
+                // Ждём завершения всех попыток или остановки
+                try {
+                    latch.await(15, java.util.concurrent.TimeUnit.SECONDS)
+                } catch (_: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                }
+                
+                // Анализируем результаты
+                val successfulIp = connectionAttempts.entries.find { it.value == "success" }?.key
+                val tcpDisabledIp = connectionAttempts.entries.find { it.value == "tcp_disabled" }?.key
+                
+                if (successfulIp == null && tcpDisabledIp == null) {
+                    // Ни одно подключение не удалось
+                    ApplicationManager.getApplication().invokeLater {
+                        val timeouts = connectionAttempts.count { it.value == "timeout" }
+                        if (timeouts == ipAddresses.size) {
+                            NotificationUtils.showWarning(project, "Device not found. Connect via USB first to enable Wi-Fi debugging.")
+                        } else {
+                            NotificationUtils.showWarning(project, "Connection failed. Connect device via USB and try again.")
+                        }
+                    }
+                }
+                
+                PluginLogger.debug("Connection attempts summary: $connectionAttempts")
+            }
+        }.queue()
     }
 
     // ==================== SETTINGS ====================

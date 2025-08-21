@@ -59,7 +59,7 @@ object AdbService {
             val output = receiver.output
             PluginLogger.debug("IP route output for device %s: %s", device.name, output)
             if (output.isBlank()) {
-                throw Exception("Empty ip route output")
+                throw Exception("Device is not connected to Wi-Fi network. Please connect the device to Wi-Fi first.")
             }
             
             // Паттерн для поиска IP адреса в выводе ip route
@@ -95,19 +95,39 @@ object AdbService {
                 PluginLogger.debug("IP address found via ip route: %s for device %s", selectedIp, device.name)
                 selectedIp
             } else {
-                throw Exception("No usable IP address found in ip route output")
+                throw Exception("Could not determine device IP address. Make sure the device is connected to Wi-Fi network.")
             }
         }.onError { exception, message ->
             // Не логируем warning для ожидаемых ошибок соединения
             val errorMsg = message ?: exception.message ?: ""
-            if (errorMsg.contains("connection lost", ignoreCase = true) ||
+            when {
+                errorMsg.contains("connection lost", ignoreCase = true) ||
                 errorMsg.contains("connection reset", ignoreCase = true) ||
                 errorMsg.contains("device offline", ignoreCase = true) ||
                 errorMsg.contains("device not found", ignoreCase = true) ||
-                errorMsg.contains("is not online", ignoreCase = true)) {
-                PluginLogger.debug("Device %s disconnected during IP retrieval", device.name)
-            } else {
-                PluginLogger.warn("IP route method failed for device %s: %s", device.name, errorMsg)
+                errorMsg.contains("is not online", ignoreCase = true) -> {
+                    PluginLogger.debug("Device %s disconnected during IP retrieval", device.name)
+                }
+                errorMsg.contains("not connected to Wi-Fi", ignoreCase = true) ||
+                errorMsg.contains("Could not determine device IP", ignoreCase = true) -> {
+                    // Используем rate limiter для Wi-Fi ошибок с ключом по серийному номеру устройства
+                    PluginLogger.infoWithRateLimit(
+                        LogCategory.GENERAL,
+                        "wifi_error_${device.serialNumber}",
+                        "Device %s is not connected to Wi-Fi network",
+                        device.name
+                    )
+                }
+                else -> {
+                    // Для остальных ошибок тоже используем rate limiter
+                    PluginLogger.warnWithRateLimit(
+                        LogCategory.GENERAL,
+                        "ip_route_error_${device.serialNumber}",
+                        "IP route method failed for device %s: %s",
+                        device.name,
+                        errorMsg
+                    )
+                }
             }
         }.flatMap {
             // Fallback на старый метод
@@ -334,7 +354,7 @@ object AdbService {
             device.executeShellCommand("wm density", receiver, PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             
             val output = receiver.output.trim()
-            PluginLogger.info(LogCategory.ADB_CONNECTION, "wm density output for device %s: %s", device.name, output)
+            PluginLogger.debug(LogCategory.ADB_CONNECTION, "wm density output for device %s: %s", device.name, output)
             
             // Формат вывода может содержать несколько строк:
             // "Physical density: 480"
@@ -347,7 +367,7 @@ object AdbService {
             
             if (overrideMatcher.find()) {
                 val dpi = overrideMatcher.group(1).toInt()
-                PluginLogger.info(LogCategory.ADB_CONNECTION, "Found override DPI for device %s: %d", device.name, dpi)
+                PluginLogger.debug("Found override DPI for device %s: %d", device.name, dpi)
                 return@runDeviceOperation dpi
             }
             
@@ -357,7 +377,7 @@ object AdbService {
             
             if (physicalMatcher.find()) {
                 val dpi = physicalMatcher.group(1).toInt()
-                PluginLogger.info(LogCategory.ADB_CONNECTION, "Found physical DPI for device %s: %d", device.name, dpi)
+                PluginLogger.debug(LogCategory.ADB_CONNECTION, "Found physical DPI for device %s: %d", device.name, dpi)
                 dpi
             } else {
                 throw Exception("Could not parse density from output: $output")
@@ -483,116 +503,308 @@ object AdbService {
         }
     }
 
+    /**
+     * Проверяет, включён ли TCP/IP режим на устройстве
+     */
+    fun isTcpIpEnabled(device: IDevice): Result<Boolean> {
+        return runDeviceOperation(device.name, "check TCP/IP status") {
+            val receiver = CollectingOutputReceiver()
+            device.executeShellCommand("getprop service.adb.tcp.port", receiver, 2, TimeUnit.SECONDS)
+            val output = receiver.output.trim()
+            
+            // Если порт установлен и не пустой и не 0 - TCP/IP включён
+            val portValue = output.toIntOrNull()
+            val isEnabled = portValue != null && portValue > 0
+            
+            PluginLogger.info(LogCategory.ADB_CONNECTION, "[TCPIP] TCP/IP status check for device %s: %s (port value: %s)", 
+                device.name, if (isEnabled) "ENABLED" else "DISABLED", output.ifEmpty { "empty" })
+            
+            isEnabled
+        }
+    }
+    
+    /**
+     * Отключает TCP/IP режим и возвращает устройство в USB режим
+     */
+    fun disableTcpIp(serialNumber: String): Result<Unit> {
+        return runAdbOperation("disable TCP/IP and return to USB mode") {
+            PluginLogger.info(LogCategory.ADB_CONNECTION, "[TCPIP] Disabling TCP/IP mode for device %s", serialNumber)
+            
+            val adbPath = AdbPathResolver.findAdbExecutable() ?: throw Exception("ADB not found")
+            
+            // Команда adb usb возвращает устройство в USB режим
+            val command = listOf(adbPath, "-s", serialNumber, "usb")
+            PluginLogger.info(LogCategory.ADB_CONNECTION, "[TCPIP] Executing: %s", command.joinToString(" "))
+            
+            val processBuilder = ProcessBuilder(command)
+            processBuilder.redirectErrorStream(true)
+            
+            val process = processBuilder.start()
+            val completed = process.waitFor(5, TimeUnit.SECONDS)
+            
+            if (completed) {
+                val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
+                val exitCode = process.exitValue()
+                
+                PluginLogger.info(LogCategory.ADB_CONNECTION, "[TCPIP] USB mode command output: '%s' (exit code: %d)", output, exitCode)
+                
+                if (exitCode == 0 || output.contains("restarting in USB mode")) {
+                    PluginLogger.info(LogCategory.ADB_CONNECTION, "[TCPIP] Successfully returned to USB mode")
+                    Thread.sleep(2000) // Даём время на переподключение
+                }
+            } else {
+                process.destroyForcibly()
+                PluginLogger.warn(LogCategory.ADB_CONNECTION, "[TCPIP] USB mode command timed out")
+            }
+        }
+    }
+    
     fun enableTcpIp(device: IDevice, port: Int = 5555): Result<Unit> {
-        return runDeviceOperation(device.name, "enable TCP/IP on port $port") {
+        return runAdbOperation("enable TCP/IP on port $port") {
+            PluginLogger.info(LogCategory.ADB_CONNECTION, "[TCPIP] Starting enableTcpIp for device %s on port %d", device.serialNumber, port)
+            
             // Валидация порта
             if (!ValidationUtils.isValidAdbPort(port)) {
+                PluginLogger.error(LogCategory.ADB_CONNECTION, "[TCPIP] Invalid port: %d", null, port)
                 throw IllegalArgumentException("Port must be between ${PluginConfig.Network.MIN_ADB_PORT} and ${PluginConfig.Network.MAX_PORT}, got: $port")
             }
 
-            PluginLogger.info("Enabling TCP/IP mode on port %d for device %s", port, device.serialNumber)
+            val serialNumber = device.serialNumber
             
-            // Проверяем, не включён ли уже TCP/IP режим
-            val checkReceiver = CollectingOutputReceiver()
-            device.executeShellCommand("getprop service.adb.tcp.port", checkReceiver, 2, TimeUnit.SECONDS)
-            val currentPort = checkReceiver.output.trim()
+            // Сначала проверяем, не включен ли уже TCP/IP режим
+            PluginLogger.info(LogCategory.ADB_CONNECTION, "[TCPIP] Checking if TCP/IP is already enabled on device %s", serialNumber)
+            val tcpipCheckResult = isTcpIpEnabled(device)
             
-            if (currentPort == port.toString()) {
-                PluginLogger.info("TCP/IP already enabled on port %d for device %s", port, device.name)
-                return@runDeviceOperation
+            if (tcpipCheckResult.isSuccess() && tcpipCheckResult.getOrNull() == true) {
+                PluginLogger.info(LogCategory.ADB_CONNECTION, "[TCPIP] TCP/IP mode is already enabled on device %s, skipping", serialNumber)
+                return@runAdbOperation // Уже включен, ничего делать не нужно
             }
             
-            try {
-                // Включаем TCP/IP режим
-                device.executeShellCommand("setprop service.adb.tcp.port $port", NullOutputReceiver(), PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-                Thread.sleep(500)
+            PluginLogger.info(LogCategory.ADB_CONNECTION, "[TCPIP] TCP/IP is not enabled, enabling on port %d for device %s", port, serialNumber)
+            
+            // Используем прямую команду adb tcpip как у конкурента
+            val adbPath = AdbPathResolver.findAdbExecutable()
+            if (adbPath == null) {
+                PluginLogger.error(LogCategory.ADB_CONNECTION, "[TCPIP] ADB executable not found")
+                throw IllegalStateException("ADB executable not found")
+            }
+            PluginLogger.info(LogCategory.ADB_CONNECTION, "[TCPIP] Using ADB path: %s", adbPath)
+            
+            // Запускаем команду: adb -s SERIAL tcpip PORT
+            val command = listOf(adbPath, "-s", serialNumber, "tcpip", port.toString())
+            PluginLogger.info(LogCategory.ADB_CONNECTION, "[TCPIP] Executing command: %s", command.joinToString(" "))
+            val processBuilder = ProcessBuilder(command)
+            processBuilder.redirectErrorStream(true)
+            
+            val process = processBuilder.start()
+            PluginLogger.info(LogCategory.ADB_CONNECTION, "[TCPIP] Process started, waiting for completion...")
+            val completed = process.waitFor(5, TimeUnit.SECONDS)
+            
+            if (completed) {
+                val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
+                val exitCode = process.exitValue()
                 
-                // Перезапускаем ADB сервис на устройстве ТОЛЬКО если порт изменился
-                if (currentPort != port.toString()) {
-                    PluginLogger.info("Restarting adbd to apply TCP/IP port change")
-                    device.executeShellCommand("stop adbd", NullOutputReceiver(), PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-                    Thread.sleep(500)
-                    device.executeShellCommand("start adbd", NullOutputReceiver(), PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-                    Thread.sleep(1500)
+                PluginLogger.info(LogCategory.ADB_CONNECTION, "[TCPIP] Command completed with exit code: %d", exitCode)
+                PluginLogger.info(LogCategory.ADB_CONNECTION, "[TCPIP] Command output: '%s'", output)
+                
+                // Проверяем успешность выполнения
+                if (exitCode == 0 || output.contains("restarting in TCP mode")) {
+                    PluginLogger.info(LogCategory.ADB_CONNECTION, "[TCPIP] TCP/IP mode enabled successfully on port %d for device %s", port, serialNumber)
+                    PluginLogger.info(LogCategory.ADB_CONNECTION, "[TCPIP] Waiting for ADB to restart in TCP mode...")
+                    
+                    // На некоторых устройствах (особенно старых Android) включение TCP/IP временно отключает USB
+                    // Даём время устройству перезапустить ADB и переподключиться
+                    Thread.sleep(2000)
+                    
+                    // Проверяем, что устройство всё ещё доступно (может быть по USB или уже по Wi-Fi)
+                    PluginLogger.info(LogCategory.ADB_CONNECTION, "[TCPIP] Checking device availability after TCP/IP enable...")
+                    val checkCmd = ProcessBuilder(adbPath, "devices")
+                    val checkProcess = checkCmd.start()
+                    val checkOutput = checkProcess.inputStream.bufferedReader().use { it.readText() }
+                    
+                    if (!checkOutput.contains(serialNumber)) {
+                        PluginLogger.warn(LogCategory.ADB_CONNECTION, "[TCPIP] Device %s disconnected after TCP/IP enable, waiting for reconnection...", serialNumber)
+                        // Ждём ещё немного для переподключения
+                        Thread.sleep(3000)
+                    }
+                    
+                    PluginLogger.info(LogCategory.ADB_CONNECTION, "[TCPIP] Wait completed")
+                } else {
+                    PluginLogger.error(LogCategory.ADB_CONNECTION, "[TCPIP] Failed to enable TCP/IP. Exit code: %d, Output: %s", null, exitCode, output)
+                    throw Exception("Failed to enable TCP/IP mode: $output")
                 }
-                
-                PluginLogger.info("TCP/IP mode enabled on port %d for device %s", port, device.name)
-            } catch (e: Exception) {
-                // Fallback на стандартный метод
-                PluginLogger.warn("Failed to enable TCP/IP via setprop, trying standard method: %s", e.message)
-                device.executeShellCommand("tcpip $port", NullOutputReceiver(), PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-                Thread.sleep(2000)
+            } else {
+                PluginLogger.error(LogCategory.ADB_CONNECTION, "[TCPIP] Command timed out after 5 seconds", null)
+                process.destroyForcibly()
+                throw Exception("TCP/IP command timed out after 5 seconds")
             }
         }
     }
 
     fun connectWifi(@Suppress("UNUSED_PARAMETER") project: Project?, ipAddress: String, port: Int = 5555): Result<Boolean> {
         return runAdbOperation("connect to Wi-Fi device $ipAddress:$port") {
+            PluginLogger.info(LogCategory.ADB_CONNECTION, "[WIFI] ========== START WIFI CONNECTION ATTEMPT ==========")
+            PluginLogger.info(LogCategory.ADB_CONNECTION, "[WIFI] Target IP: %s, Port: %d", ipAddress, port)
+            
             val adbPath = AdbPathResolver.findAdbExecutable() ?: throw Exception("ADB path not found")
+            PluginLogger.info(LogCategory.ADB_CONNECTION, "[WIFI] ADB executable path: %s", adbPath)
+            
+            // Специальный простой метод для проблемных устройств
+            // Просто выполняем connect без всяких проверок и disconnect
+            val useSimpleConnect = true // Можно сделать настройкой
+            
+            if (useSimpleConnect) {
+                PluginLogger.info(LogCategory.ADB_CONNECTION, "[WIFI] Using simple connect method")
+                val target = "$ipAddress:$port"
+                
+                // Просто выполняем connect
+                val connectCmd = ProcessBuilder(adbPath, "connect", target)
+                val process = connectCmd.start()
+                
+                // Ждём немного и читаем вывод
+                val completed = process.waitFor(2, TimeUnit.SECONDS)
+                
+                if (completed) {
+                    val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
+                    val exitCode = process.exitValue()
+                    
+                    PluginLogger.info(LogCategory.ADB_CONNECTION, "[WIFI] Connect result: exit=%d, output='%s'", exitCode, output)
+                    
+                    // Проверяем результат
+                    val success = output.contains("connected to") || output.contains("already connected")
+                    
+                    if (success) {
+                        PluginLogger.wifiConnectionSuccess(ipAddress, port)
+                        return@runAdbOperation true
+                    } else {
+                        // Даём ещё один шанс - проверяем через devices
+                        Thread.sleep(1000)
+                        val checkCmd = ProcessBuilder(adbPath, "devices")
+                        val checkProcess = checkCmd.start()
+                        val checkOutput = checkProcess.inputStream.bufferedReader().use { it.readText() }
+                        
+                        if (checkOutput.contains(target)) {
+                            PluginLogger.wifiConnectionSuccess(ipAddress, port)
+                            return@runAdbOperation true
+                        }
+                    }
+                } else {
+                    // Процесс зависает - убиваем и проверяем
+                    process.destroyForcibly()
+                    Thread.sleep(1000)
+                    
+                    // Проверяем подключение через devices
+                    val checkCmd = ProcessBuilder(adbPath, "devices")
+                    val checkProcess = checkCmd.start()
+                    val checkOutput = checkProcess.inputStream.bufferedReader().use { it.readText() }
+                    
+                    if (checkOutput.contains(target)) {
+                        PluginLogger.info(LogCategory.ADB_CONNECTION, "[WIFI] Device connected despite timeout")
+                        PluginLogger.wifiConnectionSuccess(ipAddress, port)
+                        return@runAdbOperation true
+                    }
+                }
+                
+                PluginLogger.wifiConnectionFailed(ipAddress, port, Exception("Simple connect failed"))
+                return@runAdbOperation false
+            }
 
             // Проверяем настройку автопереключения Wi-Fi
             val settings = PluginSettings.instance
             var actualIpAddress = ipAddress
+            PluginLogger.info(LogCategory.ADB_CONNECTION, "[WIFI] Auto-switch to host WiFi setting: %s", settings.autoSwitchToHostWifi)
+            
             if (settings.autoSwitchToHostWifi) {
+                PluginLogger.info(LogCategory.ADB_CONNECTION, "[WIFI] Attempting auto WiFi switch...")
                 try {
                     // Пытаемся переключить устройство на ту же Wi-Fi сеть, что и ПК
                     val newIp = tryAutoSwitchWifi(ipAddress)
                     if (newIp != null) {
-                        PluginLogger.info("Using new IP address after WiFi switch: %s", newIp)
+                        PluginLogger.info(LogCategory.ADB_CONNECTION, "[WIFI] Auto switch successful! New IP: %s (was: %s)", newIp, ipAddress)
                         actualIpAddress = newIp
+                    } else {
+                        PluginLogger.info(LogCategory.ADB_CONNECTION, "[WIFI] Auto switch returned null, using original IP: %s", ipAddress)
                     }
                 } catch (e: ManualWifiSwitchRequiredException) {
                     // Требуется ручное переключение - прерываем подключение
-                    PluginLogger.info("Manual WiFi switch required, aborting connection attempt")
+                    PluginLogger.warn(LogCategory.ADB_CONNECTION, "[WIFI] Manual WiFi switch required - aborting connection")
                     throw e // Пробрасываем исключение дальше
+                } catch (e: Exception) {
+                    // Любая другая ошибка - логируем, но продолжаем
+                    PluginLogger.warn(LogCategory.ADB_CONNECTION, "[WIFI] Auto WiFi switch error: %s", e, e.message)
                 }
+            } else {
+                PluginLogger.info(LogCategory.ADB_CONNECTION, "[WIFI] Auto WiFi switch is disabled")
             }
 
             if (!ValidationUtils.isValidIpAddress(actualIpAddress)) {
+                PluginLogger.error(LogCategory.ADB_CONNECTION, "[WIFI] Invalid IP address: %s", null, actualIpAddress)
                 throw Exception("Invalid IP address: $actualIpAddress")
             }
 
             val target = "$actualIpAddress:$port"
-            PluginLogger.wifiConnectionAttempt(ipAddress, port)
+            PluginLogger.info(LogCategory.ADB_CONNECTION, "[WIFI] Final connection target: %s", target)
+            PluginLogger.wifiConnectionAttempt(actualIpAddress, port)
 
             // Сначала проверяем, не подключены ли уже
+            PluginLogger.info(LogCategory.ADB_CONNECTION, "[WIFI] Checking if already connected...")
             val checkCmd = ProcessBuilder(adbPath, "devices")
             val checkProcess = checkCmd.start()
             val checkOutput = checkProcess.inputStream.bufferedReader().use { it.readText() }
+            PluginLogger.debug(LogCategory.ADB_CONNECTION, "[WIFI] Current devices output: %s", checkOutput)
 
             if (checkOutput.contains(target)) {
-                PluginLogger.info("Device %s already connected", target)
+                PluginLogger.info(LogCategory.ADB_CONNECTION, "[WIFI] Device %s already connected", target)
                 return@runAdbOperation true
             }
 
-            // Не отключаемся от устройства перед подключением
-            // Это позволяет иметь несколько устройств подключенных одновременно
-            PluginLogger.debug("Skipping disconnect step to allow multiple simultaneous connections")
+            // НЕ отключаемся перед подключением - это может вызывать проблемы
+            // Просто пытаемся подключиться
 
             // Подключаемся
-            PluginLogger.info("Connecting to %s...", target)
+            PluginLogger.info(LogCategory.ADB_CONNECTION, "[WIFI] Executing: %s connect %s", adbPath, target)
             val connectCmd = ProcessBuilder(adbPath, "connect", target)
             connectCmd.redirectErrorStream(true)
 
             val process = connectCmd.start()
+            PluginLogger.info(LogCategory.ADB_CONNECTION, "[WIFI] Process started, waiting %d ms for completion...", PluginConfig.Adb.CONNECTION_TIMEOUT_MS)
+            
+            // Читаем output в отдельном потоке, чтобы избежать блокировки
+            val outputBuilder = StringBuilder()
+            val outputReader = Thread {
+                try {
+                    process.inputStream.bufferedReader().use { reader ->
+                        var line: String?
+                        while (reader.readLine().also { line = it } != null) {
+                            outputBuilder.append(line).append("\n")
+                        }
+                    }
+                } catch (e: Exception) {
+                    PluginLogger.debug("Error reading output: ${e.message}")
+                }
+            }
+            outputReader.start()
+            
             val completed = process.waitFor(PluginConfig.Adb.CONNECTION_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            outputReader.join(500) // Ждём максимум 500мс чтобы поток закончил чтение
 
             if (completed) {
-                val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
+                val output = outputBuilder.toString().trim()
                 val exitCode = process.exitValue()
-                PluginLogger.info("ADB connect output: '%s' (exit code: %d)", output, exitCode)
+                PluginLogger.info(LogCategory.ADB_CONNECTION, "[WIFI] Command completed. Exit code: %d", exitCode)
+                PluginLogger.info(LogCategory.ADB_CONNECTION, "[WIFI] Command output: '%s'", output)
 
                 // Проверяем разные варианты успешного подключения
                 // ADB может возвращать успешный код выхода даже при неудачном подключении
                 val success = when {
-                    output.contains("connected to $target") -> true
-                    output.contains("connected to $ipAddress:$port") -> true
-                    output.contains("already connected to $target") -> true
+                    output.contains("connected to") && !output.contains("cannot") && !output.contains("failed") -> true
+                    output.contains("already connected") -> true
                     output.contains("failed to connect") -> false
                     output.contains("cannot connect") -> false
                     output.contains("Connection refused") -> false
                     output.contains("unable to connect") -> false
-                    else -> exitCode == 0 && !output.contains("failed")
+                    output.contains("no route to host") -> false
+                    else -> exitCode == 0 && output.isNotEmpty() && !output.contains("failed")
                 }
 
                 if (success) {
@@ -607,7 +819,7 @@ object AdbService {
                     if (verified) {
                         PluginLogger.wifiConnectionSuccess(ipAddress, port)
                     } else {
-                        PluginLogger.wifiConnectionFailed(ipAddress, port, Exception("Device not found in 'adb devices' list after connection"))
+                        PluginLogger.wifiConnectionFailedDebug(ipAddress, port, Exception("Device not found in 'adb devices' list after connection"))
                     }
                     
                     return@runAdbOperation verified
@@ -620,7 +832,8 @@ object AdbService {
                 if (output.contains("10061") || output.contains("Connection refused") || 
                     output.contains("отверг запрос на подключение")) {
                     
-                    PluginLogger.info("Connection refused detected in output, trying to enable TCP/IP mode on USB-connected device...")
+                    PluginLogger.warn(LogCategory.ADB_CONNECTION, "[WIFI] Connection refused (error 10061). Device may have lost TCP/IP mode after USB reconnection")
+                    PluginLogger.info(LogCategory.ADB_CONNECTION, "[WIFI] Checking for USB devices to re-enable TCP/IP...")
                     
                     // Проверяем, есть ли устройство подключенное по USB
                     val devicesCmd = ProcessBuilder(adbPath, "devices")
@@ -680,12 +893,74 @@ object AdbService {
                     }
                 }
 
-                PluginLogger.wifiConnectionFailed(ipAddress, port, Exception("ADB connect command failed: $output"))
+                // Используем warn только для реальных ошибок (не таймаутов)
+                if (output.contains("10061") || output.contains("Connection refused") || 
+                    output.contains("отверг запрос на подключение")) {
+                    // Это ожидаемая ошибка - устройство есть, но TCP/IP выключен
+                    PluginLogger.debug("Connection refused for %s (TCP/IP disabled)", target)
+                    PluginLogger.wifiConnectionFailedDebug(ipAddress, port, Exception("TCP/IP disabled: $output"))
+                } else {
+                    // Другие ошибки логируем как warn
+                    PluginLogger.wifiConnectionFailed(ipAddress, port, Exception("ADB connect command failed: $output"))
+                }
                 return@runAdbOperation false
             } else {
+                // Процесс зависает - это часто случается на Android 6
+                PluginLogger.info(LogCategory.ADB_CONNECTION, "[WIFI] Connection process timed out, killing process...")
                 process.destroyForcibly()
-                PluginLogger.warn("Connection timed out for %s", target)
-                PluginLogger.wifiConnectionFailed(ipAddress, port, Exception("Connection timed out after ${PluginConfig.Adb.CONNECTION_TIMEOUT_MS}ms"))
+                
+                // Даём время процессу умереть
+                Thread.sleep(500)
+                
+                // На Android 6 команда connect может зависнуть, но подключение могло установиться
+                // Проверяем несколько раз с задержками
+                PluginLogger.info(LogCategory.ADB_CONNECTION, "[WIFI] Checking if device connected despite timeout...")
+                
+                for (attempt in 1..3) {
+                    Thread.sleep(1000) // Ждём секунду перед каждой проверкой
+                    
+                    val checkCmd = ProcessBuilder(adbPath, "devices")
+                    val checkProcess = checkCmd.start()
+                    val checkCompleted = checkProcess.waitFor(2, TimeUnit.SECONDS)
+                    
+                    if (checkCompleted) {
+                        val checkOutput = checkProcess.inputStream.bufferedReader().use { it.readText() }
+                        PluginLogger.debug(LogCategory.ADB_CONNECTION, "[WIFI] Check attempt %d, devices output: %s", attempt, checkOutput)
+                        
+                        if (checkOutput.contains(target)) {
+                            PluginLogger.info(LogCategory.ADB_CONNECTION, "[WIFI] Device connected on attempt %d despite timeout (Android 6 workaround)", attempt)
+                            PluginLogger.wifiConnectionSuccess(ipAddress, port)
+                            return@runAdbOperation true
+                        }
+                    } else {
+                        checkProcess.destroyForcibly()
+                    }
+                }
+                
+                // Если после трёх попыток устройство не появилось - пробуем альтернативный метод
+                // Попробуем подключиться без disconnect перед этим (может быть проблема в disconnect)
+                PluginLogger.info(LogCategory.ADB_CONNECTION, "[WIFI] Trying alternative connection method without pre-disconnect...")
+                
+                val altCmd = ProcessBuilder(adbPath, "connect", target)
+                altCmd.redirectErrorStream(true)
+                val altProcess = altCmd.start()
+                
+                // Для альтернативной попытки используем короткий таймаут
+                val altCompleted = altProcess.waitFor(3, TimeUnit.SECONDS)
+                
+                if (altCompleted) {
+                    val altOutput = altProcess.inputStream.bufferedReader().use { it.readText() }.trim()
+                    PluginLogger.info(LogCategory.ADB_CONNECTION, "[WIFI] Alternative connect output: %s", altOutput)
+                    
+                    if (altOutput.contains("connected to") || altOutput.contains("already connected")) {
+                        PluginLogger.wifiConnectionSuccess(ipAddress, port)
+                        return@runAdbOperation true
+                    }
+                } else {
+                    altProcess.destroyForcibly()
+                }
+                
+                PluginLogger.wifiConnectionFailedDebug(ipAddress, port, Exception("Connection failed after all attempts"))
                 return@runAdbOperation false
             }
         }
@@ -1089,27 +1364,41 @@ object AdbService {
     
     private fun tryAutoSwitchWifi(targetDeviceIp: String): String? {
         try {
+            PluginLogger.info(LogCategory.NETWORK, "[AUTO-SWITCH] ===== Starting auto WiFi switch =====")
+            PluginLogger.info(LogCategory.NETWORK, "[AUTO-SWITCH] Target device IP: %s", targetDeviceIp)
+            
             // Получаем SSID Wi-Fi сети на ПК
             val hostSSIDResult = WifiNetworkServiceOptimized.getHostWifiSSID()
             val hostSSID = hostSSIDResult.getOrNull()
             
+            PluginLogger.info(LogCategory.NETWORK, "[AUTO-SWITCH] Host SSID detection result: %s", 
+                if (hostSSIDResult.isSuccess()) "Success" else "Failed")
+            PluginLogger.info(LogCategory.NETWORK, "[AUTO-SWITCH] Host SSID: %s", hostSSID ?: "null")
+            
             if (hostSSID == null) {
-                PluginLogger.debug("Host is not connected to WiFi, skipping auto-switch")
+                PluginLogger.info(LogCategory.NETWORK, "[AUTO-SWITCH] Host is not connected to WiFi, skipping auto-switch")
                 return null
             }
-            
-            PluginLogger.info("Host WiFi SSID: %s", hostSSID)
             
             // Пытаемся найти устройство через USB для переключения Wi-Fi
             val devicesResult = getConnectedDevices()
             val devices = devicesResult.getOrNull() ?: emptyList()
             
             // Ищем USB подключенное устройство с таким же IP
+            PluginLogger.info(LogCategory.NETWORK, "[AUTO-SWITCH] Found %d connected devices", devices.size)
+            PluginLogger.info(LogCategory.NETWORK, "[AUTO-SWITCH] Looking for USB device with IP %s", targetDeviceIp)
+            
             for (device in devices) {
-                if (!DeviceConnectionUtils.isWifiConnection(device.serialNumber)) {
+                val isWifi = DeviceConnectionUtils.isWifiConnection(device.serialNumber)
+                PluginLogger.info(LogCategory.NETWORK, "[AUTO-SWITCH] Device %s: isWifi=%s", device.serialNumber, isWifi)
+                
+                if (!isWifi) {
                     // Это USB устройство, проверяем его IP
+                    PluginLogger.info(LogCategory.NETWORK, "[AUTO-SWITCH] Checking IP for USB device: %s", device.serialNumber)
                     val deviceIpResult = getDeviceIpAddress(device)
                     var deviceIp = deviceIpResult.getOrNull()
+                    
+                    PluginLogger.info(LogCategory.NETWORK, "[AUTO-SWITCH] Device %s IP: %s", device.serialNumber, deviceIp ?: "not detected")
                     
                     // Если не удалось получить IP, пробуем еще раз с задержкой
                     if (deviceIp == null) {
@@ -1120,15 +1409,37 @@ object AdbService {
                     
                     if (deviceIp == targetDeviceIp) {
                         // Нашли нужное устройство
-                        PluginLogger.info("Found USB device with target IP: %s", targetDeviceIp)
+                        PluginLogger.info(LogCategory.NETWORK, "[AUTO-SWITCH] FOUND! USB device %s has target IP %s", device.serialNumber, targetDeviceIp)
                         
                         // Проверяем текущий Wi-Fi на устройстве
+                        PluginLogger.info(LogCategory.NETWORK, "[AUTO-SWITCH] Getting device WiFi SSID...")
                         val deviceSSIDResult = WifiNetworkServiceOptimized.getDeviceWifiSSID(device)
                         val deviceSSID = deviceSSIDResult.getOrNull()
                         
-                        PluginLogger.info("Device WiFi SSID: %s", deviceSSID ?: "Not connected")
+                        PluginLogger.info(LogCategory.NETWORK, "[AUTO-SWITCH] Device SSID detection result: %s", 
+                            if (deviceSSIDResult.isSuccess()) "Success" else "Failed")
+                        PluginLogger.info(LogCategory.NETWORK, "[AUTO-SWITCH] Device SSID: '%s'", deviceSSID ?: "null")
                         
-                        if (deviceSSID != hostSSID) {
+                        if (!deviceSSIDResult.isSuccess()) {
+                            deviceSSIDResult.onError { exception, message ->
+                                PluginLogger.warn(LogCategory.NETWORK, "[AUTO-SWITCH] SSID detection error: %s", 
+                                    exception, message ?: exception.message)
+                            }
+                        }
+                        
+                        // Получаем API уровень для проверки старых устройств
+                        // Если не удалось определить - считаем устройство старым (API 23)
+                        val apiLevel = device.getProperty(IDevice.PROP_BUILD_API_LEVEL)?.toIntOrNull() ?: 23
+                        
+                        // Если SSID не удалось определить на старом устройстве - не блокируем
+                        if (deviceSSID == null && apiLevel <= 23) {
+                            PluginLogger.info("Could not detect SSID on old Android device (API %d), skipping network check", apiLevel)
+                            NotificationUtils.showWarning(
+                                "Wi-Fi Check Skipped",
+                                "Could not detect Wi-Fi network on Android ${device.getProperty(IDevice.PROP_BUILD_VERSION) ?: "6 or older"}. Attempting connection anyway."
+                            )
+                            // Продолжаем попытку подключения без проверки сети
+                        } else if (deviceSSID != hostSSID) {
                             // Нужно переключить сеть - проверяем root доступ
                             val hasRoot = WifiNetworkServiceOptimized.hasRootAccess(device)
                             
@@ -1137,15 +1448,27 @@ object AdbService {
                                 PluginLogger.info("Device needs manual WiFi switch from '%s' to '%s' (no root access)", 
                                     deviceSSID ?: "unknown", hostSSID)
                                 
-                                NotificationUtils.showWarning(
-                                    "Manual Wi-Fi Switch Required",
-                                    String.format("Please switch device to '%s' network (currently on '%s'). Root access required for automatic switching.", 
-                                        hostSSID, deviceSSID ?: "unknown")
-                                )
-                                // Выбрасываем специальное исключение для прерывания подключения
-                                throw ManualWifiSwitchRequiredException(
-                                    "Manual switch to '$hostSSID' network required (currently on '${deviceSSID ?: "unknown"}')"
-                                )
+                                // Для устройств где не удалось определить SSID
+                                if (deviceSSID == null) {
+                                    NotificationUtils.showWarning(
+                                        "Wi-Fi Network Check",
+                                        String.format("Please ensure device is on '%s' network. Could not detect current network.", hostSSID)
+                                    )
+                                    // Если мы здесь, значит apiLevel > 23 (иначе бы сработал блок выше)
+                                    throw ManualWifiSwitchRequiredException(
+                                        "Manual switch to '$hostSSID' network required (current network unknown)"
+                                    )
+                                } else {
+                                    NotificationUtils.showWarning(
+                                        "Manual Wi-Fi Switch Required",
+                                        String.format("Please switch device to '%s' network (currently on '%s'). Root access required for automatic switching.", 
+                                            hostSSID, deviceSSID)
+                                    )
+                                    // Выбрасываем специальное исключение для прерывания подключения
+                                    throw ManualWifiSwitchRequiredException(
+                                        "Manual switch to '$hostSSID' network required (currently on '$deviceSSID')"
+                                    )
+                                }
                             }
                             
                             // Есть root - автоматически переключаем

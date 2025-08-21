@@ -204,6 +204,21 @@ class CombinedDeviceRenderer(
             alignmentX = Component.LEFT_ALIGNMENT
         }
         
+        // Логирование для отладки (ограничиваем спам)
+        if (device.hasWifiConnection && !device.hasUsbConnection) {
+            // Логируем только для Finepower или если имя содержит серийный номер
+            if (device.displayName.contains("Finepower", ignoreCase = true) || 
+                device.displayName.contains("TMMPH", ignoreCase = true) ||
+                device.displayName.contains(device.baseSerialNumber)) {
+                println("ADB_Randomizer: [Renderer] Wi-Fi device rendering:")
+                println("ADB_Randomizer: [Renderer]   - displayName: ${device.displayName}")
+                println("ADB_Randomizer: [Renderer]   - baseSerialNumber: ${device.baseSerialNumber}")
+                println("ADB_Randomizer: [Renderer]   - ipAddress: ${device.ipAddress}")
+                println("ADB_Randomizer: [Renderer]   - hasUsbConnection: ${device.hasUsbConnection}")
+                println("ADB_Randomizer: [Renderer]   - hasWifiConnection: ${device.hasWifiConnection}")
+            }
+        }
+        
         val nameText = "${device.displayName} (${device.baseSerialNumber})"
         val nameLabel = JLabel(nameText).apply {
             font = font.deriveFont(Font.BOLD)

@@ -37,7 +37,124 @@ data class DeviceInfo(
 
     companion object {
         private fun createDisplayName(device: IDevice): String {
-            val nameParts = device.name.replace("_", " ").split('-')
+            // Для Wi-Fi устройств пытаемся получить имя из истории
+            if (DeviceConnectionUtils.isWifiConnection(device.serialNumber)) {
+                val ipAddress = device.serialNumber.substringBefore(":")
+                val history = WifiDeviceHistoryService.getHistory()
+                val historyEntry = history.find { 
+                    it.ipAddress == ipAddress || it.logicalSerialNumber == device.serialNumber
+                }
+                
+                // Логируем только для проблемных устройств
+                val shouldLog = device.name.contains("finepower", ignoreCase = true) || 
+                               device.name.contains("TMMPH", ignoreCase = true) ||
+                               device.serialNumber.contains("192.168.1.132")
+                
+                if (shouldLog) {
+                    println("ADB_Randomizer: [DeviceInfo] Creating display name for Wi-Fi device:")
+                    println("ADB_Randomizer: [DeviceInfo]   - device.name: ${device.name}")
+                    println("ADB_Randomizer: [DeviceInfo]   - device.serialNumber: ${device.serialNumber}")
+                    println("ADB_Randomizer: [DeviceInfo]   - historyEntry found: ${historyEntry != null}")
+                }
+                
+                if (historyEntry != null && historyEntry.displayName.isNotBlank()) {
+                    if (shouldLog) {
+                        println("ADB_Randomizer: [DeviceInfo]   - historyEntry.displayName: ${historyEntry.displayName}")
+                        println("ADB_Randomizer: [DeviceInfo]   - historyEntry.realSerialNumber: ${historyEntry.realSerialNumber}")
+                    }
+                    
+                    // Проверяем, не содержит ли displayName серийный номер
+                    var cleanDisplayName = historyEntry.displayName
+                    
+                    // Убираем серийный номер если он есть в конце имени
+                    if (historyEntry.realSerialNumber != null && cleanDisplayName.contains(historyEntry.realSerialNumber)) {
+                        cleanDisplayName = cleanDisplayName.replace(historyEntry.realSerialNumber, "").trim()
+                        if (shouldLog) {
+                            println("ADB_Randomizer: [DeviceInfo]   - After removing serial: $cleanDisplayName")
+                        }
+                    }
+                    
+                    // Убираем IP:PORT если есть
+                    val beforeIpClean = cleanDisplayName
+                    cleanDisplayName = cleanDisplayName
+                        .replace(Regex("\\s*\\d+\\.\\d+\\.\\d+\\.\\d+:\\d+"), "")
+                        .replace(Regex("\\s*\\d+\\.\\d+\\.\\d+\\.\\d+"), "")
+                        .trim()
+                    
+                    if (beforeIpClean != cleanDisplayName && shouldLog) {
+                        println("ADB_Randomizer: [DeviceInfo]   - After removing IP: $cleanDisplayName")
+                    }
+                    
+                    if (cleanDisplayName.isNotBlank()) {
+                        if (shouldLog) {
+                            println("ADB_Randomizer: [DeviceInfo]   - Final display name from history: $cleanDisplayName")
+                        }
+                        return cleanDisplayName
+                    }
+                }
+                
+                // Если в истории нет, пытаемся извлечь имя из device.name
+                // Для Wi-Fi устройств device.name может быть типа "finepower_c3-192.168.1.132:5555" или "finepower_c3-TMMPH9252N201505"
+                val deviceName = device.name
+                if (shouldLog) {
+                    println("ADB_Randomizer: [DeviceInfo]   - Extracting from device.name: $deviceName")
+                }
+                
+                // Получаем реальный серийный номер устройства
+                val realSerial = getDeviceRealSerial(device) ?: device.serialNumber.substringBefore(":")
+                
+                // Убираем IP:PORT паттерн из имени
+                var cleanedName = deviceName
+                    .replace(Regex("-\\d+\\.\\d+\\.\\d+\\.\\d+:\\d+"), "") // Убираем -IP:PORT
+                    .replace(Regex("\\s+\\d+\\.\\d+\\.\\d+\\.\\d+$"), "") // Убираем IP в конце
+                
+                // Убираем реальный серийный номер из имени, если он там есть
+                if (realSerial != device.serialNumber && cleanedName.contains(realSerial)) {
+                    cleanedName = cleanedName.replace(realSerial, "").replace("--", "-").trim('-')
+                    if (shouldLog) {
+                        println("ADB_Randomizer: [DeviceInfo]   - Removed serial $realSerial from name")
+                    }
+                }
+                
+                // Убираем любые длинные серийные номера в конце (10+ символов)
+                cleanedName = cleanedName.replace(Regex("\\s+[A-Z0-9]{10,}$"), "")
+                
+                if (shouldLog) {
+                    println("ADB_Randomizer: [DeviceInfo]   - After cleaning: $cleanedName")
+                }
+                
+                // Если после очистки имя пустое, используем базовую обработку
+                if (cleanedName.isBlank()) {
+                    if (shouldLog) {
+                        println("ADB_Randomizer: [DeviceInfo]   - Cleaned name is blank, returning serial")
+                    }
+                    return device.serialNumber
+                }
+                
+                // Форматируем очищенное имя
+                val nameParts = cleanedName.replace("_", " ").split('-')
+                val manufacturer = nameParts.getOrNull(0)?.replaceFirstChar { 
+                    if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() 
+                } ?: ""
+                val model = nameParts.getOrNull(1)?.uppercase(Locale.getDefault()) ?: ""
+                val result = "$manufacturer $model".trim()
+                if (shouldLog) {
+                    println("ADB_Randomizer: [DeviceInfo]   - Final formatted name: $result")
+                }
+                return if (result.isNotBlank()) result else device.serialNumber
+            }
+            
+            // Для USB устройств используем стандартную логику
+            // Сначала получаем реальный серийный номер устройства
+            val realSerial = getDeviceRealSerial(device) ?: device.serialNumber
+            
+            // Убираем серийный номер из имени устройства если он там есть
+            var cleanedName = device.name
+            if (cleanedName.contains(realSerial)) {
+                cleanedName = cleanedName.replace(realSerial, "").replace("--", "-").trim('-')
+            }
+            
+            val nameParts = cleanedName.replace("_", " ").split('-')
             val manufacturer = nameParts.getOrNull(0)?.replaceFirstChar { 
                 if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() 
             } ?: ""

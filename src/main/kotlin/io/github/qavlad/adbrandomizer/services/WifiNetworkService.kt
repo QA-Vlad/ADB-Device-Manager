@@ -39,68 +39,188 @@ object WifiNetworkService {
      */
     fun getDeviceWifiSSID(device: IDevice): Result<String?> {
         return runDeviceOperation(device.name, "get device WiFi SSID") {
-            // Способ 1: через dumpsys wifi (работает на большинстве устройств)
-            val receiver = CollectingOutputReceiver()
-            device.executeShellCommand("dumpsys wifi | grep -E \"mWifiInfo SSID|current SSID\"", receiver, 
-                PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            // Получаем API уровень устройства
+            val apiLevel = device.getProperty(IDevice.PROP_BUILD_API_LEVEL)?.toIntOrNull() ?: 999
+            PluginLogger.info(LogCategory.NETWORK, "Device API level: %d", apiLevel)
             
-            var output = receiver.output.trim()
-            PluginLogger.debug(LogCategory.NETWORK, "Device WiFi info output: %s", output)
-            
-            // Пробуем извлечь SSID из вывода dumpsys wifi
             var ssid: String? = null
-            if (output.isNotBlank()) {
-                val ssidPattern = Regex("SSID: \"([^\"]+)\"")
-                val match = ssidPattern.find(output)
-                ssid = match?.groupValues?.getOrNull(1)
+            
+            // Для старых Android (6 и ниже) используем полный вывод без grep
+            if (apiLevel <= 23) {
+                PluginLogger.info(LogCategory.NETWORK, "Using full dumpsys for old Android (API %d)", apiLevel)
+                
+                // Получаем полный вывод dumpsys wifi
+                val fullReceiver = CollectingOutputReceiver()
+                device.executeShellCommand("dumpsys wifi", fullReceiver, 5, TimeUnit.SECONDS)
+                val fullOutput = fullReceiver.output
+                PluginLogger.info(LogCategory.NETWORK, "Dumpsys wifi output length: %d chars", fullOutput.length)
+                
+                // Логируем первые 500 символов для диагностики
+                if (fullOutput.length > 0) {
+                    val preview = if (fullOutput.length > 500) fullOutput.substring(0, 500) + "..." else fullOutput
+                    PluginLogger.info(LogCategory.NETWORK, "Dumpsys wifi preview: %s", preview)
+                }
+                
+                // Ищем SSID в разных форматах, которые использовались в старых Android
+                val patterns = listOf(
+                    Regex("SSID: \"([^\"]+)\""),           // Стандартный формат
+                    Regex("SSID: ([^,\\s]+)"),             // Без кавычек
+                    Regex("mWifiInfo.*SSID: ([^,]+)"),     // В строке mWifiInfo
+                    Regex("ssid=\"([^\"]+)\""),            // Альтернативный формат
+                    Regex("SSID=\"([^\"]+)\""),            // С большими буквами
+                    Regex("current.*ssid[: ]+\"?([^\"\\s,]+)\"?", RegexOption.IGNORE_CASE) // current ssid
+                )
+                
+                for (pattern in patterns) {
+                    val matches = pattern.findAll(fullOutput)
+                    var matchCount = 0
+                    for (match in matches) {
+                        matchCount++
+                        val foundSsid = match.groupValues[1].trim()
+                        PluginLogger.info(LogCategory.NETWORK, "Pattern '%s' match #%d: '%s'", pattern.pattern, matchCount, foundSsid)
+                        // Пропускаем невалидные SSID
+                        if (foundSsid.isNotEmpty() && 
+                            foundSsid != "<unknown ssid>" && 
+                            foundSsid != "0x" &&
+                            foundSsid != "null") {
+                            ssid = foundSsid
+                            PluginLogger.info(LogCategory.NETWORK, "Selected SSID via pattern '%s': %s", pattern.pattern, ssid)
+                            break
+                        } else {
+                            PluginLogger.info(LogCategory.NETWORK, "Skipped invalid SSID: '%s'", foundSsid)
+                        }
+                    }
+                    if (matchCount == 0) {
+                        PluginLogger.debug(LogCategory.NETWORK, "Pattern '%s' found no matches", pattern.pattern)
+                    }
+                    if (ssid != null) break
+                }
+            } else {
+                // Для новых Android используем grep как раньше
+                val receiver = CollectingOutputReceiver()
+                device.executeShellCommand("dumpsys wifi | grep -E \"mWifiInfo SSID|current SSID\"", receiver, 
+                    PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                
+                val output = receiver.output.trim()
+                PluginLogger.debug(LogCategory.NETWORK, "Device WiFi info output: %s", output)
+                
+                // Пробуем извлечь SSID из вывода dumpsys wifi
+                if (output.isNotBlank()) {
+                    val ssidPattern = Regex("SSID: \"([^\"]+)\"")
+                    val match = ssidPattern.find(output)
+                    ssid = match?.groupValues?.getOrNull(1)
+                }
             }
             
             // Способ 2: через dumpsys connectivity
             if (ssid == null) {
-                val connReceiver = CollectingOutputReceiver()
-                device.executeShellCommand("dumpsys connectivity | grep -i \"wifi.*ssid\"", connReceiver,
-                    PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-                
-                output = connReceiver.output.trim()
-                if (output.isNotBlank()) {
-                    // Ищем SSID в различных форматах
+                if (apiLevel <= 23) {
+                    // Для старых Android получаем полный вывод
+                    val connReceiver = CollectingOutputReceiver()
+                    device.executeShellCommand("dumpsys connectivity", connReceiver,
+                        PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                    
+                    val output = connReceiver.output
+                    // Ищем различные паттерны Wi-Fi информации
                     val patterns = listOf(
+                        Regex("extra: \"([^\"]+)\""),           // extra field часто содержит SSID
                         Regex("SSID: \"([^\"]+)\""),
                         Regex("SSID: ([^,\\s]+)"),
-                        Regex("\"([^\"]+)\"")
+                        Regex("networkId=\"([^\"]+)\""),
+                        Regex("\"([^\"]+)\".*state: CONNECTED", RegexOption.IGNORE_CASE)
                     )
                     
                     for (pattern in patterns) {
-                        val match = pattern.find(output)
-                        if (match != null) {
-                            ssid = match.groupValues[1]
+                        val matches = pattern.findAll(output)
+                        for (match in matches) {
+                            val foundSsid = match.groupValues[1].trim()
+                            if (foundSsid.isNotEmpty() && 
+                                foundSsid != "<unknown ssid>" && 
+                                foundSsid != "0x" &&
+                                foundSsid != "null" &&
+                                !foundSsid.startsWith("(") &&  // Пропускаем (unspecified) и подобное
+                                foundSsid.length < 33) {  // Максимальная длина SSID - 32 символа
+                                ssid = foundSsid
+                                PluginLogger.debug(LogCategory.NETWORK, "Found SSID via connectivity pattern: %s", ssid)
+                                break
+                            }
+                        }
+                        if (ssid != null) break
+                    }
+                } else {
+                    // Для новых Android используем grep
+                    val connReceiver = CollectingOutputReceiver()
+                    device.executeShellCommand("dumpsys connectivity | grep -i \"wifi.*ssid\"", connReceiver,
+                        PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                    
+                    val output = connReceiver.output.trim()
+                    if (output.isNotBlank()) {
+                        // Ищем SSID в различных форматах
+                        val patterns = listOf(
+                            Regex("SSID: \"([^\"]+)\""),
+                            Regex("SSID: ([^,\\s]+)"),
+                            Regex("\"([^\"]+)\"")
+                        )
+                        
+                        for (pattern in patterns) {
+                            val match = pattern.find(output)
+                            if (match != null) {
+                                ssid = match.groupValues[1]
+                                break
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Способ 3: через dumpsys netstats (для Android 5-6)
+            if (ssid == null && apiLevel in 21..23) {
+                val netstatsReceiver = CollectingOutputReceiver()
+                device.executeShellCommand("dumpsys netstats", netstatsReceiver,
+                    PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                
+                val output = netstatsReceiver.output
+                // Ищем информацию о Wi-Fi интерфейсе
+                val patterns = listOf(
+                    Regex("iface=wlan[0-9]*.*networkId=\"([^\"]+)\""),
+                    Regex("Active interfaces:.*wlan.*\"([^\"]+)\""),
+                    Regex("networkId=\"([^\"]+)\".*type=WIFI", RegexOption.IGNORE_CASE)
+                )
+                
+                for (pattern in patterns) {
+                    val match = pattern.find(output)
+                    if (match != null) {
+                        val foundSsid = match.groupValues[1].trim()
+                        if (foundSsid.isNotEmpty() && foundSsid != "0x") {
+                            ssid = foundSsid
+                            PluginLogger.debug(LogCategory.NETWORK, "Found SSID via netstats: %s", ssid)
                             break
                         }
                     }
                 }
             }
             
-            // Способ 3: через wpa_cli (для root устройств)
+            // Способ 4: через wpa_cli (для root устройств)
             if (ssid == null) {
                 val wpaReceiver = CollectingOutputReceiver()
                 device.executeShellCommand("su -c 'wpa_cli status 2>/dev/null | grep ^ssid='", wpaReceiver,
                     PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
                 
-                output = wpaReceiver.output.trim()
+                val output = wpaReceiver.output.trim()
                 if (output.startsWith("ssid=")) {
                     ssid = output.substring(5)
                 }
             }
             
-            // Способ 4: через cmd wifi status (Android 10+)
+            // Способ 5: через cmd wifi status (Android 10+)
             if (ssid == null) {
                 val cmdReceiver = CollectingOutputReceiver()
                 device.executeShellCommand("cmd wifi status", cmdReceiver,
                     PluginConfig.Adb.COMMAND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
                 
-                output = cmdReceiver.output
-                if (output.contains("Wifi is enabled")) {
-                    val lines = output.lines()
+                val cmdOutput = cmdReceiver.output
+                if (cmdOutput.contains("Wifi is enabled")) {
+                    val lines = cmdOutput.lines()
                     for (line in lines) {
                         if (line.contains("SSID:")) {
                             ssid = line.substringAfter("SSID:").trim().trim('"')
@@ -119,7 +239,7 @@ object WifiNetworkService {
                 ssid = ssid.substringBefore(",").trim()
             }
             
-            PluginLogger.debug(LogCategory.NETWORK, "Detected WiFi SSID: %s", ssid ?: "not connected")
+            PluginLogger.info(LogCategory.NETWORK, "Final detected WiFi SSID: %s", ssid ?: "not connected")
             ssid
         }
     }

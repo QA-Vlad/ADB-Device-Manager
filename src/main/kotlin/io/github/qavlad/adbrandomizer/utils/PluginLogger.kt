@@ -34,10 +34,12 @@ object PluginLogger {
         logWithRateLimit(LogLevel.DEBUG, category, key, message, *args)
     }
     
-    // Оставляем для будущего использования, может понадобиться для INFO логов с ограничением частоты
-    @Suppress("unused")
     fun infoWithRateLimit(category: LogCategory, key: String, message: String, vararg args: Any?) {
         logWithRateLimit(LogLevel.INFO, category, key, message, *args)
+    }
+    
+    fun warnWithRateLimit(category: LogCategory, key: String, message: String, vararg args: Any?) {
+        logWithRateLimit(LogLevel.WARN, category, key, message, *args)
     }
     
     private fun log(level: LogLevel, category: LogCategory, message: String, throwable: Throwable?, vararg args: Any?) {
@@ -72,6 +74,10 @@ object PluginLogger {
     
     fun wifiConnectionFailed(ipAddress: String, port: Int, exception: Exception? = null) {
         warn(LogCategory.ADB_CONNECTION, "Wi-Fi connection failed: %s:%d", exception, ipAddress, port)
+    }
+    
+    fun wifiConnectionFailedDebug(ipAddress: String, port: Int, exception: Exception? = null) {
+        debug(LogCategory.ADB_CONNECTION, "Wi-Fi connection failed: %s:%d - %s", ipAddress, port, exception?.message ?: "Unknown error")
     }
     
     // Для обратной совместимости

@@ -20,6 +20,7 @@ internal object AdbConnectionManager {
     private var customBridge: AndroidDebugBridge? = null
     private var isInitialized = false
     private var lastDeviceCount = -1
+    private var lastDeviceSerials = emptySet<String>()
 
     @Suppress("DEPRECATION")
     suspend fun getOrCreateDebugBridge(): Result<AndroidDebugBridge> = withContext(Dispatchers.IO) {
@@ -90,14 +91,29 @@ internal object AdbConnectionManager {
             }
 
             val devices = bridge.devices.filter { it.isOnline }
+            val currentSerials = devices.map { it.serialNumber }.toSet()
 
-            if (devices.size != lastDeviceCount) {
-                PluginLogger.info("Connected devices count changed: %d", devices.size)
-                lastDeviceCount = devices.size
+            // Логируем только если действительно изменился список устройств
+            if (currentSerials != lastDeviceSerials) {
+                PluginLogger.info("Connected devices changed: %d devices", devices.size)
                 
-                devices.forEach { device ->
-                    PluginLogger.deviceConnected(device.name, device.serialNumber)
+                // Находим добавленные и удалённые устройства
+                val added = currentSerials - lastDeviceSerials
+                val removed = lastDeviceSerials - currentSerials
+                
+                added.forEach { serial ->
+                    val device = devices.find { it.serialNumber == serial }
+                    if (device != null) {
+                        PluginLogger.deviceConnected(device.name, serial)
+                    }
                 }
+                
+                removed.forEach { serial ->
+                    PluginLogger.info(LogCategory.ADB_CONNECTION, "Device disconnected: %s", serial)
+                }
+                
+                lastDeviceCount = devices.size
+                lastDeviceSerials = currentSerials
             }
 
             devices
