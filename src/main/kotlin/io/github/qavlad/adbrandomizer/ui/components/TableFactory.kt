@@ -62,8 +62,18 @@ class TableFactory {
                 if (row >= rowCount || column >= columnCount) {
                     return super.prepareRenderer(renderer, row, column)
                 }
-
-                val component = super.prepareRenderer(renderer, row, column)
+                
+                // Проверяем, является ли это строкой с плюсиком
+                val isButtonRow = row >= 0 && row < model.rowCount && model.getValueAt(row, 0) == "+"
+                
+                // Для строки с плюсиком НЕ вызываем super.prepareRenderer для колонок кроме первой
+                // чтобы избежать применения стандартного hover эффекта
+                val component = if (isButtonRow && column > 0) {
+                    // Получаем компонент напрямую от renderer без super обработки
+                    renderer.getTableCellRendererComponent(this, model.getValueAt(row, column), false, false, row, column)
+                } else {
+                    super.prepareRenderer(renderer, row, column)
+                }
 
                 if (component is JComponent) {
                     applyTableCellStyles(component, row, column, model, hoverStateProvider())
@@ -157,14 +167,19 @@ class TableFactory {
 
             // Применяем hover эффект только если мышь именно на этой ячейке
             if (isHovered) {
-                val normalBg = component.background
-                val hoverBg = normalBg?.brighter()
-                component.background = hoverBg ?: normalBg
+                component.background = ColorScheme.getTableCellBackground(
+                    isSelected = false,
+                    isHovered = true,
+                    isError = false
+                )
+            } else {
+                component.background = component.parent?.background
             }
-            component.isOpaque = true
+            component.isOpaque = isHovered
         } else if (isButtonRow) {
-            // Для остальных ячеек строки с кнопкой - обычный фон
-            component.isOpaque = true
+            // Для остальных ячеек строки с кнопкой - обычный фон без hover
+            component.background = component.parent?.background
+            component.isOpaque = false
         } else {
             // Обычная логика для других строк
             val isHovered = hoverState.isTableCellHovered(row, column)

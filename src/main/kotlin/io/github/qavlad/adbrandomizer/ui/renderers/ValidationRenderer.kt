@@ -13,6 +13,7 @@ import java.awt.Graphics
 import javax.swing.JTable
 import javax.swing.table.DefaultTableCellRenderer
 import javax.swing.JLabel
+import javax.swing.JComponent
 import javax.swing.BorderFactory
 import com.intellij.util.ui.JBUI
 import com.intellij.ui.JBColor
@@ -36,10 +37,26 @@ class ValidationRenderer(
             false
         }
         
-        // Для строки с плюсиком возвращаем обычный компонент без hover эффектов
+        // Для строки с плюсиком применяем hover только к первой колонке (где сам плюсик)
         if (isButtonRow) {
             val component = super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column)
-            component.background = table.background
+            // Hover эффект только для колонки с плюсиком (column == 0)
+            if (column == 0 && hoverState().isTableCellHovered(row, column)) {
+                component.background = ColorScheme.getTableCellBackground(
+                    isSelected = false,
+                    isHovered = true,
+                    isError = false
+                )
+                if (component is JComponent) {
+                    component.isOpaque = true
+                }
+            } else {
+                // Для остальных колонок - прозрачный фон
+                component.background = table.background
+                if (component is JComponent) {
+                    component.isOpaque = false
+                }
+            }
             component.foreground = table.foreground
             border = null
             return component

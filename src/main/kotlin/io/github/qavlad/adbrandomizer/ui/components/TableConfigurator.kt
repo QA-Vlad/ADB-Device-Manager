@@ -152,13 +152,21 @@ class TableConfigurator(
                     if (!hoverState().isTableCellHovered(row, column)) {
                         setHoverState(hoverState().withTableHover(row, column))
                         
-                        repaintTableCells(oldHoverState, row, column)
+                        // Перерисовываем только ячейку с плюсиком
+                        SwingUtilities.invokeLater {
+                            val rect = table.getCellRect(row, 0, true)
+                            table.repaint(rect)
+                        }
                     }
                 } else {
-                    // Не первая колонка в строке с плюсиком - очищаем любой hover
-                    if (oldHoverState.hoveredTableRow >= 0 || oldHoverState.hoveredTableColumn >= 0) {
+                    // Не первая колонка в строке с плюсиком - всегда очищаем hover если он был
+                    if (oldHoverState.hoveredTableRow >= 0 && oldHoverState.hoveredTableColumn >= 0) {
                         setHoverState(hoverState().clearTableHover())
-                        repaintTableCells(oldHoverState, -1, -1)
+                        // Перерисовываем старую hover ячейку
+                        SwingUtilities.invokeLater {
+                            val rect = table.getCellRect(oldHoverState.hoveredTableRow, oldHoverState.hoveredTableColumn, true)
+                            table.repaint(rect)
+                        }
                     }
                 }
             } else {
@@ -243,6 +251,8 @@ class TableConfigurator(
                     } else {
                         table?.font
                     }
+                    // Hover обрабатывается в ValidationRenderer
+                    isOpaque = false
                 }
             }
             // Make the cell not editable
