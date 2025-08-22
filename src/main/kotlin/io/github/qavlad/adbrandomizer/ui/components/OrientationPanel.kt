@@ -170,6 +170,12 @@ class OrientationPanel(private val table: JTable) : JPanel() {
         }
     }
     
+    fun resetToPortrait() {
+        if (currentOrientation == Orientation.LANDSCAPE) {
+            switchToPortrait()
+        }
+    }
+    
     private fun switchToPortrait() {
         if (currentOrientation == Orientation.PORTRAIT) return
         

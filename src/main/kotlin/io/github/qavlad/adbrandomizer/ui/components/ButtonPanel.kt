@@ -19,6 +19,9 @@ class ButtonPanel(
     private fun setupUI() {
         layout = BoxLayout(this, BoxLayout.Y_AXIS)
         border = BorderFactory.createTitledBorder("Controls")
+        
+        // Отключаем автоматическое получение фокуса панелью
+        isFocusable = false
 
         // Группируем кнопки логически
         add(createCenteredButton("RANDOM SIZE AND DPI") { onRandomAction(true, true) })
@@ -39,6 +42,9 @@ class ButtonPanel(
         val button = JButton(text).apply {
             alignmentX = CENTER_ALIGNMENT
             addActionListener { action() }
+            // Полностью отключаем возможность получения фокуса
+            isFocusable = false
+            setFocusable(false)
         }
         ButtonUtils.addHoverEffect(button)
         

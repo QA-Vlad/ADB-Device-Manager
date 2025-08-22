@@ -57,10 +57,10 @@ class PresetsPersistenceService {
                     if (tempList != null) {
                         val orderedPresets = mutableListOf<DevicePreset>()
                         
-                        // Восстанавливаем порядок из памяти
-                        memoryOrder.forEach { key ->
+                        // Восстанавливаем порядок из памяти (memoryOrder содержит ID пресетов)
+                        memoryOrder.forEach { presetId ->
                             val preset = tempList.presets.find { p ->
-                                "${p.label}|${p.size}|${p.dpi}" == key
+                                p.id == presetId
                             }
                             if (preset != null) {
                                 orderedPresets.add(preset)
@@ -68,10 +68,9 @@ class PresetsPersistenceService {
                         }
                         
                         // Добавляем новые пресеты, которых не было в сохранённом порядке
-                        val savedKeys = memoryOrder.toSet()
+                        val savedIds = memoryOrder.toSet()
                         tempList.presets.forEach { preset ->
-                            val key = "${preset.label}|${preset.size}|${preset.dpi}"
-                            if (key !in savedKeys) {
+                            if (preset.id !in savedIds) {
                                 orderedPresets.add(preset)
                             }
                         }
@@ -177,31 +176,28 @@ class PresetsPersistenceService {
             }
             
             if (savedOrder != null) {
-                // Создаем карту обновленных пресетов из tempList
-                val updatedPresetsMap = tempList.presets.associateBy { 
-                    "${it.label}|${it.size}|${it.dpi}"
-                }
+                // Создаем карту обновленных пресетов из tempList по ID
+                val updatedPresetsMap = tempList.presets.associateBy { it.id }
                 
                 // Создаем новый список с сохранённым порядком, но обновленным содержимым
                 val presetsWithOriginalOrder = mutableListOf<DevicePreset>()
                 
-                // Добавляем пресеты в сохранённом порядке
-                savedOrder.forEach { presetKey ->
-                    val updatedPreset = updatedPresetsMap[presetKey]
+                // Добавляем пресеты в сохранённом порядке (savedOrder содержит ID пресетов)
+                savedOrder.forEach { presetId ->
+                    val updatedPreset = updatedPresetsMap[presetId]
                     if (updatedPreset != null) {
                         presetsWithOriginalOrder.add(updatedPreset)
                     } else {
-                        println("ADB_DEBUG: Preset '$presetKey' was deleted in Show All mode")
+                        println("ADB_DEBUG: Preset with ID '$presetId' was deleted")
                     }
                 }
                 
                 // Добавляем новые пресеты, которых не было в сохранённом порядке
-                val savedKeys = savedOrder.toSet()
+                val savedIds = savedOrder.toSet()
                 tempList.presets.forEach { preset ->
-                    val key = "${preset.label}|${preset.size}|${preset.dpi}"
-                    if (key !in savedKeys) {
+                    if (preset.id !in savedIds) {
                         presetsWithOriginalOrder.add(preset)
-                        println("ADB_DEBUG: New preset '$key' added in Show All mode")
+                        println("ADB_DEBUG: New preset '${preset.label}' added")
                     }
                 }
                 

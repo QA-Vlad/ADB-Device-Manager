@@ -6,6 +6,8 @@ import io.github.qavlad.adbrandomizer.services.PresetListService
 import io.github.qavlad.adbrandomizer.ui.services.DuplicateManager
 import io.github.qavlad.adbrandomizer.ui.services.TempListsManager
 import io.github.qavlad.adbrandomizer.ui.services.SelectionTracker
+import io.github.qavlad.adbrandomizer.utils.PluginLogger
+import io.github.qavlad.adbrandomizer.utils.logging.LogCategory
 
 /**
  * Инициализатор обработчиков событий для диалога настроек.
@@ -30,7 +32,7 @@ class EventHandlersInitializer(
     ): PresetListManagerPanel {
         return PresetListManagerPanel(
             onListChanged = { presetList ->
-                println("ADB_DEBUG: onListChanged called with: ${presetList.name}")
+                println("ADB_DEBUG: onListChanged called with: ${presetList.name} having ${presetList.presets.size} presets")
                 // Останавливаем редактирование если оно активно
                 controller.stopTableEditing()
                 
@@ -45,11 +47,17 @@ class EventHandlersInitializer(
                             controller.serviceLocator.presetOrderManager.updateNormalModeOrderInMemory(controller.stateManager.currentPresetList!!.id, tablePresets)
                             
                             // Также обновляем tempList чтобы при переключении обратно порядок сохранился
-                            val tempList = tempListsManager.getTempList(controller.stateManager.currentPresetList!!.id)
-                            if (tempList != null) {
-                                tempList.presets.clear()
-                                tempList.presets.addAll(tablePresets)
-                                println("ADB_DEBUG: Updated tempList order before switching lists for '${controller.stateManager.currentPresetList!!.name}'")
+                            // НО НЕ делаем этого, если только что произошёл reset
+                            val listId = controller.stateManager.currentPresetList!!.id
+                            if (!tempListsManager.isRecentlyReset(listId)) {
+                                val tempList = tempListsManager.getTempList(listId)
+                                if (tempList != null) {
+                                    tempList.presets.clear()
+                                    tempList.presets.addAll(tablePresets)
+                                    println("ADB_DEBUG: Updated tempList order before switching lists for '${controller.stateManager.currentPresetList!!.name}'")
+                                }
+                            } else {
+                                println("ADB_DEBUG: Skipping tempList update from tablePresets because list $listId was recently reset")
                             }
                             
                             println("ADB_DEBUG: Updated in-memory order before switching lists for '${controller.stateManager.currentPresetList!!.name}' with ${tablePresets.size} presets")
@@ -66,8 +74,25 @@ class EventHandlersInitializer(
                 controller.addTableModelListener()
                 
                 dialogState.withListSwitching {
-                    // Переключаемся на временную копию нового списка
+                    // При ресете нужно обновить временный список
                     val newCurrentList = tempListsManager.getTempList(presetList.id)
+                    
+                    println("ADB_DEBUG: In onListChanged.withListSwitching:")
+                    println("ADB_DEBUG:   presetList.id: ${presetList.id}, has ${presetList.presets.size} presets")
+                    println("ADB_DEBUG:   newCurrentList from tempListsManager: ${newCurrentList?.presets?.size} presets")
+                    
+                    // Если временный список существует, но содержит меньше пресетов чем оригинал,
+                    // это может быть результат ресета - обновляем временный список
+                    if (newCurrentList != null && newCurrentList.presets.size < presetList.presets.size) {
+                        PluginLogger.warn(LogCategory.PRESET_SERVICE,
+                            "Updating temp list after reset: %d -> %d presets",
+                            newCurrentList.presets.size, presetList.presets.size)
+                        // Обновляем временный список данными из переданного списка
+                        newCurrentList.presets.clear()
+                        newCurrentList.presets.addAll(presetList.presets.map { it.copy(id = it.id) })
+                    }
+                    
+                    println("ADB_DEBUG:   Final newCurrentList to be used: ${newCurrentList?.presets?.size} presets")
                     onCurrentListChanged(newCurrentList)
                     println("ADB_DEBUG: onListChanged - set currentPresetList to: ${newCurrentList?.name}, presets: ${newCurrentList?.presets?.size}")
                     
@@ -81,6 +106,11 @@ class EventHandlersInitializer(
                     
                     if (controller.isTableInitialized()) {
                         onLoadPresetsIntoTable()
+                        // Очищаем флаг reset после загрузки данных в таблицу
+                        if (tempListsManager.isRecentlyReset(presetList.id)) {
+                            tempListsManager.clearResetFlag(presetList.id)
+                            println("ADB_DEBUG: Cleared reset flag for list ${presetList.id} after loading presets into table")
+                        }
                         // Ориентация уже применена к данным в initializeTempPresetLists
                         println("ADB_DEBUG: onListChanged - orientation already applied to all lists")
                     }
@@ -120,6 +150,38 @@ class EventHandlersInitializer(
                 // Удаляем список из tempLists
                 tempListsManager.removeList(deletedListId)
                 println("ADB_DEBUG: Removed list with id $deletedListId from tempLists")
+            },
+            onListReset = { listId, resetList ->
+                println("ADB_DEBUG: EventHandlersInitializer.onListReset called")
+                println("ADB_DEBUG:   listId: $listId")
+                println("ADB_DEBUG:   resetList has ${resetList.presets.size} presets")
+                
+                // Отмечаем список как недавно сброшенный
+                tempListsManager.markAsRecentlyReset(listId)
+                // Обновляем временный список после ресета
+                tempListsManager.updateTempList(listId, resetList)
+                PluginLogger.info(LogCategory.PRESET_SERVICE, 
+                    "Updated temp list after reset: %s with %d presets", 
+                    resetList.name, resetList.presets.size)
+            },
+            onListCreated = { newList ->
+                // Добавляем новый список в tempLists
+                tempListsManager.getMutableTempLists()[newList.id] = newList
+                PluginLogger.info(LogCategory.PRESET_SERVICE, 
+                    "Added new list to tempLists: %s with id %s", 
+                    newList.name, newList.id)
+            },
+            onClearListOrderInMemory = { listId ->
+                // Очищаем сохранённый порядок drag & drop для списка при его сбросе
+                controller.serviceLocator.presetOrderManager.clearNormalModeOrderInMemoryForList(listId)
+                PluginLogger.info(LogCategory.PRESET_SERVICE, 
+                    "Cleared in-memory order for reset list: %s", listId)
+            },
+            onResetOrientation = {
+                // Сбрасываем ориентацию в вертикальную при сбросе списка
+                controller.orientationPanel?.resetToPortrait()
+                PluginLogger.info(LogCategory.UI_EVENTS, 
+                    "Reset orientation to portrait after preset list reset")
             }
         )
     }

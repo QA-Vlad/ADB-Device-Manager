@@ -59,7 +59,7 @@ class PresetsDialogController(
     lateinit var listManagerPanel: PresetListManagerPanel
         private set
     private var tableWithButtonPanel: TableWithAddButtonPanel? = null
-    private var orientationPanel: OrientationPanel? = null
+    internal var orientationPanel: OrientationPanel? = null
 
     // Делегаты для удобства доступа
     private val dialogState get() = serviceLocator.dialogState
@@ -1157,7 +1157,7 @@ class PresetsDialogController(
         }
     }
     
-    override fun getTableSortingService(): TableSortingService? {
+    override fun getTableSortingService(): TableSortingService {
         return TableSortingService
     }
     

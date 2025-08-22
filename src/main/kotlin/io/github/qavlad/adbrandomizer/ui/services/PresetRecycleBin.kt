@@ -52,8 +52,10 @@ class PresetRecycleBin {
         
         if (matchingEntry != null) {
             val info = deletedPresets.remove(matchingEntry.key)
-            println("ADB_DEBUG: PresetRecycleBin - restored preset by partial key: ${info!!.preset.label} (id: ${info.preset.id}) to list '$listName'")
-            return info.preset
+            if (info != null) {
+                println("ADB_DEBUG: PresetRecycleBin - restored preset by partial key: ${info.preset.label} (id: ${info.preset.id}) to list '$listName'")
+                return info.preset
+            }
         }
         
         println("ADB_DEBUG: PresetRecycleBin - no preset found for list '$listName' at index $originalIndex")

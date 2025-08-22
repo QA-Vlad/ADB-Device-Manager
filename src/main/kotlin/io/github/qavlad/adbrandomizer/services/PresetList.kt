@@ -6,10 +6,11 @@ import java.util.UUID
  * Представляет список пресетов с уникальным идентификатором и именем
  */
 data class PresetList(
-    val id: String = UUID.randomUUID().toString(),
+    var id: String = UUID.randomUUID().toString(),
     var name: String,
     var presets: MutableList<DevicePreset> = mutableListOf(),
-    var isDefault: Boolean = false
+    var isDefault: Boolean = false,
+    var isImported: Boolean = false
 ) {
     /**
      * Создает копию списка с новым ID
@@ -19,7 +20,8 @@ data class PresetList(
             id = UUID.randomUUID().toString(),
             name = newName,
             presets = presets.map { it.copy(id = it.id) }.toMutableList(),
-            isDefault = false
+            isDefault = false,
+            isImported = false
         )
     }
 }

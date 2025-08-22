@@ -57,7 +57,7 @@ class PresetOrderManager {
         
         println("ADB_DEBUG: PresetOrderManager.saveShowAllModeOrder - saving ${order.size} items:")
         order.take(5).forEachIndexed { index, key ->
-            println("ADB_DEBUG:   [$index] $key")
+        println("ADB_DEBUG:   [$index] $key")
         }
         if (order.size > 5) {
             println("ADB_DEBUG:   ... and ${order.size - 5} more items")
@@ -221,6 +221,15 @@ class PresetOrderManager {
      */
     fun getNormalModeOrderInMemory(): Map<String, List<String>> {
         return normalModeOrderInMemory.toMap()
+    }
+    
+    /**
+     * Очищает порядок в памяти для конкретного списка
+     * Используется при сбросе списка к дефолтному состоянию
+     */
+    fun clearNormalModeOrderInMemoryForList(listId: String) {
+        normalModeOrderInMemory.remove(listId)
+        println("ADB_DEBUG: PresetOrderManager.clearNormalModeOrderInMemoryForList - cleared in-memory order for listId: $listId")
     }
 
 }
