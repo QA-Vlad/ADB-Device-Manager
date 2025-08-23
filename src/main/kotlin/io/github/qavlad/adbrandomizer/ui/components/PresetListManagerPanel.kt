@@ -9,6 +9,7 @@ import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.ui.components.JBCheckBox
 import com.intellij.util.ui.JBUI
+import com.intellij.ui.JBColor
 import io.github.qavlad.adbrandomizer.services.PresetList
 import io.github.qavlad.adbrandomizer.services.PresetListService
 import io.github.qavlad.adbrandomizer.ui.dialogs.ExportPresetListsDialog
@@ -35,8 +36,10 @@ class PresetListManagerPanel(
     private val onListDeleted: ((String) -> Unit)? = null,
     private val onListReset: ((String, PresetList) -> Unit)? = null,
     private val onListCreated: ((PresetList) -> Unit)? = null,
+    private val onListImported: ((PresetList) -> Unit)? = null,
     private val onClearListOrderInMemory: ((String) -> Unit)? = null,
-    private val onResetOrientation: (() -> Unit)? = null
+    private val onResetOrientation: (() -> Unit)? = null,
+    private val onLoadPresetsIntoTable: (() -> Unit)? = null
 ) : JPanel(BorderLayout()) {
     
     private val listComboBox = ComboBox<PresetListItem>()
@@ -366,17 +369,21 @@ class PresetListManagerPanel(
         val metadata = PresetListService.getAllListsMetadata()
         val listNames = metadata.map { it.name }.toTypedArray()
         
+        // Получаем имя активного списка и состояние "Show all"
+        val activeListName = PresetListService.getActivePresetList()?.name
+        val showAllSelected = showAllPresetsCheckbox.isSelected
+        
         // Используем новый диалог с поддержкой навигации
-        val dialog = ExportPresetListsDialog(listNames)
+        val dialog = ExportPresetListsDialog(listNames, activeListName, showAllSelected)
         
         if (dialog.showAndGet()) { // OK button clicked
             val selectedListNames = dialog.getSelectedLists()
-            val selectedLists = mutableListOf<String>()
+            val selectedLists = mutableListOf<Pair<String, String>>() // ID to Name
             
             // Сопоставляем имена с ID
             selectedListNames.forEach { name ->
                 metadata.find { it.name == name }?.let {
-                    selectedLists.add(it.id)
+                    selectedLists.add(it.id to it.name)
                 }
             }
             
@@ -389,74 +396,673 @@ class PresetListManagerPanel(
                 return
             }
             
-            // Выбор файла для сохранения с использованием современного диалога
-            val descriptor = FileSaverDescriptor(
-                "Export Preset Lists",
-                "Choose location to save preset lists",
-                "json"
-            )
+            // Загружаем актуальные списки для экспорта
+            val allAvailableLists = PresetListService.getAllAvailableLists()
+            val listsToExport = selectedLists.mapNotNull { (listId, listName) ->
+                allAvailableLists.find { it.id == listId }?.let { it to listName }
+            }
             
-            val dialog = FileChooserFactory.getInstance().createSaveFileDialog(descriptor, null)
-            val virtualFile = dialog.save(null as VirtualFile?, "preset_lists_export.json")
+            if (listsToExport.isEmpty()) {
+                Messages.showWarningDialog(
+                    this,
+                    "No valid lists found to export",
+                    "Export Warning"
+                )
+                return
+            }
             
-            virtualFile?.let { vf ->
-                val file = vf.file
-                
-                try {
-                    PresetListService.exportLists(selectedLists, file)
-                    Messages.showInfoMessage(
-                        this,
-                        "Successfully exported ${selectedLists.size} preset list(s)",
-                        "Export Success"
+            try {
+                if (listsToExport.size == 1) {
+                    // Экспорт одного списка - сохраняем как имя_списка.json
+                    val (list, name) = listsToExport.first()
+                    val sanitizedName = name.replace(Regex("[^a-zA-Z0-9\\s_-]"), "_")
+                    
+                    val descriptor = FileSaverDescriptor(
+                        "Export Preset List",
+                        "Choose location to save preset list",
+                        "json"
                     )
-                } catch (e: Exception) {
-                    Messages.showErrorDialog(
-                        this,
-                        "Failed to export preset lists: ${e.message}",
-                        "Export Error"
-                    )
+                    
+                    val dialog = FileChooserFactory.getInstance().createSaveFileDialog(descriptor, null)
+                    val virtualFile = dialog.save(null as VirtualFile?, "$sanitizedName.json")
+                    
+                    virtualFile?.let { vf ->
+                        // Экспортируем как массив с одним элементом для совместимости
+                        PresetListService.exportListsDirectly(listOf(list), vf.file)
+                        Messages.showInfoMessage(
+                            this,
+                            "Successfully exported preset list: $name",
+                            "Export Success"
+                        )
+                    }
+                } else {
+                    // Экспорт нескольких списков - создаем папку с отдельными файлами
+                    val timestamp = java.time.LocalDateTime.now()
+                        .format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss"))
+                    val folderName = "plugin_export_$timestamp"
+                    
+                    // Выбор директории для сохранения
+                    val descriptor = FileChooserDescriptor(
+                        false, // chooseFiles
+                        true, // chooseFolders
+                        false, // chooseMultiple
+                        false, // chooseJarContents
+                        false, // chooseJarsAsFiles
+                        false  // chooseArchives
+                    ).apply {
+                        title = "Choose Directory for Export"
+                        description = "Select where to create export folder"
+                    }
+                    
+                    val virtualFiles = FileChooserFactory.getInstance()
+                        .createFileChooser(descriptor, null, this)
+                        .choose(null)
+                    
+                    virtualFiles.firstOrNull()?.let { baseDir ->
+                        val exportDir = File(baseDir.path, folderName)
+                        if (!exportDir.exists()) {
+                            exportDir.mkdirs()
+                        }
+                        
+                        var exportedCount = 0
+                        listsToExport.forEach { (list, name) ->
+                            val sanitizedName = name.replace(Regex("[^a-zA-Z0-9\\s_-]"), "_")
+                            val file = File(exportDir, "$sanitizedName.json")
+                            // Экспортируем каждый список как массив с одним элементом
+                            PresetListService.exportListsDirectly(listOf(list), file)
+                            exportedCount++
+                        }
+                        
+                        Messages.showInfoMessage(
+                            this,
+                            "Successfully exported $exportedCount preset list(s) to:\n${exportDir.absolutePath}",
+                            "Export Success"
+                        )
+                    }
                 }
+            } catch (e: Exception) {
+                Messages.showErrorDialog(
+                    this,
+                    "Failed to export preset lists: ${e.message}",
+                    "Export Error"
+                )
             }
         }
     }
     
     private fun importLists() {
-        // Используем современный диалог выбора файла
-        val descriptor = FileChooserDescriptor(
-            true, // chooseFiles
-            false, // chooseFolders
-            false, // chooseMultiple
-            false, // chooseJarContents
-            false, // chooseJarsAsFiles
-            false  // chooseArchives
-        ).apply {
-            title = "Import Preset Lists"
-            description = "Choose JSON file with preset lists"
-            withFileFilter { virtualFile ->
-                virtualFile.extension.equals("json", ignoreCase = true)
+        // Создаем кастомный диалог для выбора опций импорта
+        val importDialog = object : com.intellij.openapi.ui.DialogWrapper(true) {
+            private lateinit var fileListModel: DefaultListModel<File>
+            private lateinit var fileList: com.intellij.ui.components.JBList<File>
+            private lateinit var dropPanel: JPanel
+            private lateinit var dropLabel: JLabel
+            private var isDragging = false
+            
+            init {
+                title = "Import Preset Lists"
+                init()
+            }
+            
+            override fun createCenterPanel(): JComponent {
+                val panel = JPanel(BorderLayout())
+                
+                
+                // Создаем панель для drag & drop с визуальной индикацией
+                val centerPanel = JPanel(BorderLayout())
+                
+                // Модель и список для отображения выбранных файлов
+                fileListModel = DefaultListModel()
+                fileList = com.intellij.ui.components.JBList(fileListModel)
+                fileList.cellRenderer = object : DefaultListCellRenderer() {
+                    override fun getListCellRendererComponent(
+                        list: JList<*>?,
+                        value: Any?,
+                        index: Int,
+                        isSelected: Boolean,
+                        cellHasFocus: Boolean
+                    ): java.awt.Component {
+                        super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus)
+                        if (value is File) {
+                            text = value.name
+                            icon = if (value.isDirectory) AllIcons.Nodes.Folder else AllIcons.FileTypes.Json
+                        }
+                        return this
+                    }
+                }
+                
+                // Создаем панель с индикатором drag & drop
+                dropPanel = JPanel(BorderLayout())
+                dropPanel.background = com.intellij.util.ui.UIUtil.getPanelBackground()
+                dropPanel.border = BorderFactory.createCompoundBorder(
+                    BorderFactory.createDashedBorder(
+                        com.intellij.util.ui.UIUtil.getBoundsColor(), 
+                        2f, 5f, 5f, false
+                    ),
+                    JBUI.Borders.empty(20)
+                )
+                
+                // Создаем лейбл с иконкой и текстом
+                dropLabel = JLabel().apply {
+                    horizontalAlignment = SwingConstants.CENTER
+                    verticalAlignment = SwingConstants.CENTER
+                    icon = AllIcons.Actions.Upload
+                    text = "<html><center><br>Drop JSON files or folders here<br>" +
+                           "<small style='color:gray'>or use buttons below to select files</small></center></html>"
+                    foreground = com.intellij.util.ui.UIUtil.getLabelDisabledForeground()
+                }
+                dropPanel.add(dropLabel, BorderLayout.CENTER)
+                
+                // Создаем scrollPane для списка файлов
+                val scrollPane = com.intellij.ui.components.JBScrollPane(fileList)
+                scrollPane.isVisible = false
+                scrollPane.isOpaque = false
+                scrollPane.viewport.isOpaque = false
+                fileList.isOpaque = false
+                
+                // Создаем контейнер с JLayeredPane для наложения
+                val contentContainer = JLayeredPane()
+                contentContainer.preferredSize = Dimension(450, 250)
+                contentContainer.layout = null
+                
+                // Устанавливаем размеры и позиции для компонентов
+                dropPanel.setBounds(0, 0, 450, 250)
+                scrollPane.setBounds(0, 0, 450, 250)
+                
+                // Добавляем компоненты в разные слои
+                contentContainer.add(dropPanel, JLayeredPane.DEFAULT_LAYER)
+                contentContainer.add(scrollPane, JLayeredPane.PALETTE_LAYER)
+                
+                // Слушатель для обновления размеров при изменении контейнера
+                contentContainer.addComponentListener(object : java.awt.event.ComponentAdapter() {
+                    override fun componentResized(e: java.awt.event.ComponentEvent?) {
+                        val width = contentContainer.width
+                        val height = contentContainer.height
+                        dropPanel.setBounds(0, 0, width, height)
+                        scrollPane.setBounds(0, 0, width, height)
+                    }
+                })
+                
+                // Функция для сброса визуального состояния drag & drop
+                fun resetDragVisualState() {
+                    if (isDragging) {
+                        isDragging = false
+                        // Просто обновляем UI
+                        SwingUtilities.invokeLater {
+                            contentContainer.repaint()
+                        }
+                    }
+                }
+                
+                // Добавляем поддержку Drag & Drop с визуальной обратной связью
+                val transferHandler = object : TransferHandler() {
+                    override fun canImport(support: TransferSupport): Boolean {
+                        val canImport = support.isDataFlavorSupported(java.awt.datatransfer.DataFlavor.javaFileListFlavor)
+                        PluginLogger.info("TransferHandler.canImport called, result: $canImport", LogCategory.DRAG_DROP)
+                        return canImport
+                    }
+                    
+                    override fun importData(support: TransferSupport): Boolean {
+                        PluginLogger.info("TransferHandler.importData called", LogCategory.DRAG_DROP)
+                        
+                        if (!canImport(support)) {
+                            PluginLogger.warn("TransferHandler.importData: canImport returned false", LogCategory.DRAG_DROP)
+                            return false
+                        }
+                        
+                        try {
+                            val transferable = support.transferable
+                            @Suppress("UNCHECKED_CAST")
+                            val files = transferable.getTransferData(
+                                java.awt.datatransfer.DataFlavor.javaFileListFlavor
+                            ) as List<File>
+                            
+                            PluginLogger.info("TransferHandler.importData: received ${files.size} files", LogCategory.DRAG_DROP)
+                            
+                            val nonJsonFiles = mutableListOf<String>()
+                            val emptyFolders = mutableListOf<String>()
+                            var addedCount = 0
+                            
+                            files.forEach { file ->
+                                when {
+                                    file.isDirectory -> {
+                                        val jsonFiles = file.listFiles { f -> 
+                                            f.isFile && f.extension.equals("json", ignoreCase = true)
+                                        }
+                                        if (jsonFiles.isNullOrEmpty()) {
+                                            emptyFolders.add(file.name)
+                                        } else {
+                                            if (!fileListModel.contains(file)) {
+                                                fileListModel.addElement(file)
+                                                addedCount++
+                                                PluginLogger.info("Added folder to import list: ${file.path}", LogCategory.DRAG_DROP)
+                                            }
+                                        }
+                                    }
+                                    file.extension.equals("json", ignoreCase = true) -> {
+                                        if (!fileListModel.contains(file)) {
+                                            fileListModel.addElement(file)
+                                            addedCount++
+                                            PluginLogger.info("Added JSON file to import list: ${file.path}", LogCategory.DRAG_DROP)
+                                        }
+                                    }
+                                    else -> {
+                                        nonJsonFiles.add(file.name)
+                                        PluginLogger.info("Skipped non-JSON file: ${file.name}", LogCategory.DRAG_DROP)
+                                    }
+                                }
+                            }
+                            
+                            PluginLogger.info("TransferHandler.importData: Added $addedCount items, fileListModel size: ${fileListModel.size()}", LogCategory.DRAG_DROP)
+                            
+                            // Показываем список файлов и делаем dropPanel полупрозрачной
+                            if (fileListModel.size() > 0) {
+                                PluginLogger.info("TransferHandler.importData: Showing file list, making drop panel transparent", LogCategory.DRAG_DROP)
+                                SwingUtilities.invokeLater {
+                                    // Показываем scrollPane (он в верхнем слое)
+                                    scrollPane.isVisible = true
+                                    // Делаем dropPanel полупрозрачной (она в нижнем слое)
+                                    dropPanel.isOpaque = false
+                                    dropPanel.background = JBColor(java.awt.Color(0, 0, 0, 0), java.awt.Color(0, 0, 0, 0))
+                                    dropLabel.foreground = JBColor(
+                                        java.awt.Color(
+                                        com.intellij.util.ui.UIUtil.getLabelDisabledForeground().red,
+                                        com.intellij.util.ui.UIUtil.getLabelDisabledForeground().green,
+                                        com.intellij.util.ui.UIUtil.getLabelDisabledForeground().blue,
+                                        50
+                                        ),
+                                        java.awt.Color(
+                                            com.intellij.util.ui.UIUtil.getLabelDisabledForeground().red,
+                                            com.intellij.util.ui.UIUtil.getLabelDisabledForeground().green,
+                                            com.intellij.util.ui.UIUtil.getLabelDisabledForeground().blue,
+                                            50
+                                        )
+                                    )
+                                    dropLabel.text = "<html><center><br>Drop more JSON files or folders here<br>" +
+                                                   "<small style='color:gray'>or use buttons below to add files</small></center></html>"
+                                    dropPanel.border = BorderFactory.createCompoundBorder(
+                                        BorderFactory.createDashedBorder(
+                                            JBColor(
+                                                java.awt.Color(
+                                                com.intellij.util.ui.UIUtil.getBoundsColor().red,
+                                                com.intellij.util.ui.UIUtil.getBoundsColor().green,
+                                                com.intellij.util.ui.UIUtil.getBoundsColor().blue,
+                                                30
+                                                ),
+                                                java.awt.Color(
+                                                    com.intellij.util.ui.UIUtil.getBoundsColor().red,
+                                                    com.intellij.util.ui.UIUtil.getBoundsColor().green,
+                                                    com.intellij.util.ui.UIUtil.getBoundsColor().blue,
+                                                    30
+                                                )
+                                            ), 
+                                            2f, 5f, 5f, false
+                                        ),
+                                        JBUI.Borders.empty(20)
+                                    )
+                                    // Меняем порядок слоев, чтобы dropPanel была видна сквозь scrollPane
+                                    contentContainer.setLayer(dropPanel, JLayeredPane.PALETTE_LAYER)
+                                    contentContainer.setLayer(scrollPane, JLayeredPane.DEFAULT_LAYER)
+                                    contentContainer.revalidate()
+                                    contentContainer.repaint()
+                                    PluginLogger.info("TransferHandler.importData: UI updated - drop panel made transparent", LogCategory.DRAG_DROP)
+                                }
+                            } else {
+                                PluginLogger.info("TransferHandler.importData: fileListModel is empty, not switching UI", LogCategory.DRAG_DROP)
+                            }
+                            
+                            // Всегда сбрасываем визуальное состояние после обработки
+                            SwingUtilities.invokeLater {
+                                resetDragVisualState()
+                                
+                                // Показываем предупреждения
+                                if (nonJsonFiles.isNotEmpty()) {
+                                    PluginLogger.info("TransferHandler.importData: Showing warning for ${nonJsonFiles.size} non-JSON files", LogCategory.DRAG_DROP)
+                                    Messages.showWarningDialog(
+                                        contentPanel,
+                                        "The following files were skipped (only JSON files are accepted):\n" +
+                                        nonJsonFiles.joinToString("\n") { "• $it" },
+                                        "Non-JSON Files Detected"
+                                    )
+                                }
+                                
+                                if (emptyFolders.isNotEmpty()) {
+                                    PluginLogger.info("TransferHandler.importData: Showing warning for ${emptyFolders.size} empty folders", LogCategory.DRAG_DROP)
+                                    Messages.showWarningDialog(
+                                        contentPanel,
+                                        "The following folders contain no JSON files:\n" +
+                                        emptyFolders.joinToString("\n") { "• $it" },
+                                        "Empty Folders Detected"
+                                    )
+                                }
+                            }
+                            
+                            val result = addedCount > 0 || nonJsonFiles.isNotEmpty() || emptyFolders.isNotEmpty()
+                            PluginLogger.info("TransferHandler.importData: returning $result", LogCategory.DRAG_DROP)
+                            return result
+                        } catch (e: Exception) {
+                            PluginLogger.error("TransferHandler.importData: Exception occurred: ${e.message}", e, LogCategory.DRAG_DROP)
+                            return false
+                        }
+                    }
+                }
+                
+                // Устанавливаем TransferHandler для всех компонентов
+                contentContainer.transferHandler = transferHandler
+                dropPanel.transferHandler = transferHandler
+                fileList.transferHandler = transferHandler
+                scrollPane.transferHandler = transferHandler
+                centerPanel.transferHandler = transferHandler
+                panel.transferHandler = transferHandler
+                
+                // Комментируем DropTarget - он конфликтует с TransferHandler
+                // Вместо этого будем использовать только TransferHandler для всего
+                
+                centerPanel.add(contentContainer, BorderLayout.CENTER)
+                panel.add(centerPanel, BorderLayout.CENTER)
+                
+                // Панель с кнопками
+                val buttonPanel = JPanel(FlowLayout(FlowLayout.LEFT))
+                
+                val addFilesButton = JButton("Add Files").apply {
+                    addActionListener {
+                        val descriptor = FileChooserDescriptor(
+                            true, false, false, false, false, true
+                        ).apply {
+                            withFileFilter { it.extension.equals("json", ignoreCase = true) }
+                        }
+                        
+                        com.intellij.openapi.fileChooser.FileChooser.chooseFiles(
+                            descriptor, null, this@PresetListManagerPanel, null
+                        ) { files ->
+                            var added = false
+                            files.forEach { vf ->
+                                val file = File(vf.path)
+                                if (!fileListModel.contains(file)) {
+                                    fileListModel.addElement(file)
+                                    added = true
+                                }
+                            }
+                            // Показываем список файлов и делаем dropPanel полупрозрачной
+                            if (added && fileListModel.size() > 0) {
+                                scrollPane.isVisible = true
+                                dropPanel.isOpaque = false
+                                dropPanel.background = JBColor(java.awt.Color(0, 0, 0, 0), java.awt.Color(0, 0, 0, 0))
+                                dropLabel.foreground = JBColor(
+                                    java.awt.Color(
+                                        com.intellij.util.ui.UIUtil.getLabelDisabledForeground().red,
+                                        com.intellij.util.ui.UIUtil.getLabelDisabledForeground().green,
+                                        com.intellij.util.ui.UIUtil.getLabelDisabledForeground().blue,
+                                        50
+                                    ),
+                                    java.awt.Color(
+                                        com.intellij.util.ui.UIUtil.getLabelDisabledForeground().red,
+                                        com.intellij.util.ui.UIUtil.getLabelDisabledForeground().green,
+                                        com.intellij.util.ui.UIUtil.getLabelDisabledForeground().blue,
+                                        50
+                                    )
+                                )
+                                dropLabel.text = "<html><center><br>Drop more JSON files or folders here<br>" +
+                                               "<small style='color:gray'>or use buttons below to add files</small></center></html>"
+                                dropPanel.border = BorderFactory.createCompoundBorder(
+                                    BorderFactory.createDashedBorder(
+                                        JBColor(
+                                            java.awt.Color(
+                                                com.intellij.util.ui.UIUtil.getBoundsColor().red,
+                                                com.intellij.util.ui.UIUtil.getBoundsColor().green,
+                                                com.intellij.util.ui.UIUtil.getBoundsColor().blue,
+                                                30
+                                            ),
+                                            java.awt.Color(
+                                                com.intellij.util.ui.UIUtil.getBoundsColor().red,
+                                                com.intellij.util.ui.UIUtil.getBoundsColor().green,
+                                                com.intellij.util.ui.UIUtil.getBoundsColor().blue,
+                                                30
+                                            )
+                                        ), 
+                                        2f, 5f, 5f, false
+                                    ),
+                                    JBUI.Borders.empty(20)
+                                )
+                                // Меняем порядок слоев
+                                contentContainer.setLayer(dropPanel, JLayeredPane.PALETTE_LAYER)
+                                contentContainer.setLayer(scrollPane, JLayeredPane.DEFAULT_LAYER)
+                                contentContainer.revalidate()
+                                contentContainer.repaint()
+                            }
+                        }
+                    }
+                }
+                
+                val addFolderButton = JButton("Add Folder").apply {
+                    addActionListener {
+                        val descriptor = FileChooserDescriptor(
+                            false, true, false, false, false, false
+                        )
+                        
+                        val virtualFiles = FileChooserFactory.getInstance()
+                            .createFileChooser(descriptor, null, this@PresetListManagerPanel)
+                            .choose(null)
+                        
+                        virtualFiles.firstOrNull()?.let { vf ->
+                            val folder = File(vf.path)
+                            // Проверяем, содержит ли папка JSON файлы
+                            val jsonFiles = folder.listFiles { f -> 
+                                f.isFile && f.extension.equals("json", ignoreCase = true)
+                            }
+                            if (jsonFiles.isNullOrEmpty()) {
+                                Messages.showWarningDialog(
+                                    contentPanel,
+                                    "The selected folder '${folder.name}' contains no JSON files",
+                                    "Empty Folder"
+                                )
+                            } else {
+                                if (!fileListModel.contains(folder)) {
+                                    fileListModel.addElement(folder)
+                                    // Показываем список файлов и делаем dropPanel полупрозрачной
+                                    scrollPane.isVisible = true
+                                    dropPanel.isOpaque = false
+                                    dropPanel.background = JBColor(java.awt.Color(0, 0, 0, 0), java.awt.Color(0, 0, 0, 0))
+                                    dropLabel.foreground = JBColor(
+                                        java.awt.Color(
+                                        com.intellij.util.ui.UIUtil.getLabelDisabledForeground().red,
+                                        com.intellij.util.ui.UIUtil.getLabelDisabledForeground().green,
+                                        com.intellij.util.ui.UIUtil.getLabelDisabledForeground().blue,
+                                        50
+                                        ),
+                                        java.awt.Color(
+                                            com.intellij.util.ui.UIUtil.getLabelDisabledForeground().red,
+                                            com.intellij.util.ui.UIUtil.getLabelDisabledForeground().green,
+                                            com.intellij.util.ui.UIUtil.getLabelDisabledForeground().blue,
+                                            50
+                                        )
+                                    )
+                                    dropLabel.text = "<html><center><br>Drop more JSON files or folders here<br>" +
+                                                   "<small style='color:gray'>or use buttons below to add files</small></center></html>"
+                                    dropPanel.border = BorderFactory.createCompoundBorder(
+                                        BorderFactory.createDashedBorder(
+                                            JBColor(
+                                                java.awt.Color(
+                                                com.intellij.util.ui.UIUtil.getBoundsColor().red,
+                                                com.intellij.util.ui.UIUtil.getBoundsColor().green,
+                                                com.intellij.util.ui.UIUtil.getBoundsColor().blue,
+                                                30
+                                                ),
+                                                java.awt.Color(
+                                                    com.intellij.util.ui.UIUtil.getBoundsColor().red,
+                                                    com.intellij.util.ui.UIUtil.getBoundsColor().green,
+                                                    com.intellij.util.ui.UIUtil.getBoundsColor().blue,
+                                                    30
+                                                )
+                                            ), 
+                                            2f, 5f, 5f, false
+                                        ),
+                                        JBUI.Borders.empty(20)
+                                    )
+                                    // Меняем порядок слоев
+                                    contentContainer.setLayer(dropPanel, JLayeredPane.PALETTE_LAYER)
+                                    contentContainer.setLayer(scrollPane, JLayeredPane.DEFAULT_LAYER)
+                                    contentContainer.revalidate()
+                                    contentContainer.repaint()
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                // Функция для удаления выбранных файлов
+                fun removeSelectedFiles() {
+                    fileList.selectedValuesList.forEach { file ->
+                        fileListModel.removeElement(file)
+                    }
+                    // Если список пуст, восстанавливаем непрозрачность dropPanel
+                    if (fileListModel.size() == 0) {
+                        scrollPane.isVisible = false
+                        dropPanel.isOpaque = true
+                        dropPanel.background = com.intellij.util.ui.UIUtil.getPanelBackground()
+                        dropLabel.foreground = com.intellij.util.ui.UIUtil.getLabelDisabledForeground()
+                        dropLabel.text = "<html><center><br>Drop JSON files or folders here<br>" +
+                                       "<small style='color:gray'>or use buttons below to select files</small></center></html>"
+                        dropPanel.border = BorderFactory.createCompoundBorder(
+                            BorderFactory.createDashedBorder(
+                                com.intellij.util.ui.UIUtil.getBoundsColor(), 
+                                2f, 5f, 5f, false
+                            ),
+                            JBUI.Borders.empty(20)
+                        )
+                        // Восстанавливаем слои
+                        contentContainer.setLayer(dropPanel, JLayeredPane.DEFAULT_LAYER)
+                        contentContainer.setLayer(scrollPane, JLayeredPane.PALETTE_LAYER)
+                    }
+                }
+                
+                val removeButton = JButton("Remove").apply {
+                    addActionListener {
+                        removeSelectedFiles()
+                    }
+                }
+                
+                // Добавляем обработку клавиши Delete для списка файлов
+                fileList.addKeyListener(object : java.awt.event.KeyAdapter() {
+                    override fun keyPressed(e: java.awt.event.KeyEvent) {
+                        if (e.keyCode == java.awt.event.KeyEvent.VK_DELETE) {
+                            removeSelectedFiles()
+                        }
+                    }
+                })
+                
+                buttonPanel.add(addFilesButton)
+                buttonPanel.add(addFolderButton)
+                buttonPanel.add(removeButton)
+                panel.add(buttonPanel, BorderLayout.SOUTH)
+                
+                return panel
+            }
+            
+            fun getSelectedFiles(): List<File> {
+                val result = mutableListOf<File>()
+                for (i in 0 until fileListModel.size()) {
+                    result.add(fileListModel.getElementAt(i))
+                }
+                return result
             }
         }
         
-        val virtualFiles = FileChooserFactory.getInstance()
-            .createFileChooser(descriptor, null, this)
-            .choose(null)
-        
-        virtualFiles.firstOrNull()?.let { virtualFile ->
-            try {
-                val file = File(virtualFile.path)
-                val importedLists = PresetListService.importLists(file)
+        if (importDialog.showAndGet()) {
+            val selectedItems = importDialog.getSelectedFiles()
+            PluginLogger.info("Import dialog OK clicked, selected items: ${selectedItems.size}", LogCategory.DRAG_DROP)
+            selectedItems.forEach { 
+                PluginLogger.info("  - ${it.path} (isDirectory=${it.isDirectory})", LogCategory.DRAG_DROP)
+            }
+            if (selectedItems.isEmpty()) {
+                PluginLogger.info("No items selected, returning", LogCategory.DRAG_DROP)
+                return
+            }
+            
+            val filesToImport = mutableListOf<File>()
+            
+            // Обрабатываем все выбранные файлы и папки
+            selectedItems.forEach { item ->
+                if (item.isDirectory) {
+                    // Если выбрана папка, ищем все JSON файлы в ней
+                    item.listFiles { f -> 
+                        f.isFile && f.extension.equals("json", ignoreCase = true)
+                    }?.forEach { filesToImport.add(it) }
+                } else if (item.extension.equals("json", ignoreCase = true)) {
+                    // Если выбран файл JSON
+                    filesToImport.add(item)
+                }
+            }
+            
+            if (filesToImport.isEmpty()) {
+                Messages.showWarningDialog(
+                    this@PresetListManagerPanel,
+                    "No JSON files found in the selected location(s)",
+                    "Import Warning"
+                )
+                return
+            }
+            
+            var totalImported = 0
+            val errors = mutableListOf<String>()
+            
+            PluginLogger.info("Processing ${filesToImport.size} files for import", LogCategory.DRAG_DROP)
+            filesToImport.forEach { file ->
+                try {
+                    PluginLogger.info("Importing from file: ${file.path}", LogCategory.DRAG_DROP)
+                    val importedLists = PresetListService.importLists(file)
+                    PluginLogger.info("Imported ${importedLists.size} lists from ${file.name}", LogCategory.DRAG_DROP)
+                    
+                    // Добавляем импортированные списки в tempListsManager
+                    importedLists.forEach { list ->
+                        PluginLogger.info("Adding imported list '${list.name}' with ${list.presets.size} presets to tempListsManager", LogCategory.DRAG_DROP)
+                        onListImported?.invoke(list)
+                    }
+                    
+                    totalImported += importedLists.size
+                } catch (e: Exception) {
+                    PluginLogger.error("Error importing from ${file.name}: ${e.message}", e, LogCategory.DRAG_DROP)
+                    errors.add("${file.name}: ${e.message}")
+                }
+            }
+            
+            // Обновляем список после импорта
+            if (totalImported > 0) {
+                PluginLogger.info("Reloading lists after import (imported $totalImported lists)", LogCategory.DRAG_DROP)
+                loadLists()
+                
+                // Если мы в режиме Show all, нужно обновить таблицу, чтобы показать импортированные списки
+                if (showAllPresetsCheckbox.isSelected) {
+                    PluginLogger.info("In Show all mode, reloading table to show imported presets", LogCategory.DRAG_DROP)
+                    println("ADB_DEBUG: Show all mode is active, calling onLoadPresetsIntoTable to refresh table with imported lists")
+                    onLoadPresetsIntoTable?.invoke()
+                } else {
+                    println("ADB_DEBUG: Not in Show all mode, skipping table refresh after import")
+                }
+            } else {
+                PluginLogger.info("No lists imported, not reloading", LogCategory.DRAG_DROP)
+            }
+            
+            // Показываем результат
+            if (errors.isEmpty()) {
                 Messages.showInfoMessage(
-                    this,
-                    "Successfully imported ${importedLists.size} preset list(s)",
+                    this@PresetListManagerPanel,
+                    "Successfully imported $totalImported preset list(s) from ${filesToImport.size} file(s)",
                     "Import Success"
                 )
-                loadLists()
-            } catch (e: Exception) {
-                Messages.showErrorDialog(
-                    this,
-                    "Failed to import preset lists: ${e.message}",
-                    "Import Error"
-                )
+            } else {
+                val message = buildString {
+                    appendLine("Imported $totalImported preset list(s)")
+                    if (errors.isNotEmpty()) {
+                        appendLine("\nErrors:")
+                        errors.forEach { appendLine("  - $it") }
+                    }
+                }
+                if (totalImported > 0) {
+                    Messages.showWarningDialog(this@PresetListManagerPanel, message, "Import Completed with Warnings")
+                } else {
+                    Messages.showErrorDialog(this@PresetListManagerPanel, message, "Import Failed")
+                }
             }
         }
     }

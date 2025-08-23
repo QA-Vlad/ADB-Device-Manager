@@ -19,7 +19,14 @@ data class PresetList(
         return PresetList(
             id = UUID.randomUUID().toString(),
             name = newName,
-            presets = presets.map { it.copy(id = it.id) }.toMutableList(),
+            presets = presets.map { preset -> 
+                DevicePreset(
+                    label = preset.label,
+                    size = preset.size,
+                    dpi = preset.dpi,
+                    id = preset.id
+                )
+            }.toMutableList(),
             isDefault = false,
             isImported = false
         )

@@ -146,6 +146,7 @@ class PresetsDialog(project: Project?) : DialogWrapper(project) {
     override fun doOKAction() {
         controller.saveSettings(orientationPanel)
         controller.dispose()
+        PresetListService.clearDeletedListsCache()
         DialogTracker.unregisterPresetsDialog()
         super.doOKAction()
     }
@@ -153,6 +154,7 @@ class PresetsDialog(project: Project?) : DialogWrapper(project) {
     override fun doCancelAction() {
         controller.restoreOriginalState()
         controller.dispose()
+        PresetListService.clearDeletedListsCache()
         DialogTracker.unregisterPresetsDialog()
         super.doCancelAction()
     }

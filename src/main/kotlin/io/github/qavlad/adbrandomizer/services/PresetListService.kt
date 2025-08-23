@@ -30,8 +30,17 @@ object PresetListService {
     private val properties: PropertiesComponent
         get() = PropertiesComponent.getInstance()
     
-    // Кастомный десериализатор для DevicePreset
-    class DevicePresetDeserializer : JsonDeserializer<DevicePreset> {
+    // Комбинированный адаптер для DevicePreset
+    class DevicePresetAdapter : JsonSerializer<DevicePreset>, JsonDeserializer<DevicePreset> {
+        override fun serialize(src: DevicePreset, typeOfSrc: Type, context: JsonSerializationContext): JsonElement {
+            val jsonObject = JsonObject()
+            jsonObject.addProperty("label", src.label)
+            jsonObject.addProperty("size", src.size)
+            jsonObject.addProperty("dpi", src.dpi)
+            jsonObject.addProperty("id", src.id)
+            return jsonObject
+        }
+        
         override fun deserialize(json: JsonElement, typeOfT: Type, context: JsonDeserializationContext): DevicePreset {
             val jsonObject = json.asJsonObject
             val label = jsonObject.get("label").asString
@@ -46,20 +55,8 @@ object PresetListService {
         }
     }
     
-    class DevicePresetSerializer : JsonSerializer<DevicePreset> {
-        override fun serialize(src: DevicePreset, typeOfSrc: Type, context: JsonSerializationContext): JsonElement {
-            val jsonObject = JsonObject()
-            jsonObject.addProperty("label", src.label)
-            jsonObject.addProperty("size", src.size)
-            jsonObject.addProperty("dpi", src.dpi)
-            jsonObject.addProperty("id", src.id)
-            return jsonObject
-        }
-    }
-    
     private val gson = GsonBuilder()
-        .registerTypeAdapter(DevicePreset::class.java, DevicePresetSerializer())
-        .registerTypeAdapter(DevicePreset::class.java, DevicePresetDeserializer())
+        .registerTypeAdapter(DevicePreset::class.java, DevicePresetAdapter())
         .serializeNulls()
         .setPrettyPrinting()
         .create()
@@ -235,8 +232,9 @@ object PresetListService {
      * Загружает список пресетов по ID
      */
     fun loadPresetList(listId: String): PresetList? {
-        // Проверяем кэш если он включен
-        if (cacheEnabled && loadedListsCache.containsKey(listId)) {
+        // Всегда проверяем кэш сначала (для удаленных списков)
+        if (loadedListsCache.containsKey(listId)) {
+            PluginLogger.debug(LogCategory.PRESET_SERVICE, "Returning cached list for id: %s", listId)
             return loadedListsCache[listId]
         }
         
@@ -431,6 +429,16 @@ object PresetListService {
         
         PluginLogger.info(LogCategory.PRESET_SERVICE, "Deleting list '%s' (id: %s)", listToDelete.name, listId)
         
+        // Загружаем список в кэш перед удалением файла
+        // Это позволит экспортировать удаленные списки до закрытия диалога
+        if (!loadedListsCache.containsKey(listId)) {
+            val presetList = loadPresetList(listId)
+            if (presetList != null) {
+                loadedListsCache[listId] = presetList
+                PluginLogger.info(LogCategory.PRESET_SERVICE, "Cached list '%s' before deletion for potential export", presetList.name)
+            }
+        }
+        
         // Удаляем из метаданных
         metadata.removeIf { it.id == listId }
         saveListsMetadata(metadata)
@@ -469,8 +477,9 @@ object PresetListService {
             PluginLogger.info(LogCategory.PRESET_SERVICE, "Old file deletion result: %s", deleted)
         }
         
-        // Очищаем кэши
-        loadedListsCache.remove(listId)
+        // НЕ очищаем кэш сразу - это позволит экспортировать удаленные списки
+        // Кэш будет очищен при перезапуске плагина или закрытии диалога
+        // loadedListsCache.remove(listId)
         if (activeListCacheId == listId) {
             activeListCache = null
             activeListCacheId = null
@@ -482,6 +491,48 @@ object PresetListService {
         }
         
         return true
+    }
+    
+    /**
+     * Очищает кэш удаленных списков
+     * Вызывается при закрытии диалога пресетов
+     */
+    fun clearDeletedListsCache() {
+        val metadata = getAllListsMetadata()
+        val existingIds = metadata.map { it.id }.toSet()
+        
+        // Удаляем из кэша только те списки, которых нет в метаданных
+        val idsToRemove = loadedListsCache.keys.filter { id -> id !in existingIds }
+        idsToRemove.forEach { id ->
+            PluginLogger.info(LogCategory.PRESET_SERVICE, "Removing deleted list from cache: %s", id)
+            loadedListsCache.remove(id)
+        }
+    }
+    
+    /**
+     * Возвращает все доступные списки (из кэша и с диска)
+     */
+    fun getAllAvailableLists(): List<PresetList> {
+        val result = mutableListOf<PresetList>()
+        val metadata = getAllListsMetadata()
+        
+        // Загружаем все списки по метаданным
+        metadata.forEach { meta ->
+            val list = loadPresetList(meta.id)
+            if (list != null) {
+                result.add(list)
+            }
+        }
+        
+        // Добавляем списки из кэша, которых нет в метаданных (удаленные)
+        loadedListsCache.forEach { (id, list) ->
+            if (result.none { it.id == id }) {
+                PluginLogger.debug(LogCategory.PRESET_SERVICE, "Adding cached (deleted) list: %s", list.name)
+                result.add(list)
+            }
+        }
+        
+        return result
     }
     
     /**
@@ -518,13 +569,12 @@ object PresetListService {
         
         return true
     }
-    
+
     /**
-     * Экспортирует списки пресетов
+     * Экспортирует списки пресетов напрямую (из памяти)
      */
-    fun exportLists(listIds: List<String>, targetFile: File) {
-        val listsToExport = listIds.mapNotNull { loadPresetList(it) }
-        val json = gson.toJson(listsToExport)
+    fun exportListsDirectly(lists: List<PresetList>, targetFile: File) {
+        val json = gson.toJson(lists)
         targetFile.writeText(json)
     }
     
@@ -533,22 +583,39 @@ object PresetListService {
      */
     fun importLists(sourceFile: File): List<PresetList> {
         val json = sourceFile.readText()
+        PluginLogger.info(LogCategory.PRESET_SERVICE, "Importing lists from file, JSON length: %d", json.length)
+        
         val type = object : TypeToken<List<PresetList>>() {}.type
         val importedLists: List<PresetList> = gson.fromJson(json, type)
         
+        PluginLogger.info(LogCategory.PRESET_SERVICE, "Parsed %d lists from JSON", importedLists.size)
+        importedLists.forEachIndexed { index, list ->
+            PluginLogger.info(LogCategory.PRESET_SERVICE, "List %d: %s with %d presets", index, list.name, list.presets.size)
+            list.presets.forEachIndexed { presetIndex, preset ->
+                PluginLogger.debug(LogCategory.PRESET_SERVICE, "  Preset %d: %s | %s | %s", 
+                    presetIndex, preset.label, preset.size, preset.dpi)
+            }
+        }
+        
         val metadata = getAllListsMetadata().toMutableList()
+        val resultLists = mutableListOf<PresetList>()
         
         importedLists.forEach { importedList ->
             // Генерируем новый ID для импортированного списка
             val newList = importedList.copy(name = "${importedList.name} (imported)").apply {
                 isImported = true
             }
+            
+            PluginLogger.info(LogCategory.PRESET_SERVICE, "Created copy of list %s with %d presets", 
+                newList.name, newList.presets.size)
+            
             savePresetList(newList)
             metadata.add(ListMetadata(newList.id, newList.name))
+            resultLists.add(newList)
         }
         
         saveListsMetadata(metadata)
-        return importedLists
+        return resultLists
     }
 
 

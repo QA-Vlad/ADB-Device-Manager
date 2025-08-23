@@ -33,7 +33,7 @@ class DevicePresetSerializationTest {
     @Test
     fun `test custom deserializer handles missing ID`() {
         val gson = GsonBuilder()
-            .registerTypeAdapter(DevicePreset::class.java, PresetListService.DevicePresetDeserializer())
+            .registerTypeAdapter(DevicePreset::class.java, PresetListService.DevicePresetAdapter())
             .create()
             
         // JSON без ID (старый формат)
@@ -50,7 +50,7 @@ class DevicePresetSerializationTest {
     @Test
     fun `test custom deserializer preserves existing ID`() {
         val gson = GsonBuilder()
-            .registerTypeAdapter(DevicePreset::class.java, PresetListService.DevicePresetDeserializer())
+            .registerTypeAdapter(DevicePreset::class.java, PresetListService.DevicePresetAdapter())
             .create()
             
         // JSON с ID

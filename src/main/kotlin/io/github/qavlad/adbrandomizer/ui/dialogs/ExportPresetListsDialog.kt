@@ -13,7 +13,9 @@ import javax.swing.*
  * Диалог для выбора списков пресетов для экспорта
  */
 class ExportPresetListsDialog(
-    private val listNames: Array<String>
+    private val listNames: Array<String>,
+    private val activeListName: String? = null,
+    private val showAllSelected: Boolean = false
 ) : DialogWrapper(true) {
     
     private val checkBoxes = mutableListOf<JBCheckBox>()
@@ -25,6 +27,10 @@ class ExportPresetListsDialog(
     init {
         title = "Export Preset Lists"
         init()
+        // Устанавливаем фокус на кнопку OK вместо первого чекбокса
+        SwingUtilities.invokeLater {
+            rootPane.defaultButton?.requestFocusInWindow()
+        }
     }
     
     override fun createCenterPanel(): JComponent {
@@ -52,8 +58,18 @@ class ExportPresetListsDialog(
             add(Box.createVerticalStrut(10))
             
             listNames.forEach { name ->
-                val checkBox = JBCheckBox(name, true).apply {
+                // Определяем начальное состояние чекбокса
+                val initiallySelected = if (showAllSelected) {
+                    // Если "Show all" включен, выбираем все списки
+                    true
+                } else {
+                    // Иначе выбираем только активный список
+                    name == activeListName
+                }
+                
+                val checkBox = JBCheckBox(name, initiallySelected).apply {
                     isFocusable = true
+                    isFocusPainted = false  // Отключаем отрисовку фокуса (синей рамки)
                     
                     // Сохраняем ссылку на чекбокс для использования в KeyListener
                     val checkBoxRef = this
@@ -246,7 +262,8 @@ class ExportPresetListsDialog(
     }
     
     override fun getPreferredFocusedComponent(): JComponent? {
-        return if (checkBoxes.isNotEmpty()) checkBoxes[0] else null
+        // Возвращаем null чтобы фокус установился на кнопку OK по умолчанию
+        return null
     }
     
     override fun init() {

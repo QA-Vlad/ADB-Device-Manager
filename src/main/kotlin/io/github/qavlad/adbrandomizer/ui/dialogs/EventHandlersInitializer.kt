@@ -171,6 +171,14 @@ class EventHandlersInitializer(
                     "Added new list to tempLists: %s with id %s", 
                     newList.name, newList.id)
             },
+            onListImported = { importedList ->
+                // Добавляем импортированный список в tempLists
+                tempListsManager.getMutableTempLists()[importedList.id] = importedList
+                PluginLogger.info(LogCategory.PRESET_SERVICE, 
+                    "Added imported list to tempLists: %s with id %s, presets: %d", 
+                    importedList.name, importedList.id, importedList.presets.size)
+                println("ADB_DEBUG: onListImported - added list '${importedList.name}' to tempLists, total lists now: ${tempListsManager.getTempLists().size}")
+            },
             onClearListOrderInMemory = { listId ->
                 // Очищаем сохранённый порядок drag & drop для списка при его сбросе
                 controller.serviceLocator.presetOrderManager.clearNormalModeOrderInMemoryForList(listId)
@@ -182,6 +190,10 @@ class EventHandlersInitializer(
                 controller.orientationPanel?.resetToPortrait()
                 PluginLogger.info(LogCategory.UI_EVENTS, 
                     "Reset orientation to portrait after preset list reset")
+            },
+            onLoadPresetsIntoTable = {
+                // Обновляем таблицу при импорте в режиме Show all
+                onLoadPresetsIntoTable()
             }
         )
     }
