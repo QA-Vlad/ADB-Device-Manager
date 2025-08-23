@@ -552,6 +552,9 @@ class PresetsDialogController(
      */
     private fun loadPresetsIntoTable() {
         try {
+            // println("ADB_DEBUG: loadPresetsIntoTable() - isShowAllPresetsMode: ${dialogState.isShowAllPresetsMode()}")
+            // println("ADB_DEBUG: loadPresetsIntoTable() - tempLists size: ${serviceLocator.tempListsManager.getTempLists().size}")
+            
             serviceLocator.extendedTableLoader.loadPresetsIntoTable(
                 tableModel = tableModel,
                 currentPresetList = stateManager.currentPresetList,

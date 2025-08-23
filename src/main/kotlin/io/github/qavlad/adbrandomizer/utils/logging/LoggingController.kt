@@ -3,8 +3,6 @@ package io.github.qavlad.adbrandomizer.utils.logging
 import com.intellij.openapi.diagnostic.Logger
 import io.github.qavlad.adbrandomizer.settings.PluginSettings
 import io.github.qavlad.adbrandomizer.utils.FileLogger
-import java.time.LocalDateTime
-import java.time.format.DateTimeFormatter
 
 /**
  * Централизованный контроллер логирования, который обеспечивает
@@ -17,7 +15,6 @@ object LoggingController {
     private val logger = Logger.getInstance("ADB_Randomizer")
     private const val PREFIX = "ADB_Randomizer"
     private val config by lazy { LoggingConfiguration.getInstance() }
-    private val consoleFormatter = DateTimeFormatter.ofPattern("HH:mm:ss.SSS")
     
     /**
      * Обрабатывает лог-сообщение и направляет его во все необходимые выходы
@@ -38,10 +35,7 @@ object LoggingController {
         // 1. Логируем в консоль IDE через IntelliJ Logger API
         logToIdeConsole(level, formattedMessage, throwable)
         
-        // 2. Логируем в системную консоль для отладки
-        logToSystemConsole(level, category, formattedMessage, throwable)
-        
-        // 3. Логируем в файл при включенном debug режиме
+        // 2. Логируем в файл при включенном debug режиме
         if (PluginSettings.instance.debugMode) {
             logToFile(level, formattedMessage, throwable)
         }
@@ -80,7 +74,10 @@ object LoggingController {
     
     /**
      * Логирует в системную консоль через println
+     * Метод закомментирован для избежания дублирования с logToIdeConsole
+     * Оставлен для возможности быстрого включения при отладке
      */
+    /*
     private fun logToSystemConsole(
         level: LogLevel,
         category: LogCategory,
@@ -115,6 +112,7 @@ object LoggingController {
             println(consoleMessage)
         }
     }
+    */
     
     /**
      * Логирует в файл

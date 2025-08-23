@@ -416,8 +416,8 @@ class TableLoader(
         tableModel: DevicePresetTableModel,
         list: PresetList
     ) {
-        println("ADB_DEBUG: loadCurrentListNormal - start")
-        println("ADB_DEBUG: loadCurrentListNormal - list: ${list.name}, presets count: ${list.presets.size}")
+        // println("ADB_DEBUG: loadCurrentListNormal - start")
+        // println("ADB_DEBUG: loadCurrentListNormal - list: ${list.name}, presets count: ${list.presets.size}")
         
         // Проверяем, есть ли в памяти порядок после drag & drop
         val memoryOrder = presetOrderManager.getNormalModeOrderInMemory(list.id)
@@ -442,30 +442,30 @@ class TableLoader(
             list.presets
         }
         
-        println("ADB_DEBUG: loadCurrentListNormal - presets from list:")
-        presets.forEachIndexed { index, preset ->
-            println("ADB_DEBUG:   [$index] ${preset.label} | ${preset.size} | ${preset.dpi}")
-        }
+        // println("ADB_DEBUG: loadCurrentListNormal - presets from list:")
+        // presets.forEachIndexed { index, preset ->
+        //     println("ADB_DEBUG:   [$index] ${preset.label} | ${preset.size} | ${preset.dpi}")
+        // }
         
         // Применяем сортировку, если она активна
         val sortedPresets = if (tableSortingService != null) {
-            println("ADB_DEBUG: loadCurrentListNormal - tableSortingService is not null, applying sort")
+            // println("ADB_DEBUG: loadCurrentListNormal - tableSortingService is not null, applying sort")
             val sorted = tableSortingService.sortPresets(presets, isShowAll = false, isHideDuplicates = false)
-            println("ADB_DEBUG: loadCurrentListNormal - after sorting:")
-            sorted.forEachIndexed { index, preset ->
-                println("ADB_DEBUG:   [$index] ${preset.label} | ${preset.size} | ${preset.dpi}")
-            }
+            // println("ADB_DEBUG: loadCurrentListNormal - after sorting:")
+            // sorted.forEachIndexed { index, preset ->
+            //     println("ADB_DEBUG:   [$index] ${preset.label} | ${preset.size} | ${preset.dpi}")
+            // }
             sorted
         } else {
             println("ADB_DEBUG: loadCurrentListNormal - tableSortingService is null, no sorting")
             presets
         }
         
-        println("ADB_DEBUG: loadCurrentListNormal - adding ${sortedPresets.size} rows to table")
+        // println("ADB_DEBUG: loadCurrentListNormal - adding ${sortedPresets.size} rows to table")
         sortedPresets.forEach { preset ->
             addPresetRow(tableModel, preset, null)
         }
-        println("ADB_DEBUG: loadCurrentListNormal - done")
+        // println("ADB_DEBUG: loadCurrentListNormal - done")
     }
     
     /**

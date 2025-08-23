@@ -24,11 +24,28 @@ data class PresetList(
                     label = preset.label,
                     size = preset.size,
                     dpi = preset.dpi,
-                    id = preset.id
+                    id = UUID.randomUUID().toString() // Генерируем новый ID для каждого пресета
                 )
             }.toMutableList(),
             isDefault = false,
             isImported = false
         )
+    }
+    
+    /**
+     * Регенерирует ID для списка и всех его пресетов
+     * Используется при импорте для предотвращения конфликтов ID
+     */
+    fun regenerateIds() {
+        id = UUID.randomUUID().toString()
+        // Создаем новые пресеты с новыми ID, так как id в DevicePreset - это val
+        presets = presets.map { preset ->
+            DevicePreset(
+                label = preset.label,
+                size = preset.size,
+                dpi = preset.dpi,
+                id = UUID.randomUUID().toString()
+            )
+        }.toMutableList()
     }
 }

@@ -61,7 +61,7 @@ class TableColumnManager(
      * Перенастраивает рендереры и редакторы колонок
      */
     private fun reconfigureColumns(table: JBTable, isShowAllPresetsMode: Boolean) {
-        println("ADB_DEBUG: reconfigureColumns - start")
+        // println("ADB_DEBUG: reconfigureColumns - start")
         
         // Настраиваем стандартные колонки через конфигуратор
         tableConfigurator.configureColumns()
@@ -102,7 +102,7 @@ class TableColumnManager(
                 }
             }
         
-        println("ADB_DEBUG: reconfigureColumns - done")
+        // println("ADB_DEBUG: reconfigureColumns - done")
     }
     
     /**

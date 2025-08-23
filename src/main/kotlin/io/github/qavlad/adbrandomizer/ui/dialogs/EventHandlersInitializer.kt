@@ -173,11 +173,21 @@ class EventHandlersInitializer(
             },
             onListImported = { importedList ->
                 // Добавляем импортированный список в tempLists
+                println("ADB_DEBUG: onListImported BEFORE - tempLists size: ${tempListsManager.getTempLists().size}")
                 tempListsManager.getMutableTempLists()[importedList.id] = importedList
+                println("ADB_DEBUG: onListImported AFTER - tempLists size: ${tempListsManager.getTempLists().size}")
                 PluginLogger.info(LogCategory.PRESET_SERVICE, 
                     "Added imported list to tempLists: %s with id %s, presets: %d", 
                     importedList.name, importedList.id, importedList.presets.size)
                 println("ADB_DEBUG: onListImported - added list '${importedList.name}' to tempLists, total lists now: ${tempListsManager.getTempLists().size}")
+                
+                // Проверяем, что список действительно добавлен
+                val addedList = tempListsManager.getTempList(importedList.id)
+                if (addedList != null) {
+                    println("ADB_DEBUG: Verified - list '${addedList.name}' is in tempLists with ${addedList.presets.size} presets")
+                } else {
+                    println("ADB_DEBUG: ERROR - list was not added to tempLists!")
+                }
             },
             onClearListOrderInMemory = { listId ->
                 // Очищаем сохранённый порядок drag & drop для списка при его сбросе
@@ -193,7 +203,10 @@ class EventHandlersInitializer(
             },
             onLoadPresetsIntoTable = {
                 // Обновляем таблицу при импорте в режиме Show all
+                println("ADB_DEBUG: onLoadPresetsIntoTable callback called from PresetListManagerPanel")
+                println("ADB_DEBUG: Current tempLists size before loading: ${tempListsManager.getTempLists().size}")
                 onLoadPresetsIntoTable()
+                println("ADB_DEBUG: onLoadPresetsIntoTable completed")
             }
         )
     }

@@ -55,7 +55,7 @@ class HoverStateManager(
         repaintCellIfNeeded(oldState.hoveredTableRow, oldState.hoveredTableColumn)
         onStateChanged(currentState)
         
-        println("ADB_DEBUG: Cleared table hover")
+        // println("ADB_DEBUG: Cleared table hover")
     }
     
     /**
@@ -75,7 +75,7 @@ class HoverStateManager(
      * Обрабатывает выход курсора из таблицы
      */
     fun handleTableExit() {
-        println("ADB_DEBUG: handleTableExit called")
+        // println("ADB_DEBUG: handleTableExit called")
         clearTableHover()
     }
     

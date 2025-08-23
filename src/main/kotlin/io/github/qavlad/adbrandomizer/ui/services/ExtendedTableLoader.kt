@@ -29,10 +29,14 @@ class ExtendedTableLoader(
         onAddButtonRow: () -> Unit,
         inMemoryTableOrder: List<String>
     ) {
-        println("ADB_DEBUG: ExtendedTableLoader.loadPresetsIntoTable()")
+        // println("ADB_DEBUG: ExtendedTableLoader.loadPresetsIntoTable()")
         val tempLists = tempListsManager.getTempLists()
-        println("ADB_DEBUG:   tempListsManager.getTempLists().size: ${tempLists.size}")
-        println("ADB_DEBUG:   tempListsManager.isEmpty(): ${tempListsManager.isEmpty()}")
+        // println("ADB_DEBUG:   tempListsManager.getTempLists().size: ${tempLists.size}")
+        // println("ADB_DEBUG:   tempListsManager.isEmpty(): ${tempListsManager.isEmpty()}")
+        // println("ADB_DEBUG:   tempLists content:")
+        // tempLists.forEach { (id, list) ->
+        //     println("ADB_DEBUG:     List '${list.name}' (id: $id) - ${list.presets.size} presets, isImported=${list.isImported}")
+        // }
         
         if (tempLists.isEmpty()) {
             println("ADB_DEBUG:   WARNING: tempListsManager is EMPTY before passing to TableLoader!")

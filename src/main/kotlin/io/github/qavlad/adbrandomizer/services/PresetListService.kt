@@ -261,10 +261,10 @@ object PresetListService {
                 }
                 
                 // Отладочная информация о загруженных ID - закомментировано из-за спама в Show All режиме
-                println("ADB_DEBUG: Loaded preset list ${presetList.name} from file with ${presetList.presets.size} presets")
-                presetList.presets.forEachIndexed { index, preset ->
-                    println("ADB_DEBUG:   [$index] ${preset.label} | ${preset.size} | ${preset.dpi}")
-                }
+                // println("ADB_DEBUG: Loaded preset list ${presetList.name} from file with ${presetList.presets.size} presets")
+                // presetList.presets.forEachIndexed { index, preset ->
+                //     println("ADB_DEBUG:   [$index] ${preset.label} | ${preset.size} | ${preset.dpi}")
+                // }
                 
                 if (!cacheEnabled) {
                     PluginLogger.debug(LogCategory.PRESET_SERVICE, "Successfully loaded list %s with %d presets (isDefault=%s)", 
@@ -600,8 +600,22 @@ object PresetListService {
         val metadata = getAllListsMetadata().toMutableList()
         val resultLists = mutableListOf<PresetList>()
         
+        // Собираем все существующие ID листов для проверки дубликатов
+        val existingListIds = metadata.map { it.id }.toSet()
+        
         importedLists.forEach { importedList ->
-            // Генерируем новый ID для импортированного списка
+            // Проверяем, существует ли лист с таким же ID
+            val hasDuplicateId = existingListIds.contains(importedList.id)
+            
+            if (hasDuplicateId) {
+                // Если ID дублируется, регенерируем все ID
+                PluginLogger.info(LogCategory.PRESET_SERVICE, 
+                    "Detected duplicate list ID %s for list %s, regenerating IDs", 
+                    importedList.id, importedList.name)
+                importedList.regenerateIds()
+            }
+            
+            // Генерируем новый ID для импортированного списка и добавляем (imported) к имени
             val newList = importedList.copy(name = "${importedList.name} (imported)").apply {
                 isImported = true
             }

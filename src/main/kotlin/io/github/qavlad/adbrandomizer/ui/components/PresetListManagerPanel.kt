@@ -58,6 +58,7 @@ class PresetListManagerPanel(
     private lateinit var deleteButton: JButton
     
     private var isUpdatingComboBox = false
+    private var isProgrammaticCheckboxChange = false
     
     init {
         setupUI()
@@ -146,8 +147,9 @@ class PresetListManagerPanel(
         val bottomPanel = JPanel(FlowLayout(FlowLayout.LEFT, 5, 0))
         
         showAllPresetsCheckbox.addItemListener { event ->
-            val isSelected = event.stateChange == ItemEvent.SELECTED
-            onShowAllPresetsChanged(isSelected)
+            if (!isProgrammaticCheckboxChange) {
+                val isSelected = event.stateChange == ItemEvent.SELECTED
+                onShowAllPresetsChanged(isSelected)
             
             // Включаем/выключаем комбобокс в зависимости от состояния
             listComboBox.isEnabled = !isSelected
@@ -158,8 +160,9 @@ class PresetListManagerPanel(
             } else {
                 "Reset presets to defaults"
             }
-            renameButton.isEnabled = !isSelected
-            deleteButton.isEnabled = !isSelected
+                renameButton.isEnabled = !isSelected
+                deleteButton.isEnabled = !isSelected
+            }
         }
         
         // Добавляем hover эффект как у кнопок
@@ -168,7 +171,9 @@ class PresetListManagerPanel(
         bottomPanel.add(showAllPresetsCheckbox)
         
         hideDuplicatesCheckbox.addItemListener { event ->
-            onHideDuplicatesChanged(event.stateChange == ItemEvent.SELECTED)
+            if (!isProgrammaticCheckboxChange) {
+                onHideDuplicatesChanged(event.stateChange == ItemEvent.SELECTED)
+            }
         }
         
         // Добавляем hover эффект как у кнопок
@@ -177,7 +182,9 @@ class PresetListManagerPanel(
         bottomPanel.add(hideDuplicatesCheckbox)
         
         showCountersCheckbox.addItemListener { event ->
-            onShowCountersChanged(event.stateChange == ItemEvent.SELECTED)
+            if (!isProgrammaticCheckboxChange) {
+                onShowCountersChanged(event.stateChange == ItemEvent.SELECTED)
+            }
         }
         
         // Добавляем hover эффект как у кнопок
@@ -258,12 +265,12 @@ class PresetListManagerPanel(
     }
     
     private fun updateResetButtonState(list: PresetList) {
-        // Кнопка сброса активна только для дефолтных или импортированных списков
-        resetButton.isEnabled = list.isDefault || list.isImported
+        // Кнопка сброса активна только для дефолтных списков
+        resetButton.isEnabled = list.isDefault
         resetButton.toolTipText = when {
             list.isDefault -> "Reset this default preset list to original values"
-            list.isImported -> "Reset this imported preset list to original values"
-            else -> "Reset is only available for default or imported lists"
+            list.isImported -> "Reset is only available for default lists"
+            else -> "Reset is only available for default lists"
         }
     }
     
@@ -1023,7 +1030,9 @@ class PresetListManagerPanel(
                     // Добавляем импортированные списки в tempListsManager
                     importedLists.forEach { list ->
                         PluginLogger.info("Adding imported list '${list.name}' with ${list.presets.size} presets to tempListsManager", LogCategory.DRAG_DROP)
+                        println("ADB_DEBUG: Before onListImported - list '${list.name}' with ${list.presets.size} presets")
                         onListImported?.invoke(list)
+                        println("ADB_DEBUG: After onListImported for list '${list.name}'")
                     }
                     
                     totalImported += importedLists.size
@@ -1042,7 +1051,9 @@ class PresetListManagerPanel(
                 if (showAllPresetsCheckbox.isSelected) {
                     PluginLogger.info("In Show all mode, reloading table to show imported presets", LogCategory.DRAG_DROP)
                     println("ADB_DEBUG: Show all mode is active, calling onLoadPresetsIntoTable to refresh table with imported lists")
+                    println("ADB_DEBUG: Before onLoadPresetsIntoTable - imported $totalImported lists")
                     onLoadPresetsIntoTable?.invoke()
+                    println("ADB_DEBUG: After onLoadPresetsIntoTable")
                 } else {
                     println("ADB_DEBUG: Not in Show all mode, skipping table refresh after import")
                 }
@@ -1093,7 +1104,18 @@ class PresetListManagerPanel(
      */
     fun setShowAllPresets(enabled: Boolean) {
         if (showAllPresetsCheckbox.isSelected != enabled) {
+            isProgrammaticCheckboxChange = true
             showAllPresetsCheckbox.isSelected = enabled
+            // Обновляем состояние UI элементов
+            listComboBox.isEnabled = !enabled
+            resetButton.toolTipText = if (enabled) {
+                "Reset all default preset lists to original values"
+            } else {
+                "Reset presets to defaults"
+            }
+            renameButton.isEnabled = !enabled
+            deleteButton.isEnabled = !enabled
+            isProgrammaticCheckboxChange = false
         }
     }
     
@@ -1102,9 +1124,9 @@ class PresetListManagerPanel(
      */
     fun setHideDuplicates(enabled: Boolean) {
         if (hideDuplicatesCheckbox.isSelected != enabled) {
+            isProgrammaticCheckboxChange = true
             hideDuplicatesCheckbox.isSelected = enabled
-            // Явно вызываем обработчик, так как программное изменение может не вызвать ItemListener
-            onHideDuplicatesChanged(enabled)
+            isProgrammaticCheckboxChange = false
         }
     }
     
@@ -1113,7 +1135,9 @@ class PresetListManagerPanel(
      */
     fun setShowCounters(enabled: Boolean) {
         if (showCountersCheckbox.isSelected != enabled) {
+            isProgrammaticCheckboxChange = true
             showCountersCheckbox.isSelected = enabled
+            isProgrammaticCheckboxChange = false
         }
     }
     
@@ -1135,7 +1159,8 @@ class PresetListManagerPanel(
             val result = Messages.showYesNoDialog(
                 this,
                 "This will reset ALL default preset lists to their original values.\n" +
-                "Any custom presets you added will be removed.\n\n" +
+                "Imported and custom lists will be preserved.\n" +
+                "Any custom presets added to default lists will be removed.\n\n" +
                 "Are you sure you want to continue?",
                 "Confirm Reset All Default Lists",
                 Messages.getWarningIcon()
@@ -1154,11 +1179,11 @@ class PresetListManagerPanel(
             "Reset button clicked for list: %s (id: %s), isDefault: %s, isImported: %s", 
             selectedItem.name, selectedItem.id, list.isDefault, list.isImported)
         
-        // Проверяем, что это дефолтный или импортированный список
-        if (!list.isDefault && !list.isImported) {
+        // Проверяем, что это дефолтный список
+        if (!list.isDefault) {
             Messages.showWarningDialog(
                 this,
-                "Reset is only available for default or imported preset lists.",
+                "Reset is only available for default preset lists.",
                 "Cannot Reset"
             )
             return
@@ -1170,7 +1195,7 @@ class PresetListManagerPanel(
             this,
             "Choose reset option:\n\n" +
             "• Reset Current List - Reset only '${selectedItem.name}' to default values\n" +
-            "• Reset All Default Lists - Reset all default and imported lists to original values",
+            "• Reset All Default Lists - Reset all default lists to original values (custom lists preserved)",
             "Reset Presets",
             options,
             0,
@@ -1179,24 +1204,14 @@ class PresetListManagerPanel(
         
         when (choice) {
             0 -> { // Reset Current List
-                if (list.isDefault) {
-                    // Для дефолтного списка загружаем из ресурсов
-                    resetDefaultList(selectedItem.id, selectedItem.name)
-                } else if (list.isImported) {
-                    // Для импортированного пытаемся восстановить из оригинального файла
-                    Messages.showInfoMessage(
-                        this,
-                        "Resetting imported lists is not yet implemented.\n" +
-                        "Please re-import the list from the original file.",
-                        "Reset Imported List"
-                    )
-                }
+                // Для дефолтного списка загружаем из ресурсов
+                resetDefaultList(selectedItem.id, selectedItem.name)
             }
             1 -> { // Reset All Default Lists
                 val confirm = Messages.showYesNoDialog(
                     this,
                     "This will reset ALL default preset lists to their original values.\n" +
-                    "Custom lists will not be affected.\n\n" +
+                    "Imported and custom lists will be preserved.\n\n" +
                     "Are you sure you want to continue?",
                     "Confirm Reset All",
                     AllIcons.General.WarningDialog
@@ -1319,12 +1334,13 @@ class PresetListManagerPanel(
                 }
             }
             
-            // Обновляем метаданные, чтобы включить восстановленные списки
+            // Обновляем метаданные, чтобы включить восстановленные дефолтные списки
+            // И СОХРАНИТЬ импортированные и кастомные списки
             if (resetCount > 0) {
                 val existingMetadata = PresetListService.getAllListsMetadata()
                 val restoredIds = allDefaultLists.filter { it.isDefault }.map { it.id }.toSet()
                 
-                // Создаём новые метаданные, объединяя существующие кастомные списки и восстановленные дефолтные
+                // Создаём новые метаданные, объединяя восстановленные дефолтные и существующие кастомные/импортированные
                 val newMetadata = mutableListOf<PresetListService.ListMetadata>()
                 
                 // Добавляем все восстановленные дефолтные списки
@@ -1332,9 +1348,11 @@ class PresetListManagerPanel(
                     newMetadata.add(PresetListService.ListMetadata(list.id, list.name, true))
                 }
                 
-                // Добавляем существующие кастомные списки (не дефолтные)
+                // Сохраняем существующие кастомные и импортированные списки (не дефолтные)
                 existingMetadata.filter { !it.isDefault && !restoredIds.contains(it.id) }.forEach { meta ->
                     newMetadata.add(meta)
+                    PluginLogger.info(LogCategory.PRESET_SERVICE, 
+                        "Preserved non-default list during reset: %s", meta.name)
                 }
                 
                 PresetListService.saveListsMetadata(newMetadata)
