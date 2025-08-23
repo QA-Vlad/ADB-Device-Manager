@@ -30,7 +30,25 @@ class ExportPresetListsDialog(
     override fun createCenterPanel(): JComponent {
         val panel = JPanel().apply {
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
-            add(JLabel("Select preset lists to export:"))
+            
+            // Заголовок и кнопки Select All / Deselect All в одной строке
+            val headerPanel = JPanel().apply {
+                layout = BoxLayout(this, BoxLayout.X_AXIS)
+                add(JLabel("Select preset lists to export:"))
+                add(Box.createHorizontalGlue())
+                add(JButton("Select All").apply {
+                    addActionListener {
+                        checkBoxes.forEach { it.isSelected = true }
+                    }
+                })
+                add(Box.createHorizontalStrut(5))
+                add(JButton("Deselect All").apply {
+                    addActionListener {
+                        checkBoxes.forEach { it.isSelected = false }
+                    }
+                })
+            }
+            add(headerPanel)
             add(Box.createVerticalStrut(10))
             
             listNames.forEach { name ->
