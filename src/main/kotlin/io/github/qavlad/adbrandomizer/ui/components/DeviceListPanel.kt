@@ -1,34 +1,34 @@
 package io.github.qavlad.adbrandomizer.ui.components
 
 import com.android.ddmlib.IDevice
+import com.intellij.icons.AllIcons
+import com.intellij.ide.util.PropertiesComponent
+import com.intellij.ui.JBColor
 import com.intellij.ui.components.JBList
 import com.intellij.ui.components.JBScrollPane
-import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.JBFont
-import com.intellij.ui.JBColor
-import io.github.qavlad.adbrandomizer.services.DeviceInfo
-import io.github.qavlad.adbrandomizer.services.WifiDeviceHistoryService
+import com.intellij.util.ui.JBUI
 import io.github.qavlad.adbrandomizer.services.AdbService
+import io.github.qavlad.adbrandomizer.services.DeviceInfo
+import io.github.qavlad.adbrandomizer.services.DeviceOrderService
+import io.github.qavlad.adbrandomizer.services.WifiDeviceHistoryService
+import io.github.qavlad.adbrandomizer.settings.PluginSettings
+import io.github.qavlad.adbrandomizer.ui.config.DeviceType
+import io.github.qavlad.adbrandomizer.ui.config.HitboxConfigManager
+import io.github.qavlad.adbrandomizer.ui.config.HitboxType
 import io.github.qavlad.adbrandomizer.ui.models.CombinedDeviceInfo
 import io.github.qavlad.adbrandomizer.ui.renderers.DeviceListRenderer
-import io.github.qavlad.adbrandomizer.ui.config.HitboxConfigManager
-import io.github.qavlad.adbrandomizer.ui.config.DeviceType
-import io.github.qavlad.adbrandomizer.ui.config.HitboxType
 import io.github.qavlad.adbrandomizer.utils.DeviceConnectionUtils
 import io.github.qavlad.adbrandomizer.utils.PluginLogger
 import io.github.qavlad.adbrandomizer.utils.logging.LogCategory
-import io.github.qavlad.adbrandomizer.settings.PluginSettings
 import java.awt.*
+import java.awt.datatransfer.DataFlavor
+import java.awt.datatransfer.StringSelection
+import java.awt.datatransfer.Transferable
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import java.awt.event.MouseMotionAdapter
 import javax.swing.*
-import com.intellij.ide.util.PropertiesComponent
-import javax.swing.JOptionPane
-import javax.swing.JCheckBox
-import javax.swing.Icon
-import java.awt.FlowLayout
-import com.intellij.icons.AllIcons
 
 sealed class DeviceListItem {
     data class SectionHeader(val title: String) : DeviceListItem()
@@ -144,6 +144,7 @@ class DeviceListPanel(
     init {
         setupUI()
         setupDeviceListInteractions()
+        setupDragAndDrop()
         // Включаем подсказки для JList
         ToolTipManager.sharedInstance().registerComponent(deviceList)
     }
@@ -911,7 +912,7 @@ class DeviceListPanel(
             deviceListModel.clear()
             
             // Обновляем текст для пустого списка
-            if (devices.isEmpty() && deviceListModel.isEmpty()) {
+            if (devices.isEmpty() && deviceListModel.isEmpty) {
                 deviceList.emptyText.clear()
                 deviceList.emptyText.text = "No devices found"
                 deviceList.emptyText.appendLine("Connect a device via USB or enable Wi-Fi debugging")
@@ -920,7 +921,19 @@ class DeviceListPanel(
             // 1. Подключённые устройства
             if (devices.isNotEmpty()) {
                 deviceListModel.addElement(DeviceListItem.SectionHeader("Connected devices"))
-                devices.forEach { device ->
+                
+                // Сортируем устройства согласно сохраненному порядку
+                val savedOrder = DeviceOrderService.loadDeviceOrder()
+                val sortedDevices = if (savedOrder.isNotEmpty()) {
+                    devices.sortedBy { device ->
+                        val index = savedOrder.indexOf(device.baseSerialNumber)
+                        if (index == -1) Int.MAX_VALUE else index
+                    }
+                } else {
+                    devices
+                }
+                
+                sortedDevices.forEach { device ->
                     deviceListModel.addElement(DeviceListItem.CombinedDevice(device))
                 }
             }
@@ -985,7 +998,19 @@ class DeviceListPanel(
             // 1. Подключённые устройства
             if (devices.isNotEmpty()) {
                 deviceListModel.addElement(DeviceListItem.SectionHeader("Connected devices"))
-                devices.forEach {
+                
+                // Сортируем устройства согласно сохраненному порядку
+                val savedOrder = DeviceOrderService.loadDeviceOrder()
+                val sortedDevices = if (savedOrder.isNotEmpty()) {
+                    devices.sortedBy { device ->
+                        val index = savedOrder.indexOf(device.logicalSerialNumber)
+                        if (index == -1) Int.MAX_VALUE else index
+                    }
+                } else {
+                    devices
+                }
+                
+                sortedDevices.forEach {
                     deviceListModel.addElement(DeviceListItem.Device(it, true))
                 }
             }
@@ -1032,6 +1057,152 @@ class DeviceListPanel(
     }
 
     fun getDeviceListModel(): DefaultListModel<DeviceListItem> = deviceListModel
+    
+    /**
+     * Настраивает drag and drop для списка устройств
+     */
+    private fun setupDragAndDrop() {
+        deviceList.dragEnabled = true
+        deviceList.dropMode = DropMode.INSERT
+        deviceList.transferHandler = DeviceTransferHandler()
+    }
+    
+    /**
+     * TransferHandler для перетаскивания устройств
+     */
+    private inner class DeviceTransferHandler : TransferHandler() {
+        private var draggedIndex = -1
+        
+        override fun getSourceActions(c: JComponent): Int = MOVE
+        
+        override fun createTransferable(c: JComponent): Transferable? {
+            if (c !is JList<*>) return null
+            
+            // Получаем индекс элемента под курсором
+            val point = deviceList.mousePosition ?: return null
+            val index = deviceList.locationToIndex(point)
+            if (index < 0 || index >= deviceListModel.size()) return null
+            
+            val item = deviceListModel.getElementAt(index)
+            // Разрешаем перетаскивать только CombinedDevice
+            if (item !is DeviceListItem.CombinedDevice) return null
+            
+            draggedIndex = index
+            return StringSelection(item.info.baseSerialNumber)
+        }
+        
+        override fun canImport(support: TransferSupport): Boolean {
+            if (!support.isDrop || !support.isDataFlavorSupported(DataFlavor.stringFlavor)) {
+                return false
+            }
+            
+            val dropLocation = support.dropLocation as? JList.DropLocation ?: return false
+            val dropIndex = dropLocation.index
+            
+            // Запрещаем вставку в самое начало (индекс 0 - перед заголовком "Connected devices")
+            if (dropIndex <= 0) {
+                return false
+            }
+            
+            // Находим границы секции Connected devices
+            var connectedDevicesStart = -1
+            var connectedDevicesEnd = -1
+            
+            for (i in 0 until deviceListModel.size()) {
+                when (val item = deviceListModel.getElementAt(i)) {
+                    is DeviceListItem.SectionHeader -> {
+                        if (item.title == "Connected devices") {
+                            connectedDevicesStart = i + 1 // Начало секции - после заголовка
+                        } else if (item.title == "Previously connected devices") {
+                            connectedDevicesEnd = i // Конец секции - перед следующим заголовком
+                            break
+                        }
+                    }
+                    else -> {}
+                }
+            }
+            
+            // Если секция Connected devices найдена
+            if (connectedDevicesStart != -1) {
+                // Если нет заголовка Previously connected, конец секции - конец списка Connected устройств
+                if (connectedDevicesEnd == -1) {
+                    // Ищем последнее подключенное устройство
+                    for (i in deviceListModel.size() - 1 downTo connectedDevicesStart) {
+                        val item = deviceListModel.getElementAt(i)
+                        if (item is DeviceListItem.CombinedDevice) {
+                            connectedDevicesEnd = i + 1
+                            break
+                        }
+                    }
+                    // Если не нашли устройств, но есть заголовок, разрешаем вставку сразу после него
+                    if (connectedDevicesEnd == -1) {
+                        connectedDevicesEnd = connectedDevicesStart
+                    }
+                }
+                
+                // Разрешаем вставку только в пределах секции Connected devices
+                return dropIndex in connectedDevicesStart..connectedDevicesEnd
+            }
+            
+            return false
+        }
+        
+        override fun importData(support: TransferSupport): Boolean {
+            if (!canImport(support)) return false
+            
+            val dropLocation = support.dropLocation as JList.DropLocation
+            val dropIndex = dropLocation.index
+            
+            // Корректируем индекс, учитывая заголовок секции
+            var adjustedDropIndex = dropIndex
+            
+            // Если вставляем в начало списка устройств (после заголовка)
+            if (dropIndex == 1) {
+                adjustedDropIndex = 1
+            }
+            
+            // Если перетаскиваемый элемент находится выше точки вставки, корректируем индекс
+            if (draggedIndex in 0 until dropIndex) {
+                adjustedDropIndex--
+            }
+            
+            // Перемещаем элемент в модели
+            if (draggedIndex >= 0 && draggedIndex != adjustedDropIndex) {
+                val item = deviceListModel.remove(draggedIndex)
+                
+                // Вставляем на новое место
+                deviceListModel.add(adjustedDropIndex, item)
+                
+                // Сохраняем новый порядок
+                saveCurrentDeviceOrder()
+                
+                // Обновляем отображение
+                deviceList.repaint()
+            }
+            
+            return true
+        }
+        
+        override fun exportDone(source: JComponent?, data: Transferable?, action: Int) {
+            draggedIndex = -1
+        }
+    }
+    
+    /**
+     * Сохраняет текущий порядок устройств
+     */
+    private fun saveCurrentDeviceOrder() {
+        val deviceSerials = mutableListOf<String>()
+        
+        for (i in 0 until deviceListModel.size()) {
+            val item = deviceListModel.getElementAt(i)
+            if (item is DeviceListItem.CombinedDevice) {
+                deviceSerials.add(item.info.baseSerialNumber)
+            }
+        }
+        
+        DeviceOrderService.saveDeviceOrder(deviceSerials)
+    }
 
     /**
      * Получает подсказку для комбинированного устройства в зависимости от позиции мыши

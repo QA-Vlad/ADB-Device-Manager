@@ -55,9 +55,9 @@
       "height": 22
     },
     "defaultSizeTooltip": {
-      "xOffset": 110,
+      "xOffset": 40,
       "yOffset": 43,
-      "width": 80,
+      "width": 150,
       "height": 20
     },
     "defaultDpiTooltip": {
