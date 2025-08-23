@@ -1,23 +1,26 @@
 package io.github.qavlad.adbrandomizer.ui.components
 
 import com.intellij.icons.AllIcons
+import com.intellij.openapi.fileChooser.FileChooserDescriptor
+import com.intellij.openapi.fileChooser.FileChooserFactory
+import com.intellij.openapi.fileChooser.FileSaverDescriptor
 import com.intellij.openapi.ui.ComboBox
 import com.intellij.openapi.ui.Messages
+import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.ui.components.JBCheckBox
-import io.github.qavlad.adbrandomizer.services.PresetListService
+import com.intellij.util.ui.JBUI
 import io.github.qavlad.adbrandomizer.services.PresetList
+import io.github.qavlad.adbrandomizer.services.PresetListService
+import io.github.qavlad.adbrandomizer.ui.dialogs.ExportPresetListsDialog
 import io.github.qavlad.adbrandomizer.utils.ButtonUtils
 import io.github.qavlad.adbrandomizer.utils.PluginLogger
 import io.github.qavlad.adbrandomizer.utils.logging.LogCategory
-import io.github.qavlad.adbrandomizer.ui.dialogs.ExportPresetListsDialog
 import java.awt.BorderLayout
+import java.awt.Dimension
 import java.awt.FlowLayout
 import java.awt.event.ItemEvent
-import javax.swing.*
-import javax.swing.filechooser.FileNameExtensionFilter
 import java.io.File
-import java.awt.Dimension
-import com.intellij.util.ui.JBUI
+import javax.swing.*
 
 /**
  * Панель для управления списками пресетов
@@ -386,18 +389,18 @@ class PresetListManagerPanel(
                 return
             }
             
-            // Выбор файла для сохранения
-            val fileChooser = JFileChooser().apply {
-                dialogTitle = "Export Preset Lists"
-                fileFilter = FileNameExtensionFilter("JSON Files", "json")
-                selectedFile = File("preset_lists_export.json")
-            }
+            // Выбор файла для сохранения с использованием современного диалога
+            val descriptor = FileSaverDescriptor(
+                "Export Preset Lists",
+                "Choose location to save preset lists",
+                "json"
+            )
             
-            if (fileChooser.showSaveDialog(this) == JFileChooser.APPROVE_OPTION) {
-                var file = fileChooser.selectedFile
-                if (!file.name.endsWith(".json")) {
-                    file = File(file.absolutePath + ".json")
-                }
+            val dialog = FileChooserFactory.getInstance().createSaveFileDialog(descriptor, null)
+            val virtualFile = dialog.save(null as VirtualFile?, "preset_lists_export.json")
+            
+            virtualFile?.let { vf ->
+                val file = vf.file
                 
                 try {
                     PresetListService.exportLists(selectedLists, file)
@@ -418,14 +421,30 @@ class PresetListManagerPanel(
     }
     
     private fun importLists() {
-        val fileChooser = JFileChooser().apply {
-            dialogTitle = "Import Preset Lists"
-            fileFilter = FileNameExtensionFilter("JSON Files", "json")
+        // Используем современный диалог выбора файла
+        val descriptor = FileChooserDescriptor(
+            true, // chooseFiles
+            false, // chooseFolders
+            false, // chooseMultiple
+            false, // chooseJarContents
+            false, // chooseJarsAsFiles
+            false  // chooseArchives
+        ).apply {
+            title = "Import Preset Lists"
+            description = "Choose JSON file with preset lists"
+            withFileFilter { virtualFile ->
+                virtualFile.extension.equals("json", ignoreCase = true)
+            }
         }
         
-        if (fileChooser.showOpenDialog(this) == JFileChooser.APPROVE_OPTION) {
+        val virtualFiles = FileChooserFactory.getInstance()
+            .createFileChooser(descriptor, null, this)
+            .choose(null)
+        
+        virtualFiles.firstOrNull()?.let { virtualFile ->
             try {
-                val importedLists = PresetListService.importLists(fileChooser.selectedFile)
+                val file = File(virtualFile.path)
+                val importedLists = PresetListService.importLists(file)
                 Messages.showInfoMessage(
                     this,
                     "Successfully imported ${importedLists.size} preset list(s)",
