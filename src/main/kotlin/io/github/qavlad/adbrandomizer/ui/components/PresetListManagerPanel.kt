@@ -502,6 +502,10 @@ class PresetListManagerPanel(
             init {
                 title = "Import Preset Lists"
                 init()
+                // Добавляем hover эффекты к кнопкам диалога
+                SwingUtilities.invokeLater {
+                    ButtonUtils.addHoverEffectToDialogButtons(rootPane)
+                }
             }
             
             override fun createCenterPanel(): JComponent {
@@ -765,6 +769,7 @@ class PresetListManagerPanel(
                 val buttonPanel = JPanel(FlowLayout(FlowLayout.LEFT))
                 
                 val addFilesButton = JButton("Add Files").apply {
+                    ButtonUtils.addHoverEffect(this)
                     addActionListener {
                         val descriptor = FileChooserDescriptor(
                             true, false, false, false, false, true
@@ -835,6 +840,7 @@ class PresetListManagerPanel(
                 }
                 
                 val addFolderButton = JButton("Add Folder").apply {
+                    ButtonUtils.addHoverEffect(this)
                     addActionListener {
                         val descriptor = FileChooserDescriptor(
                             false, true, false, false, false, false
@@ -937,6 +943,7 @@ class PresetListManagerPanel(
                 }
                 
                 val removeButton = JButton("Remove").apply {
+                    ButtonUtils.addHoverEffect(this)
                     addActionListener {
                         removeSelectedFiles()
                     }

@@ -8,6 +8,7 @@ import java.awt.KeyboardFocusManager
 import java.awt.event.KeyAdapter
 import java.awt.event.KeyEvent
 import javax.swing.*
+import io.github.qavlad.adbrandomizer.utils.ButtonUtils
 
 /**
  * Диалог для выбора списков пресетов для экспорта
@@ -30,6 +31,8 @@ class ExportPresetListsDialog(
         // Устанавливаем фокус на кнопку OK вместо первого чекбокса
         SwingUtilities.invokeLater {
             rootPane.defaultButton?.requestFocusInWindow()
+            // Добавляем hover эффекты к кнопкам диалога
+            ButtonUtils.addHoverEffectToDialogButtons(rootPane)
         }
     }
     
@@ -43,12 +46,14 @@ class ExportPresetListsDialog(
                 add(JLabel("Select preset lists to export:"))
                 add(Box.createHorizontalGlue())
                 add(JButton("Select All").apply {
+                    ButtonUtils.addHoverEffect(this)
                     addActionListener {
                         checkBoxes.forEach { it.isSelected = true }
                     }
                 })
                 add(Box.createHorizontalStrut(5))
                 add(JButton("Deselect All").apply {
+                    ButtonUtils.addHoverEffect(this)
                     addActionListener {
                         checkBoxes.forEach { it.isSelected = false }
                     }
@@ -70,9 +75,35 @@ class ExportPresetListsDialog(
                 val checkBox = JBCheckBox(name, initiallySelected).apply {
                     isFocusable = true
                     isFocusPainted = false  // Отключаем отрисовку фокуса (синей рамки)
+                    cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
                     
                     // Сохраняем ссылку на чекбокс для использования в KeyListener
                     val checkBoxRef = this
+                    
+                    // Добавляем hover эффект как у "Show all presets"
+                    val originalBackground = background
+                    val hoverBackground = originalBackground?.brighter()
+                    
+                    addMouseListener(object : java.awt.event.MouseAdapter() {
+                        override fun mouseEntered(e: java.awt.event.MouseEvent?) {
+                            if (isEnabled) {
+                                // Применяем эффект похожий на кнопки
+                                isOpaque = true
+                                if (hoverBackground != null) {
+                                    background = hoverBackground
+                                }
+                                // Включаем rollover для визуального эффекта на самом чекбоксе
+                                model.isRollover = true
+                            }
+                        }
+                        
+                        override fun mouseExited(e: java.awt.event.MouseEvent?) {
+                            // Восстанавливаем исходное состояние
+                            background = originalBackground
+                            isOpaque = false
+                            model.isRollover = false
+                        }
+                    })
                     
                     // Добавляем обработку клавиш для каждого чекбокса
                     addKeyListener(object : KeyAdapter() {
@@ -186,6 +217,7 @@ class ExportPresetListsDialog(
         val panel = JPanel(FlowLayout(FlowLayout.RIGHT))
         
         val okButton = JButton("OK").apply {
+            ButtonUtils.addHoverEffect(this)
             addActionListener { doOKAction() }
             
             // Отключаем стандартную навигацию
@@ -220,6 +252,7 @@ class ExportPresetListsDialog(
         }
         
         val cancelButton = JButton("Cancel").apply {
+            ButtonUtils.addHoverEffect(this)
             addActionListener { doCancelAction() }
             
             // Отключаем стандартную навигацию

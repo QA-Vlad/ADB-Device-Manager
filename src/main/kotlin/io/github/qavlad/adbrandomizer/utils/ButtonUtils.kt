@@ -44,7 +44,10 @@ object ButtonUtils {
         for (component in container.components) {
             when (component) {
                 is JButton -> {
-                    if (component.text == "Save" || component.text == "Cancel" || component.text == "Open presets folder") {
+                    // Добавляем hover эффект для кнопок диалогов
+                    if (component.text == "Save" || component.text == "Cancel" || 
+                        component.text == "Open presets folder" || component.text == "OK" ||
+                        component.text == "Import" || component.text == "Export") {
                         addHoverEffect(component)
                     }
                 }
