@@ -565,6 +565,8 @@ class DeviceListPanel(
                 // даже если мышь немного сместилась между нажатием и отпусканием
                 if (SwingUtilities.isLeftMouseButton(e)) {
                     handleMouseClick(e)
+                } else if (SwingUtilities.isRightMouseButton(e)) {
+                    handleRightClick(e)
                 }
             }
             override fun mouseExited(event: MouseEvent?) {
@@ -1202,6 +1204,180 @@ class DeviceListPanel(
         }
         
         DeviceOrderService.saveDeviceOrder(deviceSerials)
+    }
+    
+    /**
+     * Обрабатывает правый клик для копирования информации об устройстве
+     */
+    private fun handleRightClick(e: MouseEvent) {
+        val index = deviceList.locationToIndex(e.point)
+        if (index == -1 || index >= deviceListModel.size()) return
+
+        when (val item = deviceListModel.getElementAt(index)) {
+            is DeviceListItem.CombinedDevice -> {
+                val bounds = deviceList.getCellBounds(index, index)
+                if (bounds != null && bounds.contains(e.point)) {
+                    showDeviceInfoContextMenu(item.info, e.point)
+                }
+            }
+            is DeviceListItem.Device -> {
+                val bounds = deviceList.getCellBounds(index, index)
+                if (bounds != null && bounds.contains(e.point)) {
+                    showDeviceInfoContextMenu(item.info, e.point)
+                }
+            }
+            is DeviceListItem.WifiHistoryDevice -> {
+                val bounds = deviceList.getCellBounds(index, index)
+                if (bounds != null && bounds.contains(e.point)) {
+                    showWifiHistoryContextMenu(item.entry, e.point)
+                }
+            }
+            is DeviceListItem.GroupedWifiHistoryDevice -> {
+                val bounds = deviceList.getCellBounds(index, index)
+                if (bounds != null && bounds.contains(e.point)) {
+                    showWifiHistoryContextMenu(item.entry, e.point, item.otherIPs)
+                }
+            }
+            else -> {}
+        }
+    }
+    
+    /**
+     * Показывает контекстное меню для копирования информации об устройстве
+     */
+    private fun showDeviceInfoContextMenu(device: CombinedDeviceInfo, point: Point) {
+        val popupMenu = JPopupMenu()
+        
+        // Формируем текст для копирования
+        val deviceInfo = buildString {
+            // Имя устройства
+            append(device.displayName)
+            append("\n")
+            
+            // Серийный номер
+            append("Serial: ${device.baseSerialNumber}")
+            append("\n")
+            
+            // Версия Android с API level
+            val androidVersion = device.usbDevice?.androidVersion ?: device.wifiDevice?.androidVersion
+            val apiLevel = device.usbDevice?.apiLevel ?: device.wifiDevice?.apiLevel
+            androidVersion?.let {
+                append("Android: $it")
+                apiLevel?.let { api ->
+                    append(" (API $api)")
+                }
+                append("\n")
+            }
+            
+            // IP адрес (может быть как у Wi-Fi устройства, так и у USB с Wi-Fi)
+            val ip = device.ipAddress ?: device.wifiDevice?.ipAddress
+            ip?.let {
+                append("IP: $it")
+                append("\n")
+            }
+            
+            // Текущее разрешение экрана
+            device.currentResolution?.let {
+                append("Resolution: ${it.first}x${it.second}")
+                append("\n")
+            }
+            
+            // Текущий DPI
+            device.currentDpi?.let {
+                append("DPI: $it")
+            }
+        }
+        
+        val copyMenuItem = JMenuItem("Copy Device Info").apply {
+            addActionListener {
+                val clipboard = Toolkit.getDefaultToolkit().systemClipboard
+                clipboard.setContents(StringSelection(deviceInfo), null)
+                PluginLogger.debug(LogCategory.UI_EVENTS, "Device info copied to clipboard")
+            }
+        }
+        
+        popupMenu.add(copyMenuItem)
+        popupMenu.show(deviceList, point.x, point.y)
+    }
+    
+    /**
+     * Показывает контекстное меню для копирования информации об устройстве
+     */
+    private fun showDeviceInfoContextMenu(device: DeviceInfo, point: Point) {
+        val popupMenu = JPopupMenu()
+        
+        // Формируем текст для копирования
+        val deviceInfo = buildString {
+            // Имя устройства
+            append(device.displayName)
+            append("\n")
+            
+            // Серийный номер
+            append("Serial: ${device.logicalSerialNumber}")
+            append("\n")
+            
+            // Версия Android с API level
+            device.androidVersion.let {
+                append("Android: $it")
+                append(" (API ${device.apiLevel})")
+                append("\n")
+            }
+            
+            // IP адрес для Wi-Fi устройств
+            device.ipAddress?.let {
+                append("IP: $it")
+                append("\n")
+            }
+        }
+        
+        val copyMenuItem = JMenuItem("Copy Device Info").apply {
+            addActionListener {
+                val clipboard = Toolkit.getDefaultToolkit().systemClipboard
+                clipboard.setContents(StringSelection(deviceInfo), null)
+                PluginLogger.debug(LogCategory.UI_EVENTS, "Device info copied to clipboard")
+            }
+        }
+        
+        popupMenu.add(copyMenuItem)
+        popupMenu.show(deviceList, point.x, point.y)
+    }
+    
+    /**
+     * Показывает контекстное меню для копирования информации о Wi-Fi истории
+     */
+    private fun showWifiHistoryContextMenu(entry: WifiDeviceHistoryService.WifiDeviceHistoryEntry, point: Point, otherIPs: List<String> = emptyList()) {
+        val popupMenu = JPopupMenu()
+        
+        // Формируем текст для копирования
+        val deviceInfo = buildString {
+            // Имя устройства
+            append(entry.displayName)
+            append("\n")
+            
+            // Серийный номер
+            append("Serial: ${entry.realSerialNumber ?: entry.logicalSerialNumber}")
+            append("\n")
+            
+            // IP адрес
+            append("IP: ${entry.ipAddress}:${entry.port}")
+            
+            // Другие IP адреса если есть
+            if (otherIPs.isNotEmpty()) {
+                append("\n")
+                append("Other IPs: ${otherIPs.joinToString(", ")}")
+            }
+        }
+        
+        val copyMenuItem = JMenuItem("Copy Device Info").apply {
+            addActionListener {
+                val clipboard = Toolkit.getDefaultToolkit().systemClipboard
+                clipboard.setContents(StringSelection(deviceInfo), null)
+                PluginLogger.debug(LogCategory.UI_EVENTS, "Wi-Fi history device info copied to clipboard")
+            }
+        }
+        
+        popupMenu.add(copyMenuItem)
+        popupMenu.show(deviceList, point.x, point.y)
     }
 
     /**
