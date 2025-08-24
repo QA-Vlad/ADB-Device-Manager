@@ -13,7 +13,7 @@ import io.github.qavlad.adbrandomizer.ui.dialogs.PresetsDialogController
 class PresetsDialogServiceLocator(
     val project: Project?,
     getSelectedDevices: (() -> List<com.android.ddmlib.IDevice>)? = null,
-    onPresetApplied: ((preset: io.github.qavlad.adbrandomizer.services.DevicePreset, listName: String?) -> Unit)? = null
+    onPresetApplied: ((preset: io.github.qavlad.adbrandomizer.services.DevicePreset, listName: String?, setSize: Boolean, setDpi: Boolean) -> Unit)? = null
 ) {
     // === Состояние и управление ===
     val dialogState = DialogStateManager()

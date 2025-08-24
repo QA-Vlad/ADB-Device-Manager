@@ -34,7 +34,7 @@ class PresetsDialogController(
     project: Project?,
     private val dialog: PresetsDialog,
     getSelectedDevices: (() -> List<com.android.ddmlib.IDevice>)? = null,
-    onPresetApplied: ((preset: DevicePreset, listName: String?) -> Unit)? = null
+    onPresetApplied: ((preset: DevicePreset, listName: String?, setSize: Boolean, setDpi: Boolean) -> Unit)? = null
 ) : CommandContext {
     // Service Locator и State Manager
     internal val serviceLocator = PresetsDialogServiceLocator(project, getSelectedDevices, onPresetApplied)

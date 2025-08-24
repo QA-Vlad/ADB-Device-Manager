@@ -18,7 +18,7 @@ class TableEventHandler(
     private val getHoverState: () -> HoverState? = { null },
     private val setHoverState: ((HoverState) -> Unit)? = null,
     private val getSelectedDevices: (() -> List<com.android.ddmlib.IDevice>)? = null,
-    private val onPresetApplied: ((preset: io.github.qavlad.adbrandomizer.services.DevicePreset, listName: String?) -> Unit)? = null,
+    private val onPresetApplied: ((preset: io.github.qavlad.adbrandomizer.services.DevicePreset, listName: String?, setSize: Boolean, setDpi: Boolean) -> Unit)? = null,
     private val getCurrentListName: (() -> String?)? = null
 ) {
     
@@ -140,7 +140,7 @@ class TableEventHandler(
                     // Передаем текущую позицию в таблице (ров + 1, так как row с 0)
                     PresetApplicationService.applyPreset(proj, preset, setSize = false, setDpi = true, currentTablePosition = row + 1, selectedDevices = selectedDevices)
                     // Уведомляем об применении пресета
-                    onPresetApplied?.invoke(preset, getCurrentListName?.invoke()) 
+                    onPresetApplied?.invoke(preset, getCurrentListName?.invoke(), false, true) 
                 }
             }
             popupMenu.add(applyDpiItem)
@@ -162,7 +162,7 @@ class TableEventHandler(
                     // Передаем текущую позицию в таблице (ров + 1, так как row с 0)
                     PresetApplicationService.applyPreset(proj, preset, setSize = true, setDpi = false, currentTablePosition = row + 1, selectedDevices = selectedDevices)
                     // Уведомляем об применении пресета
-                    onPresetApplied?.invoke(preset, getCurrentListName?.invoke()) 
+                    onPresetApplied?.invoke(preset, getCurrentListName?.invoke(), true, false) 
                 }
             }
             popupMenu.add(applySizeItem)
@@ -184,7 +184,7 @@ class TableEventHandler(
                     // Передаем текущую позицию в таблице (ров + 1, так как row с 0)
                     PresetApplicationService.applyPreset(proj, preset, setSize = true, setDpi = true, currentTablePosition = row + 1, selectedDevices = selectedDevices)
                     // Уведомляем об применении пресета
-                    onPresetApplied?.invoke(preset, getCurrentListName?.invoke()) 
+                    onPresetApplied?.invoke(preset, getCurrentListName?.invoke(), true, true) 
                 }
             }
             popupMenu.add(applyBothItem)

@@ -26,7 +26,7 @@ import java.awt.Desktop
 class PresetsDialog(
     project: Project?,
     getSelectedDevices: (() -> List<com.android.ddmlib.IDevice>)? = null,
-    onPresetApplied: ((preset: io.github.qavlad.adbrandomizer.services.DevicePreset, listName: String?) -> Unit)? = null
+    onPresetApplied: ((preset: io.github.qavlad.adbrandomizer.services.DevicePreset, listName: String?, setSize: Boolean, setDpi: Boolean) -> Unit)? = null
 ) : DialogWrapper(project) {
     
     private val controller = PresetsDialogController(project, this, getSelectedDevices, onPresetApplied)

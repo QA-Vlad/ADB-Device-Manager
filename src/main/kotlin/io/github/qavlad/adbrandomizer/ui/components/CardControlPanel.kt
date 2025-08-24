@@ -103,7 +103,6 @@ class CardControlPanel(
             
             // Кнопки
             val allButton = createStyledButton("All", true) {
-                updateLastUsedPreset(null, null)
                 onRandomAction(true, true)
             }
             allButton.toolTipText = "Randomize screen Size and DPI"
@@ -113,7 +112,6 @@ class CardControlPanel(
             add(Box.createVerticalStrut(4))
             
             val sizeButton = createStyledButton("Size", false) {
-                updateLastUsedPreset(null, null)
                 onRandomAction(true, false)
             }
             sizeButton.toolTipText = "Randomize screen Size only"
@@ -123,7 +121,6 @@ class CardControlPanel(
             add(Box.createVerticalStrut(4))
             
             val dpiButton = createStyledButton("DPI", false) {
-                updateLastUsedPreset(null, null)
                 onRandomAction(false, true)
             }
             dpiButton.toolTipText = "Randomize DPI only"
@@ -459,10 +456,13 @@ class CardControlPanel(
     }
     
     fun updateLastUsedPreset(preset: DevicePreset?) {
+        println("ADB_DEBUG [Update Preset]: updateLastUsedPreset called with preset: ${preset?.label ?: "null"}")
         updateLastUsedPreset(preset, getCurrentListName())
     }
     
     fun updateLastUsedPreset(preset: DevicePreset?, listName: String?) {
+        println("ADB_DEBUG [Update Preset]: updateLastUsedPreset called with preset: ${preset?.label ?: "null"}, listName: ${listName ?: "null"}")
+        println("ADB_DEBUG [Update Preset]:   Size='${preset?.size ?: ""}', DPI='${preset?.dpi ?: ""}'")
         lastUsedPreset = preset
         lastUsedPresetListName = listName
         updatePresetIndicator()
@@ -505,7 +505,16 @@ class CardControlPanel(
                 // Добавляем tooltip с информацией о пресете
                 val size = lastUsedPreset!!.size
                 val dpi = lastUsedPreset!!.dpi
-                activePresetPanel.toolTipText = "Resolution: $size | DPI: $dpi"
+                val tooltipText = when {
+                    size.isNotBlank() && dpi.isNotBlank() -> "Resolution: $size | DPI: $dpi"
+                    size.isNotBlank() -> "Resolution: $size"
+                    dpi.isNotBlank() -> "DPI: $dpi"
+                    else -> null
+                }
+                activePresetPanel.toolTipText = tooltipText
+                
+                // Логирование активного пресета
+                println("ADB_DEBUG [Active Preset]: Label='${lastUsedPreset!!.label}', Size='${size}', DPI='${dpi}', List='${lastUsedPresetListName ?: "none"}'")
             } else {
                 activePresetLabel.text = "Not selected"
                 activePresetLabel.foreground = JBColor.GRAY
@@ -513,6 +522,9 @@ class CardControlPanel(
                 
                 activePresetPanel.background = JBColor(Color(245, 248, 250), Color(55, 58, 60))
                 activePresetPanel.toolTipText = null
+                
+                // Логирование отсутствия активного пресета
+                println("ADB_DEBUG [Active Preset]: No active preset")
             }
         }
     }

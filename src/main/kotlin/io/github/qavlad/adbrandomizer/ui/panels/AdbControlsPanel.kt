@@ -27,6 +27,9 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
 
     private var lastUsedPreset: DevicePreset? = null
     private var currentPresetIndex: Int = -1
+    // Отслеживаем, какой пресет дал текущий Size и DPI
+    private var sizeSourcePreset: DevicePreset? = null
+    private var dpiSourcePreset: DevicePreset? = null
     private var currentHoverState = HoverState.noHover()
     
     // Debounce timer для навигации по пресетам стрелками
@@ -163,11 +166,59 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
 
         val randomPreset = selectRandomPreset(setSize, setDpi) ?: return
         
+        // Комбинируем с существующим пресетом если применяем только часть параметров
+        println("ADB_DEBUG [Preset Combination]: Previous preset: ${lastUsedPreset?.label ?: "none"} (Size='${lastUsedPreset?.size ?: ""}', DPI='${lastUsedPreset?.dpi ?: ""}')")
+        println("ADB_DEBUG [Preset Combination]: New random preset: ${randomPreset.label} (Size='${randomPreset.size}', DPI='${randomPreset.dpi}')")
+        
+        // Обновляем источники Size и DPI
+        if (setSize) {
+            sizeSourcePreset = randomPreset
+        }
+        if (setDpi) {
+            dpiSourcePreset = randomPreset  
+        }
+        
+        val combinedPreset = when {
+            setSize && setDpi -> {
+                // Применяем оба параметра - используем новый пресет полностью
+                randomPreset
+            }
+            setSize && !setDpi -> {
+                // Применяем только size - сохраняем DPI от предыдущего пресета если есть
+                if (lastUsedPreset?.dpi?.isNotBlank() == true) {
+                    // Комбинируем: берём dpi от старого, size от нового
+                    // Сохраняем оригинальное название пресета для size
+                    randomPreset.copy(
+                        dpi = lastUsedPreset!!.dpi
+                    )
+                } else {
+                    randomPreset.copy(dpi = "")
+                }
+            }
+            !setSize && setDpi -> {
+                // Применяем только DPI - сохраняем size от предыдущего пресета если есть
+                if (lastUsedPreset?.size?.isNotBlank() == true) {
+                    // Комбинируем: берём size от старого, dpi от нового
+                    // Показываем новый пресет как активный (последний применённый)
+                    randomPreset.copy(
+                        size = lastUsedPreset!!.size
+                    )
+                } else {
+                    randomPreset.copy(size = "")
+                }
+            }
+            else -> randomPreset
+        }
+        
+        println("ADB_DEBUG [Preset Combination]: Result preset: ${combinedPreset.label} (Size='${combinedPreset.size}', DPI='${combinedPreset.dpi}')")
+        
         // Обновляем индикатор текущего пресета
-        buttonPanel.updateLastUsedPreset(randomPreset)
+        buttonPanel.updateLastUsedPreset(combinedPreset)
         
         // Позиция будет вычислена динамически после обновления счетчиков
-        applyPresetToSelectedDevices(randomPreset, setSize, setDpi, selectedDevices)
+        // Передаём оригинальный randomPreset для ADB команд, но combinedPreset уже сохранён в lastUsedPreset
+        lastUsedPreset = combinedPreset
+        PresetApplicationService.applyPreset(project, randomPreset, setSize, setDpi, selectedDevices = selectedDevices)
     }
 
     private fun selectRandomPreset(setSize: Boolean, setDpi: Boolean): DevicePreset? {
@@ -275,18 +326,16 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
         // Обновляем только UI индикатор, без применения ADB команд
         buttonPanel.updateLastUsedPreset(preset)
     }
-
-    private fun applyPresetToSelectedDevices(preset: DevicePreset, setSize: Boolean, setDpi: Boolean, selectedDevices: List<IDevice>) {
-        lastUsedPreset = preset
-        
-        // Используем PresetApplicationService для применения пресета
-        // Это обеспечит правильную работу перезапуска scrcpy и приложений
-        // Передаем выбранные устройства для применения только к ним
-        PresetApplicationService.applyPreset(project, preset, setSize, setDpi, selectedDevices = selectedDevices)
-    }
     
     private fun applyPresetToDevices(preset: DevicePreset) {
         lastUsedPreset = preset
+        // Обновляем источники для Size и DPI
+        if (preset.size.isNotBlank()) {
+            sizeSourcePreset = preset
+        }
+        if (preset.dpi.isNotBlank()) {
+            dpiSourcePreset = preset
+        }
         // Получаем список выбранных устройств для применения пресета
         val selectedDevices = getSelectedDevicesForAdb()
         if (selectedDevices.isEmpty()) {
@@ -318,6 +367,9 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                 
                 ApplicationManager.getApplication().invokeLater {
                     showResetResult(selectedDevices.size, resetSize, resetDpi)
+                    
+                    // Обновляем индикатор активного пресета после сброса
+                    updateActivePresetAfterReset(resetSize, resetDpi)
                 }
             }
         }.queue()
@@ -423,6 +475,61 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
         }
     }
 
+    private fun updateActivePresetAfterReset(resetSize: Boolean, resetDpi: Boolean) {
+        println("ADB_DEBUG [Reset]: updateActivePresetAfterReset called - resetSize: $resetSize, resetDpi: $resetDpi")
+        println("ADB_DEBUG [Reset]: Current preset before reset: ${lastUsedPreset?.label ?: "none"} (Size='${lastUsedPreset?.size ?: ""}', DPI='${lastUsedPreset?.dpi ?: ""}')")
+        println("ADB_DEBUG [Reset]: Size source: ${sizeSourcePreset?.label ?: "none"}, DPI source: ${dpiSourcePreset?.label ?: "none"}")
+        
+        // Обновляем источники после сброса
+        if (resetSize) {
+            sizeSourcePreset = null
+        }
+        if (resetDpi) {
+            dpiSourcePreset = null
+        }
+        
+        // Определяем, какой пресет показывать как активный
+        val activePreset = when {
+            sizeSourcePreset != null && dpiSourcePreset != null -> {
+                // Есть и Size и DPI - показываем последний применённый
+                // Обычно DPI применяется после Size, так что показываем источник DPI
+                dpiSourcePreset
+            }
+            sizeSourcePreset != null -> {
+                // Только Size активен
+                sizeSourcePreset
+            }
+            dpiSourcePreset != null -> {
+                // Только DPI активен
+                dpiSourcePreset
+            }
+            else -> null
+        }
+        
+        if (activePreset != null) {
+            // Создаем пресет с актуальными значениями
+            val remainingPreset = activePreset.copy(
+                size = if (sizeSourcePreset != null) sizeSourcePreset!!.size else "",
+                dpi = if (dpiSourcePreset != null) dpiSourcePreset!!.dpi else ""
+            )
+            
+            val listName = try {
+                PresetListService.getActivePresetList()?.name
+            } catch (_: Exception) {
+                null
+            }
+            
+            buttonPanel.updateLastUsedPreset(remainingPreset, listName)
+            lastUsedPreset = remainingPreset
+        } else {
+            // Если ничего не осталось, очищаем
+            buttonPanel.updateLastUsedPreset(null, null)
+            lastUsedPreset = null
+        }
+        
+        println("ADB_DEBUG [Reset]: Preset after reset: ${lastUsedPreset?.label ?: "none"} (Size='${lastUsedPreset?.size ?: ""}', DPI='${lastUsedPreset?.dpi ?: ""}')")
+    }
+    
     private fun showResetResult(deviceCount: Int, resetSize: Boolean, resetDpi: Boolean) {
         val resetItems = mutableListOf<String>()
         if (resetSize) resetItems.add("screen Size")
@@ -1313,9 +1420,39 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
         PresetsDialog(
             project = project,
             getSelectedDevices = ::getSelectedDevicesForAdb,
-            onPresetApplied = { preset, listName ->
+            onPresetApplied = { preset, listName, setSize, setDpi ->
+                // Комбинируем с существующим пресетом если применяем только часть параметров
+                val combinedPreset = when {
+                    setSize && setDpi -> {
+                        // Применяем оба параметра - используем новый пресет полностью
+                        sizeSourcePreset = preset
+                        dpiSourcePreset = preset
+                        preset
+                    }
+                    setSize && !setDpi -> {
+                        // Применяем только size - сохраняем DPI от предыдущего пресета если есть
+                        sizeSourcePreset = preset
+                        if (lastUsedPreset?.dpi?.isNotBlank() == true) {
+                            preset.copy(dpi = lastUsedPreset!!.dpi)
+                        } else {
+                            preset.copy(dpi = "")
+                        }
+                    }
+                    !setSize && setDpi -> {
+                        // Применяем только DPI - сохраняем size от предыдущего пресета если есть
+                        dpiSourcePreset = preset
+                        if (lastUsedPreset?.size?.isNotBlank() == true) {
+                            preset.copy(size = lastUsedPreset!!.size)
+                        } else {
+                            preset.copy(size = "")
+                        }
+                    }
+                    else -> preset
+                }
+                
                 // Обновляем индикатор активного пресета при применении из диалога
-                buttonPanel.updateLastUsedPreset(preset, listName)
+                buttonPanel.updateLastUsedPreset(combinedPreset, listName)
+                lastUsedPreset = combinedPreset
             }
         ).show()
     }

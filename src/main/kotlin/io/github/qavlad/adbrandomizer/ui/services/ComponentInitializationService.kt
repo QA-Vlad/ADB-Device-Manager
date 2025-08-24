@@ -29,7 +29,7 @@ import javax.swing.SwingUtilities
 class ComponentInitializationService(
     private val project: Project?,
     private val getSelectedDevices: (() -> List<com.android.ddmlib.IDevice>)? = null,
-    private val onPresetApplied: ((preset: DevicePreset, listName: String?) -> Unit)? = null,
+    private val onPresetApplied: ((preset: DevicePreset, listName: String?, setSize: Boolean, setDpi: Boolean) -> Unit)? = null,
     private val getCurrentListName: (() -> String?)? = null,
     private val dialogState: DialogStateManager,
     private val componentsFactory: DialogComponentsFactory
