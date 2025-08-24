@@ -11,7 +11,8 @@ import io.github.qavlad.adbrandomizer.ui.dialogs.PresetsDialogController
  * Создаёт и предоставляет доступ ко всем необходимым сервисам
  */
 class PresetsDialogServiceLocator(
-    project: Project?
+    val project: Project?,
+    getSelectedDevices: (() -> List<com.android.ddmlib.IDevice>)? = null
 ) {
     // === Состояние и управление ===
     val dialogState = DialogStateManager()
@@ -60,7 +61,7 @@ class PresetsDialogServiceLocator(
     
     // === UI компоненты и фабрики ===
     val componentsFactory = DialogComponentsFactory()
-    val componentInitService = ComponentInitializationService(project, dialogState, componentsFactory)
+    val componentInitService = ComponentInitializationService(project, getSelectedDevices, dialogState, componentsFactory)
     
     // === Обработчики событий ===
     val tableDragDropHandler = TableDragDropHandler(

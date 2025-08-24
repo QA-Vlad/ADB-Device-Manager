@@ -23,9 +23,12 @@ import java.awt.Desktop
  * Диалог управления пресетами ADB Randomizer.
  * Использует PresetsDialogController для управления логикой.
  */
-class PresetsDialog(project: Project?) : DialogWrapper(project) {
+class PresetsDialog(
+    project: Project?,
+    getSelectedDevices: (() -> List<com.android.ddmlib.IDevice>)? = null
+) : DialogWrapper(project) {
     
-    private val controller = PresetsDialogController(project, this)
+    private val controller = PresetsDialogController(project, this, getSelectedDevices)
     private var orientationPanel: OrientationPanel? = null
     
     /**

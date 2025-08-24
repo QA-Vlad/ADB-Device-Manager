@@ -16,7 +16,8 @@ import javax.swing.*
 class TableEventHandler(
     private val project: Project?,
     private val getHoverState: () -> HoverState? = { null },
-    private val setHoverState: ((HoverState) -> Unit)? = null
+    private val setHoverState: ((HoverState) -> Unit)? = null,
+    private val getSelectedDevices: (() -> List<com.android.ddmlib.IDevice>)? = null
 ) {
     
     /**
@@ -124,9 +125,18 @@ class TableEventHandler(
         if (preset.dpi.isNotBlank()) {
             val applyDpiItem = JMenuItem("Apply DPI only (${preset.dpi})")
             applyDpiItem.addActionListener { 
-                project?.let { 
+                project?.let { proj ->
+                    val selectedDevices = getSelectedDevices?.invoke()
+                    if (selectedDevices.isNullOrEmpty()) {
+                        com.intellij.openapi.ui.Messages.showWarningDialog(
+                            proj,
+                            "No devices selected for ADB commands.\nPlease check the ADB checkboxes in the main plugin window.",
+                            "No Devices Selected"
+                        )
+                        return@addActionListener
+                    }
                     // Передаем текущую позицию в таблице (ров + 1, так как row с 0)
-                    PresetApplicationService.applyPreset(it, preset, setSize = false, setDpi = true, currentTablePosition = row + 1) 
+                    PresetApplicationService.applyPreset(proj, preset, setSize = false, setDpi = true, currentTablePosition = row + 1, selectedDevices = selectedDevices) 
                 }
             }
             popupMenu.add(applyDpiItem)
@@ -135,9 +145,18 @@ class TableEventHandler(
         if (preset.size.isNotBlank()) {
             val applySizeItem = JMenuItem("Apply Size only (${preset.size})")
             applySizeItem.addActionListener { 
-                project?.let { 
+                project?.let { proj ->
+                    val selectedDevices = getSelectedDevices?.invoke()
+                    if (selectedDevices.isNullOrEmpty()) {
+                        com.intellij.openapi.ui.Messages.showWarningDialog(
+                            proj,
+                            "No devices selected for ADB commands.\nPlease check the ADB checkboxes in the main plugin window.",
+                            "No Devices Selected"
+                        )
+                        return@addActionListener
+                    }
                     // Передаем текущую позицию в таблице (ров + 1, так как row с 0)
-                    PresetApplicationService.applyPreset(it, preset, setSize = true, setDpi = false, currentTablePosition = row + 1) 
+                    PresetApplicationService.applyPreset(proj, preset, setSize = true, setDpi = false, currentTablePosition = row + 1, selectedDevices = selectedDevices) 
                 }
             }
             popupMenu.add(applySizeItem)
@@ -146,9 +165,18 @@ class TableEventHandler(
         if (preset.dpi.isNotBlank() && preset.size.isNotBlank()) {
             val applyBothItem = JMenuItem("Apply Size and DPI")
             applyBothItem.addActionListener { 
-                project?.let { 
+                project?.let { proj ->
+                    val selectedDevices = getSelectedDevices?.invoke()
+                    if (selectedDevices.isNullOrEmpty()) {
+                        com.intellij.openapi.ui.Messages.showWarningDialog(
+                            proj,
+                            "No devices selected for ADB commands.\nPlease check the ADB checkboxes in the main plugin window.",
+                            "No Devices Selected"
+                        )
+                        return@addActionListener
+                    }
                     // Передаем текущую позицию в таблице (ров + 1, так как row с 0)
-                    PresetApplicationService.applyPreset(it, preset, setSize = true, setDpi = true, currentTablePosition = row + 1) 
+                    PresetApplicationService.applyPreset(proj, preset, setSize = true, setDpi = true, currentTablePosition = row + 1, selectedDevices = selectedDevices) 
                 }
             }
             popupMenu.add(applyBothItem)

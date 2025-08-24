@@ -1310,7 +1310,7 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
     // ==================== SETTINGS ====================
 
     private fun openPresetsDialog() {
-        PresetsDialog(project).show()
+        PresetsDialog(project, ::getSelectedDevicesForAdb).show()
     }
     
     private fun openPluginSettings() {

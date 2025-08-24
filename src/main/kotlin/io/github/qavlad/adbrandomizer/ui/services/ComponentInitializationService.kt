@@ -28,6 +28,7 @@ import javax.swing.SwingUtilities
  */
 class ComponentInitializationService(
     private val project: Project?,
+    private val getSelectedDevices: (() -> List<com.android.ddmlib.IDevice>)? = null,
     private val dialogState: DialogStateManager,
     private val componentsFactory: DialogComponentsFactory
 ) {
@@ -107,7 +108,8 @@ class ComponentInitializationService(
         val tableEventHandler = TableEventHandler(
             project = project,
             getHoverState = getHoverState,
-            setHoverState = { newState -> hoverStateManager.setState(newState) }
+            setHoverState = { newState -> hoverStateManager.setState(newState) },
+            getSelectedDevices = getSelectedDevices
         )
         
         return TableInitResult(table, hoverStateManager, tableEventHandler)
