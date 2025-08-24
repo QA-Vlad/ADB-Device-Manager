@@ -66,7 +66,7 @@ class PresetListManagerPanel(
         
         // Устанавливаем правильную подсказку для кнопки Reset в зависимости от начального состояния
         if (showAllPresetsCheckbox.isSelected) {
-            resetButton.toolTipText = "Reset all default preset lists to original values"
+            resetButton.toolTipText = "Reset all default preset lists to Default values"
         }
     }
     
@@ -156,7 +156,7 @@ class PresetListManagerPanel(
             
             // Обновляем подсказку кнопки Reset в зависимости от режима
             resetButton.toolTipText = if (isSelected) {
-                "Reset all default preset lists to original values"
+                "Reset all default preset lists to Default values"
             } else {
                 "Reset presets to defaults"
             }
@@ -268,7 +268,7 @@ class PresetListManagerPanel(
         // Кнопка сброса активна только для дефолтных списков
         resetButton.isEnabled = list.isDefault
         resetButton.toolTipText = when {
-            list.isDefault -> "Reset this default preset list to original values"
+            list.isDefault -> "Reset this default preset list to Default values"
             list.isImported -> "Reset is only available for default lists"
             else -> "Reset is only available for default lists"
         }
@@ -1109,7 +1109,7 @@ class PresetListManagerPanel(
             // Обновляем состояние UI элементов
             listComboBox.isEnabled = !enabled
             resetButton.toolTipText = if (enabled) {
-                "Reset all default preset lists to original values"
+                "Reset all default preset lists to Default values"
             } else {
                 "Reset presets to defaults"
             }
@@ -1195,7 +1195,7 @@ class PresetListManagerPanel(
             this,
             "Choose reset option:\n\n" +
             "• Reset Current List - Reset only '${selectedItem.name}' to default values\n" +
-            "• Reset All Default Lists - Reset all default lists to original values (custom lists preserved)",
+            "• Reset All Default Lists - Reset all default lists to Default values (custom lists preserved)",
             "Reset Presets",
             options,
             0,
@@ -1364,7 +1364,7 @@ class PresetListManagerPanel(
                 
                 Messages.showInfoMessage(
                     this,
-                    "$resetCount default preset list(s) have been reset to original values:\n\n${resetDetails.joinToString("\n")}",
+                    "$resetCount default preset list(s) have been reset to Default values:\n\n${resetDetails.joinToString("\n")}",
                     "Reset Complete"
                 )
             } else {

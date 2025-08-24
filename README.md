@@ -16,7 +16,7 @@
 Every mobile QA knows how tedious it can be to test an application on multiple different screens. This usually requires:
 - Switching between multiple physical devices.
 - Manually entering ADB commands in the terminal.
-- Constantly remembering the screen sizes of various devices.
+- Constantly remembering the screen Sizes of various devices.
 
 **ADB Screen Randomizer** solves these problems by providing a simple and intuitive interface for instantly changing screen parameters and performing other useful actions.
 

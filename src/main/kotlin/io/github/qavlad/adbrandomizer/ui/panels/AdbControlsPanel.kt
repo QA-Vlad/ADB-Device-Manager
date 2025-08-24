@@ -31,7 +31,7 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
     
     private val devicePollingService = DevicePollingService(project)
     private lateinit var deviceListPanel: DeviceListPanel
-    private lateinit var buttonPanel: ButtonPanel
+    private lateinit var buttonPanel: CardControlPanel
     private lateinit var compactActionPanel: CompactActionPanel
 
     init {
@@ -41,7 +41,7 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
     }
 
     private fun setupUI() {
-        buttonPanel = ButtonPanel(
+        buttonPanel = CardControlPanel(
             onRandomAction = { setSize, setDpi -> executeRandomAction(setSize, setDpi) },
             onNextPreset = { navigateToNextPreset() },
             onPreviousPreset = { navigateToPreviousPreset() },
@@ -76,13 +76,9 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
             onParallelWifiConnect = { ipAddresses -> connectDeviceViaWifiParallel(ipAddresses) }
         )
         
-        val splitPane = JSplitPane(JSplitPane.VERTICAL_SPLIT, buttonPanel, deviceListPanel).apply {
-            border = null
-            resizeWeight = 0.5
-            SwingUtilities.invokeLater { setDividerLocation(0.5) }
-        }
-        
-        add(splitPane, BorderLayout.CENTER)
+        // Используем BorderLayout вместо SplitPane для максимальной компактности
+        add(buttonPanel, BorderLayout.NORTH)
+        add(deviceListPanel, BorderLayout.CENTER)
     }
 
     private fun startDevicePolling() {
@@ -164,6 +160,9 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
 
         val randomPreset = selectRandomPreset(setSize, setDpi) ?: return
         
+        // Обновляем индикатор текущего пресета
+        buttonPanel.updateLastUsedPreset(randomPreset)
+        
         // Позиция будет вычислена динамически после обновления счетчиков
         applyPresetToSelectedDevices(randomPreset, setSize, setDpi, selectedDevices)
     }
@@ -237,6 +236,8 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
         }
 
         val preset = presets[index]
+        // Обновляем индикатор текущего пресета
+        buttonPanel.updateLastUsedPreset(preset)
         // Позиция будет вычислена динамически после обновления счетчиков
         applyPresetToDevices(preset)
     }
@@ -291,7 +292,7 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
     private fun getResetActionDescription(resetSize: Boolean, resetDpi: Boolean): String {
         return when {
             resetSize && resetDpi -> "Resetting screen and DPI"
-            resetSize -> "Resetting screen size"
+            resetSize -> "Resetting screen Size"
             resetDpi -> "Resetting DPI"
             else -> "No action"
         }
@@ -390,7 +391,7 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
 
     private fun showResetResult(deviceCount: Int, resetSize: Boolean, resetDpi: Boolean) {
         val resetItems = mutableListOf<String>()
-        if (resetSize) resetItems.add("screen size")
+        if (resetSize) resetItems.add("screen Size")
         if (resetDpi) resetItems.add("DPI")
 
         val resetDescription = resetItems.joinToString(" and ")
@@ -404,13 +405,13 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
     private fun resetDeviceSize(device: io.github.qavlad.adbrandomizer.ui.models.CombinedDeviceInfo) {
         // Проверяем, изменено ли разрешение
         if (!device.hasModifiedResolution) {
-            NotificationUtils.showInfo(project, "Screen size is already at default")
+            NotificationUtils.showInfo(project, "Screen Size is already at default")
             return
         }
         
         val activeDevice = device.usbDevice?.device ?: device.wifiDevice?.device
         if (activeDevice != null) {
-            object : Task.Backgroundable(project, "Resetting screen size") {
+            object : Task.Backgroundable(project, "Resetting screen Size") {
                 override fun run(indicator: ProgressIndicator) {
                     val settings = PluginSettings.instance
                     
@@ -480,7 +481,7 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                     )
                     
                     ApplicationManager.getApplication().invokeLater {
-                        NotificationUtils.showSuccess(project, "Screen size reset to default")
+                        NotificationUtils.showSuccess(project, "Screen Size reset to default")
                         devicePollingService.forceCombinedUpdate()
                     }
                 }

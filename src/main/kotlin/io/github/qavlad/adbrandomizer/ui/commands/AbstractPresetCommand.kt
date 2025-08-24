@@ -122,7 +122,7 @@ abstract class AbstractPresetCommand(
      * Переключается в режим, в котором была выполнена операция
      */
     protected fun switchToOriginalMode() {
-        println("ADB_DEBUG: Switching to original mode...")
+        println("ADB_DEBUG: Switching to Default mode...")
         println("ADB_DEBUG: Original: ShowAll=$wasShowAllMode, HideDuplicates=$wasHideDuplicatesMode, listId=$originalListId")
         
         // Сначала переключаем список, если нужно

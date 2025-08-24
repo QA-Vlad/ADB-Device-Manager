@@ -1,0 +1,66 @@
+META-INF/
+META-INF/MANIFEST.MF
+hitbox-config.json
+icons/
+icons/dpi.svg
+icons/edit.svg
+icons/mobile.svg
+icons/mobile_inactive.svg
+icons/mobile_landscape.svg
+icons/mobile_landscape_inactive.svg
+icons/pluginIcon.svg
+icons/presets.svg
+icons/presets_manager.svg
+icons/random.svg
+icons/reset.svg
+icons/scrcpy.svg
+icons/size.svg
+icons/usb.svg
+icons/usb_off.svg
+icons/wifi.svg
+icons/wifi_off.svg
+META-INF/plugin.xml
+presets/
+presets/Budget Phones 2024.json
+presets/Common Resolutions.json
+presets/Flagship Phones 2024.json
+presets/Foldable Phones 2024.json
+presets/Gaming Phones 2024.json
+presets/Legacy Popular Devices.json
+presets/Mid-Range Phones 2024.json
+presets/OnePlus.json
+presets/Popular Phones.json
+presets/Samsung Devices.json
+presets/Tablets 2024.json
+presets/Tablets.json
+io/
+io/github/
+io/github/qavlad/
+io/github/qavlad/adbrandomizer/
+io/github/qavlad/adbrandomizer/startup/
+io/github/qavlad/adbrandomizer/ui/
+io/github/qavlad/adbrandomizer/ui/dialogs/
+io/github/qavlad/adbrandomizer/ui/handlers/
+io/github/qavlad/adbrandomizer/ui/panels/
+io/github/qavlad/adbrandomizer/services/
+io/github/qavlad/adbrandomizer/services/integration/
+io/github/qavlad/adbrandomizer/services/integration/androidstudio/
+io/github/qavlad/adbrandomizer/services/integration/androidstudio/ui/
+io/github/qavlad/adbrandomizer/exceptions/
+io/github/qavlad/adbrandomizer/ui/components/
+io/github/qavlad/adbrandomizer/ui/config/
+io/github/qavlad/adbrandomizer/utils/
+io/github/qavlad/adbrandomizer/utils/logging/
+io/github/qavlad/adbrandomizer/services/integration/scrcpy/
+io/github/qavlad/adbrandomizer/services/integration/scrcpy/ui/
+io/github/qavlad/adbrandomizer/config/
+io/github/qavlad/adbrandomizer/actions/
+io/github/qavlad/adbrandomizer/ui/commands/
+io/github/qavlad/adbrandomizer/ui/theme/
+io/github/qavlad/adbrandomizer/ui/icons/
+io/github/qavlad/adbrandomizer/core/
+io/github/qavlad/adbrandomizer/ui/renderers/
+io/github/qavlad/adbrandomizer/ui/services/
+io/github/qavlad/adbrandomizer/services/integration/androidstudio/constants/
+io/github/qavlad/adbrandomizer/settings/
+io/github/qavlad/adbrandomizer/ui/models/

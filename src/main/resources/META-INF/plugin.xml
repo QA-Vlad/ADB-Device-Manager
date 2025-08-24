@@ -12,7 +12,7 @@
 
     <!-- 4. Описание плагина -->
     <description><![CDATA[
-    A simple plugin to set random screen sizes and DPI on connected Android devices using ADB commands.
+    A simple plugin to set random screen Sizes and DPI on connected Android devices using ADB commands.
     Very useful for testing UI adaptability and different screen configurations directly from the IDE.
     ]]></description>
 
