@@ -1716,8 +1716,8 @@ class DeviceListPanel(
                 Thread.sleep(3000)
                 SwingUtilities.invokeLater {
                     // Проверяем, подключилось ли устройство
-                    val currentDevices = getAllDevices()
-                    val wifiConnected = currentDevices.any { device ->
+                    val connectedDevices = getAllDevices()
+                    val wifiConnected = connectedDevices.any { device ->
                         DeviceConnectionUtils.isWifiConnection(device.logicalSerialNumber) &&
                         allIPs.any { (ip, port) -> device.logicalSerialNumber.contains("$ip:$port") }
                     }

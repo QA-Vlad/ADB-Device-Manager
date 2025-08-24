@@ -1069,6 +1069,43 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
         object : Task.Backgroundable(project, "Connecting to Device via Wi-Fi") {
             override fun run(indicator: ProgressIndicator) {
                 indicator.isIndeterminate = true
+                
+                // Проверяем настройку для переключения WiFi компьютера
+                if (PluginSettings.instance.autoSwitchPCWifi) {
+                    indicator.text = "Checking device WiFi network..."
+                    PluginLogger.info(LogCategory.NETWORK, "Auto PC WiFi switch enabled, checking device network")
+                    
+                    try {
+                        // Блокируем до получения сети устройства
+                        val deviceWifiInfo = kotlinx.coroutines.runBlocking {
+                            PCWifiSwitchService.getDeviceWifiNetwork(device.serialNumber)
+                        }
+                        
+                        if (deviceWifiInfo != null) {
+                            indicator.text = "Switching PC to network: ${deviceWifiInfo.ssid}..."
+                            PluginLogger.info(LogCategory.NETWORK, "Attempting to switch PC to device network: %s", deviceWifiInfo.ssid)
+                            
+                            // Пытаемся переключить WiFi компьютера
+                            val switchSuccess = kotlinx.coroutines.runBlocking {
+                                PCWifiSwitchService.switchPCWifiNetwork(project, deviceWifiInfo)
+                            }
+                            
+                            if (switchSuccess) {
+                                // Даем время на переключение сети
+                                Thread.sleep(3000)
+                                PluginLogger.info(LogCategory.NETWORK, "PC WiFi switched successfully, continuing with connection")
+                            } else {
+                                PluginLogger.warn(LogCategory.NETWORK, "Failed to switch PC WiFi, continuing with current network")
+                            }
+                        } else {
+                            PluginLogger.info(LogCategory.NETWORK, "Could not determine device WiFi network, continuing with current PC network")
+                        }
+                    } catch (e: Exception) {
+                        PluginLogger.error(LogCategory.NETWORK, "Error during PC WiFi switch attempt", e)
+                        // Продолжаем попытку подключения даже если не удалось переключить WiFi
+                    }
+                }
+                
                 indicator.text = "Getting IP address for ${device.name}..."
                 PluginLogger.info(LogCategory.ADB_CONNECTION, "[UI] Getting IP address for device %s", device.name)
 

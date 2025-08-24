@@ -73,8 +73,20 @@ class PluginSettingsPanel : JBPanel<PluginSettingsPanel>(VerticalFlowLayout(Vert
         toolTipText = "When enabled, the currently active app will be restarted after resolution change (excluding system apps and launchers)"
     }
     
-    private val autoSwitchWifiCheckBox = JBCheckBox("Automatically switch device to PC's Wi-Fi network when connecting (requires root)").apply {
+    // Радиокнопки для выбора режима WiFi переключения
+    private val wifiSwitchButtonGroup = ButtonGroup()
+    
+    private val noWifiSwitchRadio = JRadioButton("Don't switch WiFi networks automatically").apply {
+        toolTipText = "WiFi networks will not be switched automatically. You'll need to manually ensure devices are on the same network."
+        isSelected = true // По умолчанию выбран этот вариант
+    }
+    
+    private val deviceToHostWifiRadio = JRadioButton("Switch device to PC's WiFi network (requires root on device)").apply {
         toolTipText = "When enabled, the device will automatically switch to the same Wi-Fi network as your PC before establishing Wi-Fi connection. REQUIRES ROOT ACCESS on the device. Non-root devices will be shown Wi-Fi settings for manual switching."
+    }
+    
+    private val hostToDeviceWifiRadio = JRadioButton("[EXPERIMENTAL] Switch PC to device's WiFi network (requires admin rights)").apply {
+        toolTipText = "When enabled, your PC will automatically switch to the same Wi-Fi network as the device. REQUIRES ADMIN/ROOT PRIVILEGES on your computer. WARNING: This is experimental and may require manual network reconfiguration if something goes wrong. Works on Windows, macOS and Linux."
     }
     
     private val debugModeCheckBox = JBCheckBox("Enable debug mode (writes logs to file)").apply {
@@ -501,7 +513,26 @@ class PluginSettingsPanel : JBPanel<PluginSettingsPanel>(VerticalFlowLayout(Vert
             border = JBUI.Borders.empty(10)
         }
         
-        networkPanel.add(autoSwitchWifiCheckBox)
+        // Добавляем заголовок для секции WiFi
+        val wifiSectionLabel = JLabel("WiFi Network Auto-Switch:").apply {
+            font = font.deriveFont(font.style or java.awt.Font.BOLD)
+            border = JBUI.Borders.emptyBottom(5)
+        }
+        networkPanel.add(wifiSectionLabel)
+        
+        // Добавляем радиокнопки в группу
+        wifiSwitchButtonGroup.add(noWifiSwitchRadio)
+        wifiSwitchButtonGroup.add(deviceToHostWifiRadio)
+        wifiSwitchButtonGroup.add(hostToDeviceWifiRadio)
+        
+        // Добавляем радиокнопки на панель с отступом
+        val radioPanel = JPanel(VerticalFlowLayout(VerticalFlowLayout.TOP, 0, 0, true, false)).apply {
+            border = JBUI.Borders.emptyLeft(20)
+            add(noWifiSwitchRadio)
+            add(deviceToHostWifiRadio)
+            add(hostToDeviceWifiRadio)
+        }
+        networkPanel.add(radioPanel)
         
         add(networkPanel)
         
@@ -625,7 +656,12 @@ class PluginSettingsPanel : JBPanel<PluginSettingsPanel>(VerticalFlowLayout(Vert
             restartRunningDevicesCheckBox.addActionListener(stateChangeListener)
         }
         restartActiveAppCheckBox.addActionListener(stateChangeListener)
-        autoSwitchWifiCheckBox.addActionListener(stateChangeListener)
+        
+        // Добавляем слушатели для радиокнопок
+        noWifiSwitchRadio.addActionListener(stateChangeListener)
+        deviceToHostWifiRadio.addActionListener(stateChangeListener)
+        hostToDeviceWifiRadio.addActionListener(stateChangeListener)
+        
         debugModeCheckBox.addActionListener(stateChangeListener)
         debugHitboxesCheckBox.addActionListener(stateChangeListener)
         
@@ -964,7 +1000,22 @@ Are you sure you want to continue?""",
             modified = modified || restartRunningDevicesCheckBox.isSelected != settings.restartRunningDevicesOnResolutionChange
         }
         modified = modified || restartActiveAppCheckBox.isSelected != settings.restartActiveAppOnResolutionChange
-        modified = modified || autoSwitchWifiCheckBox.isSelected != settings.autoSwitchToHostWifi
+        
+        // Проверяем изменения в радиокнопках WiFi
+        val currentWifiMode = when {
+            noWifiSwitchRadio.isSelected -> 0
+            deviceToHostWifiRadio.isSelected -> 1
+            hostToDeviceWifiRadio.isSelected -> 2
+            else -> 0
+        }
+        val savedWifiMode = when {
+            !settings.autoSwitchToHostWifi && !settings.autoSwitchPCWifi -> 0
+            settings.autoSwitchToHostWifi && !settings.autoSwitchPCWifi -> 1
+            !settings.autoSwitchToHostWifi && settings.autoSwitchPCWifi -> 2
+            else -> 0
+        }
+        modified = modified || currentWifiMode != savedWifiMode
+        
         modified = modified || debugModeCheckBox.isSelected != settings.debugMode
         modified = modified || debugHitboxesCheckBox.isSelected != settings.debugHitboxes
         modified = modified || scrcpyPathField.text != settings.scrcpyPath
@@ -985,7 +1036,21 @@ Are you sure you want to continue?""",
             settings.restartActiveAppOnResolutionChange
         )
         
-        settings.autoSwitchToHostWifi = autoSwitchWifiCheckBox.isSelected
+        // Сохраняем настройки WiFi на основе выбранной радиокнопки
+        when {
+            noWifiSwitchRadio.isSelected -> {
+                settings.autoSwitchToHostWifi = false
+                settings.autoSwitchPCWifi = false
+            }
+            deviceToHostWifiRadio.isSelected -> {
+                settings.autoSwitchToHostWifi = true
+                settings.autoSwitchPCWifi = false
+            }
+            hostToDeviceWifiRadio.isSelected -> {
+                settings.autoSwitchToHostWifi = false
+                settings.autoSwitchPCWifi = true
+            }
+        }
         settings.scrcpyPath = scrcpyPathField.text
         settings.scrcpyCustomFlags = scrcpyFlagsField.text
         
@@ -1005,7 +1070,24 @@ Are you sure you want to continue?""",
             restartRunningDevicesCheckBox.isSelected = settings.restartRunningDevicesOnResolutionChange
         }
         restartActiveAppCheckBox.isSelected = settings.restartActiveAppOnResolutionChange
-        autoSwitchWifiCheckBox.isSelected = settings.autoSwitchToHostWifi
+        
+        // Устанавливаем правильную радиокнопку на основе сохраненных настроек
+        when {
+            !settings.autoSwitchToHostWifi && !settings.autoSwitchPCWifi -> {
+                noWifiSwitchRadio.isSelected = true
+            }
+            settings.autoSwitchToHostWifi && !settings.autoSwitchPCWifi -> {
+                deviceToHostWifiRadio.isSelected = true
+            }
+            !settings.autoSwitchToHostWifi && settings.autoSwitchPCWifi -> {
+                hostToDeviceWifiRadio.isSelected = true
+            }
+            else -> {
+                // Если обе настройки включены (не должно быть), сбрасываем на "без переключения"
+                noWifiSwitchRadio.isSelected = true
+            }
+        }
+        
         debugModeCheckBox.isSelected = settings.debugMode
         debugHitboxesCheckBox.isSelected = settings.debugHitboxes
         // Показываем/скрываем чекбокс отладки хитбоксов в зависимости от debug mode

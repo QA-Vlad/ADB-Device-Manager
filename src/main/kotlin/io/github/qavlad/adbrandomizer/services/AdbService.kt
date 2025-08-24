@@ -919,21 +919,21 @@ object AdbService {
                 for (attempt in 1..3) {
                     Thread.sleep(1000) // Ждём секунду перед каждой проверкой
                     
-                    val checkCmd = ProcessBuilder(adbPath, "devices")
-                    val checkProcess = checkCmd.start()
-                    val checkCompleted = checkProcess.waitFor(2, TimeUnit.SECONDS)
+                    val devicesCmd = ProcessBuilder(adbPath, "devices")
+                    val devicesProcess = devicesCmd.start()
+                    val checkCompleted = devicesProcess.waitFor(2, TimeUnit.SECONDS)
                     
                     if (checkCompleted) {
-                        val checkOutput = checkProcess.inputStream.bufferedReader().use { it.readText() }
-                        PluginLogger.debug(LogCategory.ADB_CONNECTION, "[WIFI] Check attempt %d, devices output: %s", attempt, checkOutput)
+                        val devicesOutput = devicesProcess.inputStream.bufferedReader().use { it.readText() }
+                        PluginLogger.debug(LogCategory.ADB_CONNECTION, "[WIFI] Check attempt %d, devices output: %s", attempt, devicesOutput)
                         
-                        if (checkOutput.contains(target)) {
+                        if (devicesOutput.contains(target)) {
                             PluginLogger.info(LogCategory.ADB_CONNECTION, "[WIFI] Device connected on attempt %d despite timeout (Android 6 workaround)", attempt)
                             PluginLogger.wifiConnectionSuccess(ipAddress, port)
                             return@runAdbOperation true
                         }
                     } else {
-                        checkProcess.destroyForcibly()
+                        devicesProcess.destroyForcibly()
                     }
                 }
                 

@@ -160,7 +160,7 @@ class TableModelListenerWithTimer(
             // После синхронизации проверяем, нужно ли применить сортировку
             if (e.type == javax.swing.event.TableModelEvent.UPDATE && controller != null) {
                 val sortingService = controller.getTableSortingService()
-                val currentSortState = sortingService?.getCurrentSortState()
+                val currentSortState = sortingService.getCurrentSortState()
                 
                 if (currentSortState != null && currentSortState.activeColumn != null) {
                     println("ADB_DEBUG: Cell edit detected with active sorting on column: ${currentSortState.activeColumn}")

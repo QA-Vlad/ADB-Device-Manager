@@ -430,8 +430,8 @@ class PresetListManagerPanel(
                         "json"
                     )
                     
-                    val dialog = FileChooserFactory.getInstance().createSaveFileDialog(descriptor, null)
-                    val virtualFile = dialog.save(null as VirtualFile?, "$sanitizedName.json")
+                    val saveDialog = FileChooserFactory.getInstance().createSaveFileDialog(descriptor, null)
+                    val virtualFile = saveDialog.save(null as VirtualFile?, "$sanitizedName.json")
                     
                     virtualFile?.let { vf ->
                         // Экспортируем как массив с одним элементом для совместимости

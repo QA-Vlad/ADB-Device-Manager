@@ -22,6 +22,9 @@ class PluginSettings : PersistentStateComponent<PluginSettings> {
     // Настройка для автоматического переключения устройства на Wi-Fi сеть ПК при подключении
     var autoSwitchToHostWifi: Boolean = true
     
+    // Настройка для автоматического переключения ПК на Wi-Fi сеть устройства при подключении  
+    var autoSwitchPCWifi: Boolean = false
+    
     // Настройка для включения режима отладки
     var debugMode: Boolean = false
     
