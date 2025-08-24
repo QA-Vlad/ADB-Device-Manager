@@ -33,10 +33,11 @@ import io.github.qavlad.adbrandomizer.ui.components.Orientation
 class PresetsDialogController(
     project: Project?,
     private val dialog: PresetsDialog,
-    getSelectedDevices: (() -> List<com.android.ddmlib.IDevice>)? = null
+    getSelectedDevices: (() -> List<com.android.ddmlib.IDevice>)? = null,
+    onPresetApplied: ((preset: DevicePreset, listName: String?) -> Unit)? = null
 ) : CommandContext {
     // Service Locator и State Manager
-    internal val serviceLocator = PresetsDialogServiceLocator(project, getSelectedDevices)
+    internal val serviceLocator = PresetsDialogServiceLocator(project, getSelectedDevices, onPresetApplied)
     internal val stateManager = ControllerStateManager()
     
     init {

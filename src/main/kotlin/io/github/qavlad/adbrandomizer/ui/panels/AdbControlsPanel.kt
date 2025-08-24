@@ -1310,7 +1310,14 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
     // ==================== SETTINGS ====================
 
     private fun openPresetsDialog() {
-        PresetsDialog(project, ::getSelectedDevicesForAdb).show()
+        PresetsDialog(
+            project = project,
+            getSelectedDevices = ::getSelectedDevicesForAdb,
+            onPresetApplied = { preset, listName ->
+                // Обновляем индикатор активного пресета при применении из диалога
+                buttonPanel.updateLastUsedPreset(preset, listName)
+            }
+        ).show()
     }
     
     private fun openPluginSettings() {

@@ -12,7 +12,8 @@ import io.github.qavlad.adbrandomizer.ui.dialogs.PresetsDialogController
  */
 class PresetsDialogServiceLocator(
     val project: Project?,
-    getSelectedDevices: (() -> List<com.android.ddmlib.IDevice>)? = null
+    getSelectedDevices: (() -> List<com.android.ddmlib.IDevice>)? = null,
+    onPresetApplied: ((preset: io.github.qavlad.adbrandomizer.services.DevicePreset, listName: String?) -> Unit)? = null
 ) {
     // === Состояние и управление ===
     val dialogState = DialogStateManager()
@@ -61,7 +62,14 @@ class PresetsDialogServiceLocator(
     
     // === UI компоненты и фабрики ===
     val componentsFactory = DialogComponentsFactory()
-    val componentInitService = ComponentInitializationService(project, getSelectedDevices, dialogState, componentsFactory)
+    val componentInitService = ComponentInitializationService(
+        project, 
+        getSelectedDevices, 
+        onPresetApplied,
+        { io.github.qavlad.adbrandomizer.services.PresetListService.getActivePresetList()?.name },
+        dialogState, 
+        componentsFactory
+    )
     
     // === Обработчики событий ===
     val tableDragDropHandler = TableDragDropHandler(
