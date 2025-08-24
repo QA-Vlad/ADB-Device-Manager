@@ -113,7 +113,8 @@ class ComponentInitializationService(
             setHoverState = { newState -> hoverStateManager.setState(newState) },
             getSelectedDevices = getSelectedDevices,
             onPresetApplied = onPresetApplied,
-            getCurrentListName = getCurrentListName
+            getCurrentListName = getCurrentListName,
+            isShowAllMode = { dialogState.isShowAllPresetsMode() }
         )
         
         return TableInitResult(table, hoverStateManager, tableEventHandler)

@@ -213,7 +213,17 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
         println("ADB_DEBUG [Preset Combination]: Result preset: ${combinedPreset.label} (Size='${combinedPreset.size}', DPI='${combinedPreset.dpi}')")
         
         // Обновляем индикатор текущего пресета
-        buttonPanel.updateLastUsedPreset(combinedPreset)
+        // Если режим Show All включен, показываем "All presets"
+        val listName = if (PresetStorageService.getShowAllPresetsMode()) {
+            "All presets"
+        } else {
+            try {
+                PresetListService.getActivePresetList()?.name
+            } catch (_: Exception) {
+                null
+            }
+        }
+        buttonPanel.updateLastUsedPreset(combinedPreset, listName)
         
         // Позиция будет вычислена динамически после обновления счетчиков
         // Передаём оригинальный randomPreset для ADB команд, но combinedPreset уже сохранён в lastUsedPreset
@@ -324,7 +334,16 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
         
         val preset = presets[index]
         // Обновляем только UI индикатор, без применения ADB команд
-        buttonPanel.updateLastUsedPreset(preset)
+        val listName = if (PresetStorageService.getShowAllPresetsMode()) {
+            "All presets"
+        } else {
+            try {
+                PresetListService.getActivePresetList()?.name
+            } catch (_: Exception) {
+                null
+            }
+        }
+        buttonPanel.updateLastUsedPreset(preset, listName)
     }
     
     private fun applyPresetToDevices(preset: DevicePreset) {
@@ -336,6 +355,19 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
         if (preset.dpi.isNotBlank()) {
             dpiSourcePreset = preset
         }
+        
+        // Обновляем индикатор с учетом режима Show All
+        val listName = if (PresetStorageService.getShowAllPresetsMode()) {
+            "All presets"
+        } else {
+            try {
+                PresetListService.getActivePresetList()?.name
+            } catch (_: Exception) {
+                null
+            }
+        }
+        buttonPanel.updateLastUsedPreset(preset, listName)
+        
         // Получаем список выбранных устройств для применения пресета
         val selectedDevices = getSelectedDevicesForAdb()
         if (selectedDevices.isEmpty()) {

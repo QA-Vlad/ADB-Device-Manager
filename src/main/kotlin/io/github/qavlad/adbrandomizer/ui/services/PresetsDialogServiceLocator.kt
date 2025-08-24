@@ -66,7 +66,14 @@ class PresetsDialogServiceLocator(
         project, 
         getSelectedDevices, 
         onPresetApplied,
-        { io.github.qavlad.adbrandomizer.services.PresetListService.getActivePresetList()?.name },
+        { 
+            // В режиме Show All возвращаем специальное имя
+            if (dialogState.isShowAllPresetsMode()) {
+                "All presets"
+            } else {
+                io.github.qavlad.adbrandomizer.services.PresetListService.getActivePresetList()?.name
+            }
+        },
         dialogState, 
         componentsFactory
     )
