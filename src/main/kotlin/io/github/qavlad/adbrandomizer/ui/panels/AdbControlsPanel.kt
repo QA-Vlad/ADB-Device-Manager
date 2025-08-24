@@ -29,6 +29,9 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
     private var currentPresetIndex: Int = -1
     private var currentHoverState = HoverState.noHover()
     
+    // Debounce timer для навигации по пресетам стрелками
+    private var presetNavigationTimer: Timer? = null
+    
     private val devicePollingService = DevicePollingService(project)
     private lateinit var deviceListPanel: DeviceListPanel
     private lateinit var buttonPanel: CardControlPanel
@@ -215,7 +218,19 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
 
         val presets = getVisiblePresets()
         currentPresetIndex = (currentPresetIndex + 1) % presets.size
-        applyPresetByIndex(currentPresetIndex)
+        
+        // Обновляем UI сразу
+        updatePresetIndicator(currentPresetIndex)
+        
+        // Отменяем предыдущий таймер, если он есть
+        presetNavigationTimer?.stop()
+        
+        // Создаем новый таймер с задержкой для применения ADB команд
+        presetNavigationTimer = Timer(PluginConfig.UI.PRESET_NAVIGATION_DEBOUNCE_MS) { _ ->
+            applyPresetByIndex(currentPresetIndex)
+        }
+        presetNavigationTimer?.isRepeats = false
+        presetNavigationTimer?.start()
     }
 
     private fun navigateToPreviousPreset() {
@@ -223,7 +238,19 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
 
         val presets = getVisiblePresets()
         currentPresetIndex = if (currentPresetIndex <= 0) presets.size - 1 else currentPresetIndex - 1
-        applyPresetByIndex(currentPresetIndex)
+        
+        // Обновляем UI сразу
+        updatePresetIndicator(currentPresetIndex)
+        
+        // Отменяем предыдущий таймер, если он есть
+        presetNavigationTimer?.stop()
+        
+        // Создаем новый таймер с задержкой для применения ADB команд
+        presetNavigationTimer = Timer(PluginConfig.UI.PRESET_NAVIGATION_DEBOUNCE_MS) { _ ->
+            applyPresetByIndex(currentPresetIndex)
+        }
+        presetNavigationTimer?.isRepeats = false
+        presetNavigationTimer?.start()
     }
 
     private fun applyPresetByIndex(index: Int) {
@@ -236,10 +263,17 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
         }
 
         val preset = presets[index]
-        // Обновляем индикатор текущего пресета
-        buttonPanel.updateLastUsedPreset(preset)
         // Позиция будет вычислена динамически после обновления счетчиков
         applyPresetToDevices(preset)
+    }
+    
+    private fun updatePresetIndicator(index: Int) {
+        val presets = getVisiblePresets()
+        if (index < 0 || index >= presets.size) return
+        
+        val preset = presets[index]
+        // Обновляем только UI индикатор, без применения ADB команд
+        buttonPanel.updateLastUsedPreset(preset)
     }
 
     private fun applyPresetToSelectedDevices(preset: DevicePreset, setSize: Boolean, setDpi: Boolean, selectedDevices: List<IDevice>) {
@@ -1289,6 +1323,8 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
      * Освобождает ресурсы при закрытии панели
      */
     fun dispose() {
+        presetNavigationTimer?.stop()
+        presetNavigationTimer = null
         devicePollingService.dispose()
     }
 }

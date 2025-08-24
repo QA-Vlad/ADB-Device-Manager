@@ -22,17 +22,18 @@ object PluginConfig {
         const val PRESETS_DIALOG_WIDTH = 650
         const val PRESETS_DIALOG_HEIGHT = 400
         const val NOTIFICATION_GROUP_ID = "ADB Randomizer Notifications"
+        const val PRESET_NAVIGATION_DEBOUNCE_MS = 1000
         
         // Ширина колонок таблицы (null = автоматическая ширина)
         const val COLUMN_WIDTH_DRAG_HANDLE = 20
         const val COLUMN_WIDTH_NUMBER = 40
-        val COLUMN_WIDTH_LABEL: Int? = 150
-        val COLUMN_WIDTH_SIZE: Int? = 150
-        val COLUMN_WIDTH_DPI: Int? = 115
-        val COLUMN_WIDTH_SIZE_USES: Int? = 80
-        val COLUMN_WIDTH_DPI_USES: Int? = 75
+        const val COLUMN_WIDTH_LABEL: Int = 150
+        const val COLUMN_WIDTH_SIZE: Int = 150
+        const val COLUMN_WIDTH_DPI: Int = 115
+        const val COLUMN_WIDTH_SIZE_USES: Int = 80
+        const val COLUMN_WIDTH_DPI_USES: Int = 75
         const val COLUMN_WIDTH_DELETE_BUTTON = 40
-        val COLUMN_WIDTH_LIST: Int? = 155
+        const val COLUMN_WIDTH_LIST: Int = 155
         
         /**
          * Конфигурация ширины колонок таблицы.
@@ -73,7 +74,6 @@ object PluginConfig {
         // const val WIFI_CONNECTION_VERIFY_ATTEMPTS = 3 // удалено
         const val WIFI_CONNECTION_VERIFY_DELAY_MS = 1000L
         const val CONNECTION_VERIFY_DELAY_MS = 1000L
-        const val DISCONNECT_WAIT_MS = 500L
     }
     
     // Default Presets
@@ -91,8 +91,6 @@ object PluginConfig {
         val SIZE_FORMAT_REGEX = Regex("""^\d+\s*[xхXХ]\s*\d+$""")
         const val NETCFG_PATTERN = "wlan\\d+\\s+UP\\s+(\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3})"
         const val IFCONFIG_PATTERN = "inet addr:(\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3})"
-        const val SIZE_OUTPUT_PATTERN = "(?:Physical|Override) size: (\\d+)x(\\d+)"
-        const val DPI_OUTPUT_PATTERN = "(?:Physical|Override) density: (\\d+)"
     }
     
     // Settings Keys
