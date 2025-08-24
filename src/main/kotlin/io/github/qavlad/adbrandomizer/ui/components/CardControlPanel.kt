@@ -6,7 +6,6 @@ import com.intellij.ui.JBColor
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.UIUtil
 import io.github.qavlad.adbrandomizer.services.DevicePreset
-import io.github.qavlad.adbrandomizer.services.PresetListService
 import java.awt.*
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
@@ -82,6 +81,7 @@ class CardControlPanel(
                 // Эмодзи игральной кости
                 add(JLabel("🎲").apply {
                     font = Font("Segoe UI Emoji", Font.PLAIN, 28)
+                    toolTipText = "Apply random presets from your configured preset lists. Use buttons below to randomize Size, DPI, or both"
                 })
             }
             add(iconPanel)
@@ -322,6 +322,7 @@ class CardControlPanel(
                 add(JLabel("↺").apply {
                     font = Font("Dialog", Font.BOLD, 28)
                     foreground = JBColor(Color(150, 100, 50), Color(200, 150, 100))
+                    toolTipText = "Reset device display settings to their default values. Use buttons below to reset Size, DPI, or both"
                 })
             }
             add(iconPanel)
@@ -454,12 +455,7 @@ class CardControlPanel(
             override fun getIconHeight(): Int = 32
         }
     }
-    
-    fun updateLastUsedPreset(preset: DevicePreset?) {
-        println("ADB_DEBUG [Update Preset]: updateLastUsedPreset called with preset: ${preset?.label ?: "null"}")
-        updateLastUsedPreset(preset, getCurrentListName())
-    }
-    
+
     fun updateLastUsedPreset(preset: DevicePreset?, listName: String?) {
         println("ADB_DEBUG [Update Preset]: updateLastUsedPreset called with preset: ${preset?.label ?: "null"}, listName: ${listName ?: "null"}")
         println("ADB_DEBUG [Update Preset]:   Size='${preset?.size ?: ""}', DPI='${preset?.dpi ?: ""}'")
@@ -467,17 +463,7 @@ class CardControlPanel(
         lastUsedPresetListName = listName
         updatePresetIndicator()
     }
-    
-    private fun getCurrentListName(): String? {
-        // Пытаемся получить имя текущего активного листа
-        return try {
-            val activeList = PresetListService.getActivePresetList()
-            activeList?.name
-        } catch (_: Exception) {
-            null
-        }
-    }
-    
+
     private fun updatePresetIndicator() {
         SwingUtilities.invokeLater {
             if (lastUsedPreset != null) {
