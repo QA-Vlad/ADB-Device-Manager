@@ -95,6 +95,7 @@ class CardControlPanel(
                 add(JLabel("Random").apply {
                     font = UIUtil.getLabelFont().deriveFont(Font.BOLD, 12f)
                     foreground = JBColor(Color(70, 130, 180), Color(100, 150, 200))
+                    toolTipText = "Apply random presets from your configured preset lists. Use buttons below to randomize Size, DPI, or both"
                 })
             }
             add(titlePanel)
@@ -336,6 +337,7 @@ class CardControlPanel(
                 add(JLabel("Reset").apply {
                     font = UIUtil.getLabelFont().deriveFont(Font.BOLD, 12f)
                     foreground = JBColor(Color(150, 100, 50), Color(200, 150, 100))
+                    toolTipText = "Reset device display settings to their default values. Use buttons below to reset Size, DPI, or both"
                 })
             }
             add(titlePanel)
