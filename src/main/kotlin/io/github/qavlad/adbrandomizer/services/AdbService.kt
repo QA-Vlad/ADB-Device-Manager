@@ -15,6 +15,7 @@ import io.github.qavlad.adbrandomizer.utils.DeviceConnectionUtils
 import io.github.qavlad.adbrandomizer.utils.NotificationUtils
 import io.github.qavlad.adbrandomizer.settings.PluginSettings
 import io.github.qavlad.adbrandomizer.exceptions.ManualWifiSwitchRequiredException
+import io.github.qavlad.adbrandomizer.exceptions.DifferentWifiNetworksException
 import kotlinx.coroutines.runBlocking
 import java.util.concurrent.TimeUnit
 import java.util.regex.Pattern
@@ -655,6 +656,52 @@ object AdbService {
             
             if (useSimpleConnect) {
                 PluginLogger.info(LogCategory.ADB_CONNECTION, "[WIFI] Using simple connect method")
+                
+                // ВСЕГДА проверяем Wi-Fi сети для диагностики
+                val settings = PluginSettings.instance
+                PluginLogger.info(LogCategory.ADB_CONNECTION, "[WIFI] Checking Wi-Fi networks before connection...")
+                
+                try {
+                    // Проверяем Wi-Fi сети
+                    if (settings.autoSwitchToHostWifi) {
+                        // Если включено автопереключение, пытаемся переключить
+                        val newIp = tryAutoSwitchWifi(ipAddress)
+                        if (newIp != null) {
+                            PluginLogger.info(LogCategory.ADB_CONNECTION, "[WIFI] Auto switch successful! New IP: %s (was: %s)", newIp, ipAddress)
+                            // Используем новый IP для подключения
+                            val newTarget = "$newIp:$port"
+                            val connectNewCmd = ProcessBuilder(adbPath, "connect", newTarget)
+                            val processNew = connectNewCmd.start()
+                            val completedNew = processNew.waitFor(2, TimeUnit.SECONDS)
+                            
+                            if (completedNew) {
+                                val outputNew = processNew.inputStream.bufferedReader().use { it.readText() }.trim()
+                                val successNew = outputNew.contains("connected to") || outputNew.contains("already connected")
+                                if (successNew) {
+                                    PluginLogger.wifiConnectionSuccess(newIp, port)
+                                    return@runAdbOperation true
+                                }
+                            }
+                            processNew.destroyForcibly()
+                        }
+                    } else {
+                        // Если автопереключение выключено, проверяем сети
+                        // Если сети разные, метод выбросит исключение и прервет подключение
+                        checkWifiNetworks(ipAddress)
+                    }
+                } catch (e: ManualWifiSwitchRequiredException) {
+                    // Требуется ручное переключение - прерываем подключение
+                    PluginLogger.warn(LogCategory.ADB_CONNECTION, "[WIFI] Manual WiFi switch required - aborting connection")
+                    throw e
+                } catch (e: DifferentWifiNetworksException) {
+                    // Разные Wi-Fi сети - прерываем подключение
+                    PluginLogger.warn(LogCategory.ADB_CONNECTION, "[WIFI] Different Wi-Fi networks detected - aborting connection")
+                    throw e
+                } catch (e: Exception) {
+                    // Логируем ошибку, но продолжаем с оригинальным IP
+                    PluginLogger.warn(LogCategory.ADB_CONNECTION, "[WIFI] Wi-Fi check/switch failed: %s", e, e.message)
+                }
+                
                 val target = "$ipAddress:$port"
                 
                 // Просто выполняем connect
@@ -709,9 +756,11 @@ object AdbService {
                 return@runAdbOperation false
             }
 
+            // Код ниже выполняется только если useSimpleConnect = false
+            var actualIpAddress = ipAddress
+            
             // Проверяем настройку автопереключения Wi-Fi
             val settings = PluginSettings.instance
-            var actualIpAddress = ipAddress
             PluginLogger.info(LogCategory.ADB_CONNECTION, "[WIFI] Auto-switch to host WiFi setting: %s", settings.autoSwitchToHostWifi)
             
             if (settings.autoSwitchToHostWifi) {
@@ -736,7 +785,7 @@ object AdbService {
             } else {
                 PluginLogger.info(LogCategory.ADB_CONNECTION, "[WIFI] Auto WiFi switch is disabled")
             }
-
+            
             if (!ValidationUtils.isValidIpAddress(actualIpAddress)) {
                 PluginLogger.error(LogCategory.ADB_CONNECTION, "[WIFI] Invalid IP address: %s", null, actualIpAddress)
                 throw Exception("Invalid IP address: $actualIpAddress")
@@ -1545,6 +1594,100 @@ object AdbService {
             // Продолжаем с обычным подключением даже если проверка не удалась
         }
         return null
+    }
+    
+    /**
+     * Проверяет Wi-Fi сети на устройстве и хосте и информирует пользователя если они разные
+     */
+    private fun checkWifiNetworks(targetDeviceIp: String) {
+        try {
+            PluginLogger.info(LogCategory.NETWORK, "[WIFI-CHECK] ===== Checking Wi-Fi networks =====")
+            PluginLogger.info(LogCategory.NETWORK, "[WIFI-CHECK] Target device IP: %s", targetDeviceIp)
+            
+            // Получаем SSID Wi-Fi сети на ПК
+            val hostSSIDResult = WifiNetworkServiceOptimized.getHostWifiSSID()
+            val hostSSID = hostSSIDResult.getOrNull()
+            
+            PluginLogger.info(LogCategory.NETWORK, "[WIFI-CHECK] Host SSID: %s", hostSSID ?: "not detected")
+            
+            // Пытаемся найти устройство через USB для проверки его Wi-Fi
+            val devicesResult = getConnectedDevices()
+            val devices = devicesResult.getOrNull() ?: emptyList()
+            
+            PluginLogger.info(LogCategory.NETWORK, "[WIFI-CHECK] Found %d connected devices", devices.size)
+            
+            for (device in devices) {
+                val isWifi = DeviceConnectionUtils.isWifiConnection(device.serialNumber)
+                
+                if (!isWifi) {
+                    // Это USB устройство, проверяем его IP
+                    val deviceIpResult = getDeviceIpAddress(device)
+                    val deviceIp = deviceIpResult.getOrNull()
+                    
+                    if (deviceIp == targetDeviceIp) {
+                        // Нашли нужное устройство, проверяем его Wi-Fi
+                        PluginLogger.info(LogCategory.NETWORK, "[WIFI-CHECK] Found target USB device: %s", device.serialNumber)
+                        
+                        val deviceSSIDResult = WifiNetworkServiceOptimized.getDeviceWifiSSID(device)
+                        val deviceSSID = deviceSSIDResult.getOrNull()
+                        
+                        PluginLogger.info(LogCategory.NETWORK, "[WIFI-CHECK] Device SSID: %s", deviceSSID ?: "not detected")
+                        
+                        // Проверяем различные случаи
+                        when {
+                            hostSSID == null && deviceSSID == null -> {
+                                NotificationUtils.showWarning(
+                                    "Wi-Fi Network Check", 
+                                    "Could not detect Wi-Fi networks. Please ensure both devices are connected to the same Wi-Fi network."
+                                )
+                            }
+                            hostSSID == null -> {
+                                NotificationUtils.showWarning(
+                                    "Different Wi-Fi Networks",
+                                    String.format("Device is on '%s' network but computer is not connected to Wi-Fi. Please connect computer to the same network.", deviceSSID)
+                                )
+                            }
+                            deviceSSID == null -> {
+                                NotificationUtils.showWarning(
+                                    "Different Wi-Fi Networks",
+                                    String.format("Computer is on '%s' network but could not detect device's network. Please ensure device is connected to the same network.", hostSSID)
+                                )
+                            }
+                            deviceSSID != hostSSID -> {
+                                // Разные сети - показываем предупреждение с конкретными названиями
+                                val message = String.format("Device is on '%s' network but computer is on '%s'. Please connect both to the same network for Wi-Fi debugging.", 
+                                    deviceSSID, hostSSID)
+                                NotificationUtils.showWarning("Different Wi-Fi Networks", message)
+                                PluginLogger.warn(LogCategory.NETWORK, "[WIFI-CHECK] Different networks detected! Device: %s, Host: %s", deviceSSID, hostSSID)
+                                // Выбрасываем исключение для прерывания подключения
+                                throw DifferentWifiNetworksException(message)
+                            }
+                            else -> {
+                                // Одинаковые сети
+                                PluginLogger.info(LogCategory.NETWORK, "[WIFI-CHECK] Both devices are on the same network: %s", hostSSID)
+                            }
+                        }
+                        return
+                    }
+                }
+            }
+            
+            // Не нашли USB устройство с таким IP - не можем проверить сети
+            PluginLogger.info(LogCategory.NETWORK, "[WIFI-CHECK] Could not find USB device with IP %s to check its Wi-Fi", targetDeviceIp)
+            
+            // В этом случае просто информируем о сети компьютера
+            if (hostSSID != null) {
+                NotificationUtils.showWarning(
+                    "Wi-Fi Network Info",
+                    String.format("Computer is on '%s' network. Please ensure device is on the same network.", hostSSID)
+                )
+            }
+        } catch (e: DifferentWifiNetworksException) {
+            // Пробрасываем это исключение дальше для прерывания подключения
+            throw e
+        } catch (e: Exception) {
+            PluginLogger.warn(LogCategory.NETWORK, "[WIFI-CHECK] Error checking Wi-Fi networks: %s", e, e.message)
+        }
     }
     
     /**

@@ -1020,7 +1020,7 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
             }
         } else {
             ApplicationManager.getApplication().invokeLater {
-                NotificationUtils.showError(project, "Failed to connect to $ipAddress:$port. Make sure device is in TCP/IP mode.")
+                NotificationUtils.showError(project, "Failed to connect to $ipAddress:$port. Make sure device is in TCP/IP mode and both devices are on the same Wi-Fi network.")
             }
         }
     }
@@ -1195,8 +1195,9 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                     val firstConnectResult = AdbService.connectWifi(project, ipAddress)
                     var success = firstConnectResult.getOrNull() ?: run {
                         firstConnectResult.onError { exception, _ ->
-                            // Проверяем, не является ли это исключением о ручном переключении
-                            if (exception is io.github.qavlad.adbrandomizer.exceptions.ManualWifiSwitchRequiredException) {
+                            // Проверяем специальные исключения, которые требуют прерывания
+                            if (exception is io.github.qavlad.adbrandomizer.exceptions.ManualWifiSwitchRequiredException ||
+                                exception is io.github.qavlad.adbrandomizer.exceptions.DifferentWifiNetworksException) {
                                 // Пробрасываем исключение дальше, не пытаемся повторно
                                 throw exception
                             }
@@ -1212,8 +1213,9 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                         val retryConnectResult = AdbService.connectWifi(project, ipAddress)
                         success = retryConnectResult.getOrNull() ?: run {
                             retryConnectResult.onError { exception, _ ->
-                                // Проверяем, не является ли это исключением о ручном переключении
-                                if (exception is io.github.qavlad.adbrandomizer.exceptions.ManualWifiSwitchRequiredException) {
+                                // Проверяем специальные исключения, которые требуют прерывания
+                                if (exception is io.github.qavlad.adbrandomizer.exceptions.ManualWifiSwitchRequiredException ||
+                                    exception is io.github.qavlad.adbrandomizer.exceptions.DifferentWifiNetworksException) {
                                     // Пробрасываем исключение дальше
                                     throw exception
                                 }
@@ -1237,6 +1239,10 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                     // Ручное переключение требуется - не показываем ошибку подключения
                     PluginLogger.info("Manual WiFi switch required for device ${device.name}")
                     // Уведомление уже показано в tryAutoSwitchWifi, ничего дополнительно не делаем
+                } catch (_: io.github.qavlad.adbrandomizer.exceptions.DifferentWifiNetworksException) {
+                    // Разные Wi-Fi сети - не показываем дополнительную ошибку
+                    PluginLogger.info("Different Wi-Fi networks detected for device ${device.name}")
+                    // Уведомление уже показано в checkWifiNetworks, ничего дополнительно не делаем
                 } catch (e: Exception) {
                     PluginLogger.error("Error connecting to device", e)
                     NotificationUtils.showError(project, "Error connecting to device: ${e.message}")

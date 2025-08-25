@@ -93,6 +93,22 @@ object PCWifiSwitchService {
         return withContext(Dispatchers.IO) {
             val os = System.getProperty("os.name").lowercase()
             
+            // macOS не поддерживается
+            if (os.contains("mac")) {
+                PluginLogger.info(LogCategory.NETWORK, "PC WiFi switching is not supported on macOS")
+                project?.let {
+                    NotificationGroupManager.getInstance()
+                        .getNotificationGroup("ADB Randomizer Notifications")
+                        .createNotification(
+                            "Feature not supported",
+                            "Automatic PC WiFi switching is not supported on macOS. Please switch manually or use device-to-PC switching instead.",
+                            NotificationType.WARNING
+                        )
+                        .notify(it)
+                }
+                return@withContext false
+            }
+            
             // Проверяем административные права перед попыткой переключения
             if (!hasAdminPrivileges()) {
                 PluginLogger.warn(LogCategory.NETWORK, "No admin privileges detected, WiFi switch may fail")
@@ -102,7 +118,6 @@ object PCWifiSwitchService {
             try {
                 val result = when {
                     os.contains("windows") -> switchWindowsWifi(networkInfo)
-                    os.contains("mac") -> switchMacWifi(networkInfo)
                     os.contains("linux") -> switchLinuxWifi(networkInfo)
                     else -> {
                         PluginLogger.error(LogCategory.NETWORK, "Unsupported operating system: %s", null, os)
@@ -207,63 +222,7 @@ object PCWifiSwitchService {
             return false
         }
     }
-    
-    /**
-     * Переключает WiFi на macOS
-     */
-    private fun switchMacWifi(networkInfo: WifiNetworkInfo): Boolean {
-        try {
-            // Получаем имя WiFi интерфейса (обычно en0 или en1)
-            val interfaceProcess = ProcessBuilder("/usr/sbin/networksetup", "-listallhardwareports")
-                .redirectErrorStream(true)
-                .start()
-            
-            val interfaceOutput = interfaceProcess.inputStream.bufferedReader().readText()
-            interfaceProcess.waitFor(5, TimeUnit.SECONDS)
-            
-            // Ищем WiFi интерфейс
-            val wifiInterface = Regex("""Hardware Port: Wi-Fi\nDevice: (\w+)""").find(interfaceOutput)?.groupValues?.get(1) ?: "en0"
-            
-            PluginLogger.info(LogCategory.NETWORK, "Using WiFi interface: %s", wifiInterface)
-            
-            // Пытаемся подключиться к сети
-            val connectProcess = if (networkInfo.password != null) {
-                ProcessBuilder(
-                    "/usr/sbin/networksetup", "-setairportnetwork",
-                    wifiInterface, networkInfo.ssid, networkInfo.password
-                )
-            } else {
-                ProcessBuilder(
-                    "/usr/sbin/networksetup", "-setairportnetwork",
-                    wifiInterface, networkInfo.ssid
-                )
-            }
-                .redirectErrorStream(true)
-                .start()
-            
-            val connectOutput = connectProcess.inputStream.bufferedReader().readText()
-            val success = connectProcess.waitFor(10, TimeUnit.SECONDS) && connectProcess.exitValue() == 0
-            
-            if (!success && connectOutput.contains("password", ignoreCase = true)) {
-                // Нужен пароль, открываем настройки
-                PluginLogger.warn(LogCategory.NETWORK, "Password required for network: %s", networkInfo.ssid)
-                ProcessBuilder("open", "/System/Library/PreferencePanes/Network.prefPane").start()
-                return false
-            }
-            
-            if (success) {
-                PluginLogger.info(LogCategory.NETWORK, "Successfully connected to macOS WiFi: %s", networkInfo.ssid)
-            } else {
-                PluginLogger.error(LogCategory.NETWORK, "Failed to connect to macOS WiFi: %s, output: %s", null, networkInfo.ssid, connectOutput)
-            }
-            
-            return success
-        } catch (e: Exception) {
-            PluginLogger.error(LogCategory.NETWORK, "Failed to switch macOS WiFi", e)
-            return false
-        }
-    }
-    
+
     /**
      * Переключает WiFi на Linux
      */

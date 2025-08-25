@@ -271,7 +271,9 @@ object WifiNetworkService {
     }
     
     private fun getMacWifiSSID(): String? {
-        return try {
+        // Способ 1: Через airport утилиту (старый путь)
+        try {
+            PluginLogger.debug(LogCategory.NETWORK, "Trying airport utility method...")
             val process = ProcessBuilder("/System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport", "-I")
                 .redirectErrorStream(true)
                 .start()
@@ -289,11 +291,110 @@ object WifiNetworkService {
             }
             
             process.waitFor(5, TimeUnit.SECONDS)
-            ssid
+            if (ssid != null) {
+                PluginLogger.info(LogCategory.NETWORK, "Mac WiFi SSID found via airport: %s", ssid)
+                return ssid
+            }
         } catch (e: Exception) {
-            PluginLogger.error("Failed to get Mac WiFi SSID", e)
-            null
+            PluginLogger.debug(LogCategory.NETWORK, "Airport utility failed: %s", e.message)
         }
+        
+        // Способ 2: Через networksetup с поиском правильного интерфейса
+        try {
+            PluginLogger.debug(LogCategory.NETWORK, "Trying networksetup method...")
+            
+            // Сначала находим правильное имя Wi-Fi интерфейса
+            val interfaceProcess = ProcessBuilder("networksetup", "-listallhardwareports")
+                .redirectErrorStream(true)
+                .start()
+            
+            val interfaceOutput = interfaceProcess.inputStream.bufferedReader().readText()
+            interfaceProcess.waitFor(2, TimeUnit.SECONDS)
+            
+            // Ищем Wi-Fi интерфейс
+            var wifiInterface: String? = null
+            val lines = interfaceOutput.lines()
+            for (i in lines.indices) {
+                if (lines[i].contains("Hardware Port: Wi-Fi")) {
+                    // Device на следующей строке
+                    if (i + 1 < lines.size) {
+                        val deviceLine = lines[i + 1]
+                        if (deviceLine.contains("Device:")) {
+                            wifiInterface = deviceLine.substringAfter("Device:").trim()
+                            break
+                        }
+                    }
+                }
+            }
+            
+            if (wifiInterface != null) {
+                PluginLogger.debug(LogCategory.NETWORK, "Found Wi-Fi interface: %s", wifiInterface)
+                
+                val process = ProcessBuilder("networksetup", "-getairportnetwork", wifiInterface)
+                    .redirectErrorStream(true)
+                    .start()
+                
+                val output = process.inputStream.bufferedReader().readText().trim()
+                process.waitFor(5, TimeUnit.SECONDS)
+                
+                PluginLogger.debug(LogCategory.NETWORK, "networksetup output: %s", output)
+                
+                // Формат: "Current Wi-Fi Network: NetworkName"
+                if (output.contains("Current Wi-Fi Network:")) {
+                    val ssid = output.substringAfter("Current Wi-Fi Network:").trim()
+                    if (ssid.isNotEmpty() && !ssid.contains("not associated")) {
+                        PluginLogger.info(LogCategory.NETWORK, "Mac WiFi SSID found via networksetup: %s", ssid)
+                        return ssid
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            PluginLogger.debug(LogCategory.NETWORK, "networksetup failed: %s", e.message)
+        }
+        
+        // Способ 3: Через system_profiler (медленнее, но надёжнее)
+        try {
+            PluginLogger.debug(LogCategory.NETWORK, "Trying system_profiler method...")
+            val process = ProcessBuilder("system_profiler", "SPAirPortDataType")
+                .redirectErrorStream(true)
+                .start()
+            
+            val output = process.inputStream.bufferedReader().readText()
+            process.waitFor(5, TimeUnit.SECONDS)
+            
+            PluginLogger.debug(LogCategory.NETWORK, "system_profiler output length: %d", output.length)
+            
+            // Ищем текущую сеть - формат: "NetworkName:"
+            val lines = output.lines()
+            for (i in lines.indices) {
+                if (lines[i].contains("Current Network Information:")) {
+                    // SSID на следующей строке с двоеточием в конце
+                    for (j in i+1..minOf(i+5, lines.size-1)) {
+                        val line = lines[j].trim()
+                        // Проверяем, что это строка с SSID (имеет : в конце и не содержит других метаданных)
+                        if (line.endsWith(":") && 
+                            !line.contains("PHY Mode") && 
+                            !line.contains("Channel") && 
+                            !line.contains("Network Type") && 
+                            !line.contains("Security") && 
+                            !line.contains("BSSID") &&
+                            !line.equals("Current Network Information:")) {
+                            // Убираем двоеточие в конце
+                            val ssid = line.dropLast(1).trim()
+                            if (ssid.isNotEmpty()) {
+                                PluginLogger.info(LogCategory.NETWORK, "Mac WiFi SSID found via system_profiler: %s", ssid)
+                                return ssid
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            PluginLogger.debug(LogCategory.NETWORK, "system_profiler failed: %s", e.message)
+        }
+        
+        PluginLogger.warn(LogCategory.NETWORK, "Failed to get Mac WiFi SSID using all methods")
+        return null
     }
     
     private fun getLinuxWifiSSID(): String? {

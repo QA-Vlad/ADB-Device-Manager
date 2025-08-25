@@ -85,8 +85,13 @@ class PluginSettingsPanel : JBPanel<PluginSettingsPanel>(VerticalFlowLayout(Vert
         toolTipText = "When enabled, the device will automatically switch to the same Wi-Fi network as your PC before establishing Wi-Fi connection. REQUIRES ROOT ACCESS on the device. Non-root devices will be shown Wi-Fi settings for manual switching."
     }
     
-    private val hostToDeviceWifiRadio = JRadioButton("[EXPERIMENTAL] Switch PC to device's WiFi network (requires admin rights)").apply {
-        toolTipText = "When enabled, your PC will automatically switch to the same Wi-Fi network as the device. REQUIRES ADMIN/ROOT PRIVILEGES on your computer. WARNING: This is experimental and may require manual network reconfiguration if something goes wrong. Works on Windows, macOS and Linux."
+    private val hostToDeviceWifiRadio = JRadioButton("Switch PC to device's WiFi network (requires admin rights)").apply {
+        toolTipText = "When enabled, your PC will automatically switch to the same Wi-Fi network as the device. REQUIRES ADMIN/ROOT PRIVILEGES on your computer. NOTE: This feature is not supported on macOS. Works on Windows and Linux."
+        // Disable on macOS
+        if (System.getProperty("os.name").lowercase().contains("mac")) {
+            isEnabled = false
+            toolTipText = "This feature is not supported on macOS due to system restrictions. Please use the device-to-PC switch option instead."
+        }
     }
     
     private val debugModeCheckBox = JBCheckBox("Enable debug mode (writes logs to file)").apply {
