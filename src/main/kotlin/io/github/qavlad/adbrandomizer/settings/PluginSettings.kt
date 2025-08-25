@@ -37,6 +37,12 @@ class PluginSettings : PersistentStateComponent<PluginSettings> {
     // Путь к scrcpy (может быть путь к exe файлу или к папке)
     var scrcpyPath: String = ""
     
+    // Путь к ADB (может быть путь к exe файлу или к папке)
+    var adbPath: String = ""
+    
+    // Порт для TCP/IP подключения к устройствам (по умолчанию 5555)
+    var adbPort: Int = 5555
+    
     override fun getState(): PluginSettings = this
     
     override fun loadState(state: PluginSettings) {

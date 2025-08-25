@@ -10,6 +10,7 @@ import com.intellij.ui.components.JBPanel
 import com.intellij.ui.components.JBTextField
 import com.intellij.util.ui.JBUI
 import io.github.qavlad.adbrandomizer.utils.AndroidStudioDetector
+import io.github.qavlad.adbrandomizer.utils.AdbPathResolver
 import io.github.qavlad.adbrandomizer.utils.FileLogger
 import io.github.qavlad.adbrandomizer.utils.PluginLogger
 import io.github.qavlad.adbrandomizer.utils.logging.LogCategory
@@ -145,6 +146,42 @@ class PluginSettingsPanel : JBPanel<PluginSettingsPanel>(VerticalFlowLayout(Vert
     private val resetAllButton = JButton("Reset All Plugin Data").apply {
         toolTipText = "Resets all plugin settings, presets, and cached data to default values"
         foreground = JBColor.RED
+    }
+    
+    private val adbPathField = JBTextField().apply {
+        toolTipText = """<html>
+            Path to ADB executable or folder containing ADB.<br>
+            <b>Examples:</b><br>
+            • C:\Android\SDK\platform-tools\adb.exe (path to executable)<br>
+            • C:\Android\SDK\platform-tools\ (path to folder)<br>
+            • /usr/local/bin/adb (Linux/Mac)<br>
+            Leave empty to use ADB from system PATH.
+        </html>""".trimIndent()
+    }
+    
+    private val adbPathButton = JButton("Browse...").apply {
+        toolTipText = "Select ADB executable or folder"
+    }
+    
+    private val adbPathValidationLabel = JLabel().apply {
+        foreground = JBColor.GREEN
+        border = JBUI.Borders.empty(2, 0, 5, 0)
+        isVisible = false
+    }
+    
+    private val adbPortField = JBTextField().apply {
+        toolTipText = """<html>
+            Port for TCP/IP connection to Android devices.<br>
+            Default: 5555 (standard port for Wi-Fi debugging)<br>
+            Other common ports: 5556, 5557
+        </html>""".trimIndent()
+        columns = 8
+    }
+    
+    private val adbPortValidationLabel = JLabel().apply {
+        foreground = JBColor.RED
+        border = JBUI.Borders.empty(2, 0, 5, 0)
+        isVisible = false
     }
     
     init {
@@ -341,10 +378,71 @@ class PluginSettingsPanel : JBPanel<PluginSettingsPanel>(VerticalFlowLayout(Vert
     }
     
     private fun createUI() {
+        // ADB Settings section
+        val adbPanel = JPanel(VerticalFlowLayout(VerticalFlowLayout.TOP, 0, 0, true, false)).apply {
+            border = JBUI.Borders.empty(10)
+        }
+        
+        val adbSectionLabel = JLabel("ADB Settings:").apply {
+            font = font.deriveFont(font.style or java.awt.Font.BOLD)
+            border = JBUI.Borders.emptyBottom(5)
+        }
+        adbPanel.add(adbSectionLabel)
+        
+        // ADB path settings
+        val adbPathLabel = JLabel("ADB executable path:").apply {
+            border = JBUI.Borders.empty(10, 0, 5, 0)
+        }
+        adbPanel.add(adbPathLabel)
+        
+        // Panel for ADB path field and browse button
+        val adbPathPanel = JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
+            isOpaque = false
+            maximumSize = Dimension(Integer.MAX_VALUE, 35)
+            add(adbPathField.apply {
+                preferredSize = JBUI.size(300, 30)
+                maximumSize = JBUI.size(350, 30)
+            })
+            add(Box.createHorizontalStrut(5))
+            add(adbPathButton)
+        }
+        adbPanel.add(adbPathPanel)
+        
+        // Validation label for ADB path
+        adbPanel.add(adbPathValidationLabel)
+        
+        // ADB port settings
+        val adbPortLabel = JLabel("Device TCP/IP port:").apply {
+            border = JBUI.Borders.empty(10, 0, 5, 0)
+        }
+        adbPanel.add(adbPortLabel)
+        
+        // Panel for ADB port field
+        val adbPortPanel = JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
+            isOpaque = false
+            maximumSize = Dimension(Integer.MAX_VALUE, 35)
+            add(adbPortField.apply {
+                preferredSize = JBUI.size(100, 30)
+                maximumSize = JBUI.size(100, 30)
+            })
+        }
+        adbPanel.add(adbPortPanel)
+        
+        // Validation label for ADB port
+        adbPanel.add(adbPortValidationLabel)
+        
+        add(adbPanel)
+        
         // Screen mirroring settings
         val mirroringPanel = JPanel(VerticalFlowLayout(VerticalFlowLayout.TOP, 0, 0, true, false)).apply {
             border = JBUI.Borders.empty(10)
         }
+        
+        val mirroringSectionLabel = JLabel("Screen Mirroring Settings:").apply {
+            font = font.deriveFont(font.style or java.awt.Font.BOLD)
+            border = JBUI.Borders.emptyBottom(5)
+        }
+        mirroringPanel.add(mirroringSectionLabel)
         
         mirroringPanel.add(restartScrcpyCheckBox)
         
@@ -629,6 +727,234 @@ class PluginSettingsPanel : JBPanel<PluginSettingsPanel>(VerticalFlowLayout(Vert
     }
     
     private fun setupListeners() {
+        // Browse button for ADB path
+        adbPathButton.addActionListener {
+            val isWindows = System.getProperty("os.name").startsWith("Windows")
+            val descriptor = FileChooserDescriptor(true, true, false, false, false, false).apply {
+                title = "Select ADB Executable or Folder"  
+                description = "Select the ADB executable file or the folder containing it"
+                
+                // Filter to show only relevant files
+                withFileFilter { virtualFile ->
+                    when {
+                        virtualFile.isDirectory -> true
+                        isWindows && virtualFile.name.equals("adb.exe", ignoreCase = true) -> true
+                        !isWindows && virtualFile.name.equals("adb", ignoreCase = true) -> true
+                        else -> false
+                    }
+                }
+            }
+            
+            // Определяем начальную директорию для диалога
+            val initialDir = if (adbPathField.text.isNotBlank()) {
+                val currentPath = File(adbPathField.text)
+                when {
+                    currentPath.isFile && currentPath.parentFile != null -> currentPath.parentFile
+                    currentPath.isDirectory -> currentPath
+                    else -> null
+                }
+            } else {
+                null
+            }
+            
+            val initialVirtualFile = initialDir?.let { dir ->
+                if (dir.exists() && dir.isDirectory) {
+                    com.intellij.openapi.vfs.LocalFileSystem.getInstance().findFileByIoFile(dir)
+                } else {
+                    null
+                }
+            }
+            
+            val chosenFile = FileChooser.chooseFile(descriptor, null, initialVirtualFile)
+            
+            if (chosenFile != null) {
+                val path = chosenFile.path
+                val file = File(path)
+                
+                // Validate the selected path
+                when {
+                    file.isDirectory -> {
+                        // If it's a directory, check if it contains ADB
+                        val adbExe = if (isWindows) {
+                            File(file, "adb.exe")
+                        } else {
+                            File(file, "adb")
+                        }
+                        
+                        if (adbExe.exists() && adbExe.canExecute()) {
+                            adbPathField.text = path
+                        } else {
+                            JOptionPane.showMessageDialog(
+                                this,
+                                "The selected folder does not contain a valid ADB executable",
+                                "Invalid Path",
+                                JOptionPane.WARNING_MESSAGE
+                            )
+                        }
+                    }
+                    file.isFile -> {
+                        // If it's a file, check if it's an executable
+                        if (file.canExecute() || (isWindows && file.name.endsWith(".exe", ignoreCase = true))) {
+                            adbPathField.text = path
+                        } else {
+                            JOptionPane.showMessageDialog(
+                                this,
+                                "The selected file is not an executable",
+                                "Invalid File",
+                                JOptionPane.WARNING_MESSAGE
+                            )
+                        }
+                    }
+                    else -> {
+                        JOptionPane.showMessageDialog(
+                            this,
+                            "The selected path does not exist",
+                            "Invalid Path",
+                            JOptionPane.WARNING_MESSAGE
+                        )
+                    }
+                }
+            }
+        }
+        
+        // Add validation listener for ADB path
+        adbPathField.document.addDocumentListener(object : DocumentListener {
+            override fun insertUpdate(e: DocumentEvent) = validateAdbPath()
+            override fun removeUpdate(e: DocumentEvent) = validateAdbPath()
+            override fun changedUpdate(e: DocumentEvent) = validateAdbPath()
+            
+            fun validateAdbPath() {
+                var path = adbPathField.text.trim()
+                
+                if (path.isBlank()) {
+                    // При пустом пути попытаемся найти ADB автоматически
+                    val autoDetectedPath = AdbPathResolver.findAdbExecutable()
+                    if (autoDetectedPath != null) {
+                        adbPathValidationLabel.text = "✓ ADB will be auto-detected from: ${File(autoDetectedPath).parent}"
+                        adbPathValidationLabel.foreground = JBColor.GREEN
+                    } else {
+                        adbPathValidationLabel.text = "⚠ ADB not found in system PATH"
+                        adbPathValidationLabel.foreground = JBColor.YELLOW
+                    }
+                    adbPathValidationLabel.isVisible = true
+                    return
+                }
+                
+                // Удаляем кавычки, если путь обёрнут в них
+                if ((path.startsWith("\"") && path.endsWith("\"")) || 
+                    (path.startsWith("'") && path.endsWith("'"))) {
+                    path = path.substring(1, path.length - 1).trim()
+                    // Обновляем поле без кавычек
+                    SwingUtilities.invokeLater {
+                        adbPathField.text = path
+                    }
+                    return // Валидация произойдёт автоматически после обновления текста
+                }
+                
+                val file = File(path)
+                val isWindows = System.getProperty("os.name").startsWith("Windows")
+                
+                when {
+                    // Check if it's a valid ADB executable
+                    file.isFile -> {
+                        val expectedName = if (isWindows) "adb.exe" else "adb"
+                        when {
+                            !file.exists() -> {
+                                adbPathValidationLabel.text = "✗ File not found"
+                                adbPathValidationLabel.foreground = JBColor.RED
+                            }
+                            !file.name.equals(expectedName, ignoreCase = true) -> {
+                                adbPathValidationLabel.text = "✗ File should be named '$expectedName'"
+                                adbPathValidationLabel.foreground = JBColor.RED
+                            }
+                            !file.canExecute() && !isWindows -> {
+                                adbPathValidationLabel.text = "✗ File is not executable"
+                                adbPathValidationLabel.foreground = JBColor.RED
+                            }
+                            else -> {
+                                adbPathValidationLabel.text = "✓ Valid ADB executable"
+                                adbPathValidationLabel.foreground = JBColor.GREEN
+                            }
+                        }
+                        adbPathValidationLabel.isVisible = true
+                    }
+                    // Check if it's a valid directory containing ADB
+                    file.isDirectory || path.endsWith("/") || path.endsWith("\\") -> {
+                        val dir = if (file.isDirectory) file else File(path.trimEnd('/', '\\'))
+                        val adbExe = if (isWindows) {
+                            File(dir, "adb.exe")
+                        } else {
+                            File(dir, "adb")
+                        }
+                        
+                        when {
+                            !dir.exists() -> {
+                                adbPathValidationLabel.text = "✗ Directory not found"
+                                adbPathValidationLabel.foreground = JBColor.RED
+                            }
+                            !adbExe.exists() -> {
+                                adbPathValidationLabel.text = "✗ Directory does not contain ADB"
+                                adbPathValidationLabel.foreground = JBColor.RED
+                            }
+                            !adbExe.canExecute() && !isWindows -> {
+                                adbPathValidationLabel.text = "✗ ADB in directory is not executable"
+                                adbPathValidationLabel.foreground = JBColor.RED
+                            }
+                            else -> {
+                                adbPathValidationLabel.text = "✓ Valid ADB directory"
+                                adbPathValidationLabel.foreground = JBColor.GREEN
+                            }
+                        }
+                        adbPathValidationLabel.isVisible = true
+                    }
+                    else -> {
+                        adbPathValidationLabel.text = "✗ Invalid path"
+                        adbPathValidationLabel.foreground = JBColor.RED
+                        adbPathValidationLabel.isVisible = true
+                    }
+                }
+            }
+        })
+        
+        // Add validation listener for ADB port
+        adbPortField.document.addDocumentListener(object : DocumentListener {
+            override fun insertUpdate(e: DocumentEvent) = validateAdbPort()
+            override fun removeUpdate(e: DocumentEvent) = validateAdbPort()
+            override fun changedUpdate(e: DocumentEvent) = validateAdbPort()
+            
+            fun validateAdbPort() {
+                val portText = adbPortField.text.trim()
+                
+                if (portText.isBlank()) {
+                    adbPortValidationLabel.isVisible = false
+                    return
+                }
+                
+                try {
+                    val port = portText.toInt()
+                    when {
+                        port !in 1..65535 -> {
+                            adbPortValidationLabel.text = "✗ Port must be between 1 and 65535"
+                            adbPortValidationLabel.foreground = JBColor.RED
+                            adbPortValidationLabel.isVisible = true
+                        }
+                        port < 1024 -> {
+                            adbPortValidationLabel.text = "⚠ Ports below 1024 may require admin privileges"
+                            adbPortValidationLabel.foreground = JBColor.YELLOW
+                            adbPortValidationLabel.isVisible = true
+                        }
+                        else -> {
+                            adbPortValidationLabel.isVisible = false
+                        }
+                    }
+                } catch (_: NumberFormatException) {
+                    adbPortValidationLabel.text = "✗ Invalid port number"
+                    adbPortValidationLabel.foreground = JBColor.RED
+                    adbPortValidationLabel.isVisible = true
+                }
+            }
+        })
+        
         // Enable/disable open logs button and hitbox checkbox based on debug mode checkbox
         debugModeCheckBox.addChangeListener {
             val isDebugEnabled = debugModeCheckBox.isSelected
@@ -1025,6 +1351,12 @@ Are you sure you want to continue?""",
         modified = modified || debugHitboxesCheckBox.isSelected != settings.debugHitboxes
         modified = modified || scrcpyPathField.text != settings.scrcpyPath
         modified = modified || scrcpyFlagsField.text != settings.scrcpyCustomFlags
+        modified = modified || adbPathField.text != settings.adbPath
+        
+        // Проверяем изменение порта
+        val currentPort = adbPortField.text.trim().toIntOrNull() ?: 5555
+        modified = modified || currentPort != settings.adbPort
+        
         return modified
     }
     
@@ -1058,6 +1390,8 @@ Are you sure you want to continue?""",
         }
         settings.scrcpyPath = scrcpyPathField.text
         settings.scrcpyCustomFlags = scrcpyFlagsField.text
+        settings.adbPath = adbPathField.text
+        settings.adbPort = adbPortField.text.trim().toIntOrNull() ?: 5555
         
         val debugModeChanged = settings.debugMode != debugModeCheckBox.isSelected
         settings.debugMode = debugModeCheckBox.isSelected
@@ -1108,6 +1442,21 @@ Are you sure you want to continue?""",
         
         scrcpyPathField.text = settings.scrcpyPath
         scrcpyFlagsField.text = settings.scrcpyCustomFlags
+        
+        // Заполняем ADB настройки
+        if (settings.adbPath.isBlank()) {
+            // Если путь к ADB не задан, пытаемся найти его автоматически
+            val autoDetectedPath = AdbPathResolver.findAdbExecutable()
+            if (autoDetectedPath != null) {
+                // Получаем директорию, содержащую ADB
+                val adbDir = File(autoDetectedPath).parent
+                adbPathField.text = adbDir ?: ""
+            }
+        } else {
+            adbPathField.text = settings.adbPath
+        }
+        adbPortField.text = settings.adbPort.toString()
+        
         openLogsButton.isEnabled = settings.debugMode
         // Убедимся, что Danger Zone видна
         resetPanel?.isVisible = true
