@@ -50,4 +50,16 @@
                 displayName="ADB Screen Randomizer"
                 instance="io.github.qavlad.adbrandomizer.settings.PluginSettingsConfigurable"/>
     </extensions>
+    
+    <!-- Actions section -->
+    <actions>
+        <!-- Add action to Tools menu -->
+        <action id="io.github.qavlad.adbrandomizer.OpenToolWindow"
+                class="io.github.qavlad.adbrandomizer.actions.OpenToolWindowAction"
+                text="ADB Screen Randomizer"
+                description="Open ADB Screen Randomizer tool window"
+                icon="/icons/pluginIcon.svg">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+        </action>
+    </actions>
 </idea-plugin>
