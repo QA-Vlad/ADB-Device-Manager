@@ -150,29 +150,52 @@ class DeviceListPanel(
     }
 
     private fun setupUI() {
-        // Создаём заголовок без ADB (ADB будет под Connected devices)
-        val titlePanel = JPanel(BorderLayout()).apply {
+        // Главная панель-контейнер для заголовка с фоном
+        val titleWrapperPanel = JPanel(BorderLayout()).apply {
+            isOpaque = false  // Прозрачная, чтобы показывать фон headerPanel
             border = JBUI.Borders.empty()
         }
         
-        // Центральная панель с заголовком Devices
+        // Панель для заголовка с иконкой - используем BoxLayout для лучшего выравнивания
+        val titleContentPanel = JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.X_AXIS)
+            isOpaque = false
+            alignmentY = CENTER_ALIGNMENT
+        }
+        
+        // Добавляем иконку смартфона (увеличенный размер)
+        val deviceIcon = JLabel("📱").apply {
+            font = Font("Segoe UI Emoji", Font.PLAIN, 20)
+            alignmentY = CENTER_ALIGNMENT
+        }
+        titleContentPanel.add(deviceIcon)
+        
+        // Небольшой отступ между иконкой и текстом
+        titleContentPanel.add(Box.createHorizontalStrut(6))
+        
+        // Центральная панель с заголовком Devices (увеличенный размер)
         val titleLabel = JLabel("Devices").apply {
-            border = JBUI.Borders.empty()
-            font = font.deriveFont(font.style or Font.BOLD)
+            font = JBFont.label().deriveFont(Font.BOLD, 14f)
+            alignmentY = CENTER_ALIGNMENT
         }
+        titleContentPanel.add(titleLabel)
         
-        titlePanel.add(titleLabel, BorderLayout.WEST)
+        titleWrapperPanel.add(titleContentPanel, BorderLayout.WEST)
         
         val headerPanel = JPanel(BorderLayout()).apply {
+            // Вернём исходные настройки с тонкой рамкой
             border = JBUI.Borders.compound(
                 BorderFactory.createMatteBorder(1, 1, 1, 1, JBUI.CurrentTheme.CustomFrameDecorations.separatorForeground()),
                 JBUI.Borders.empty(4, 8)
             )
-            add(titlePanel, BorderLayout.WEST)
+            add(titleWrapperPanel, BorderLayout.WEST)
             add(compactActionPanel, BorderLayout.EAST)
             maximumSize = Dimension(Int.MAX_VALUE, JBUI.scale(36))
             preferredSize = Dimension(preferredSize.width, JBUI.scale(36))
         }
+        
+        // Убедимся что compactActionPanel тоже прозрачный чтобы не перекрывать фон
+        compactActionPanel.isOpaque = false
         deviceList.cellRenderer = object : ListCellRenderer<DeviceListItem> {
             private val defaultRenderer = DeviceListRenderer(
                 getHoverState = getHoverState,
@@ -548,7 +571,7 @@ class DeviceListPanel(
         deviceList.emptyText.text = "Scanning for devices..."
         deviceList.emptyText.appendLine("Make sure ADB is running and devices are connected")
         val scrollPane = JBScrollPane(deviceList)
-        scrollPane.border = BorderFactory.createEmptyBorder()
+        scrollPane.border = JBUI.Borders.emptyTop(5)  // Добавляем отступ сверху для визуального разделения
         add(headerPanel, BorderLayout.NORTH)
         add(scrollPane, BorderLayout.CENTER)
     }
