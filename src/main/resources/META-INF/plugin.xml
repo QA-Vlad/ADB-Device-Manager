@@ -44,11 +44,13 @@
                 id="ADB Randomizer Debug"
                 displayType="BALLOON"/>
                 
-        <!-- Регистрация настроек плагина -->
+        <!-- Регистрация настроек плагина в разделе Tools -->
         <applicationConfigurable
                 id="io.github.qavlad.adbrandomizer.settings"
                 displayName="ADB Screen Randomizer"
-                instance="io.github.qavlad.adbrandomizer.settings.PluginSettingsConfigurable"/>
+                instance="io.github.qavlad.adbrandomizer.settings.PluginSettingsConfigurable"
+                parentId="tools"
+                order="first"/>
     </extensions>
     
     <!-- Actions section -->
