@@ -190,10 +190,75 @@ object PCWifiSwitchService {
                 // Если профиль есть, просто подключаемся
                 PluginLogger.info(LogCategory.NETWORK, "Found existing WiFi profile for: %s", networkInfo.ssid)
                 
-                val connectProcess = ProcessBuilder(
-                    "cmd.exe", "/c", "netsh", "wlan", "connect", 
-                    "name=\"${networkInfo.ssid}\""
-                )
+                // Сначала получаем список интерфейсов
+                val interfaceProcess = ProcessBuilder("cmd.exe", "/c", "netsh", "wlan", "show", "interfaces")
+                    .redirectErrorStream(true)
+                    .start()
+                
+                val interfaceOutput = interfaceProcess.inputStream.bufferedReader().readText()
+                interfaceProcess.waitFor(5, TimeUnit.SECONDS)
+                
+                // Извлекаем имя интерфейса (поддержка английской и русской версий Windows)
+                val interfaceMatch = Regex("""(?:Name|Имя)\s*:\s+(.+)""").find(interfaceOutput)
+                val interfaceName = interfaceMatch?.groupValues?.get(1)?.trim()
+                
+                if (interfaceName.isNullOrBlank()) {
+                    PluginLogger.error(LogCategory.NETWORK, "Could not find WiFi interface name. Output: %s", null, interfaceOutput.take(500))
+                    return false
+                }
+                
+                PluginLogger.info(LogCategory.NETWORK, "Found WiFi interface: %s", interfaceName)
+                
+                // Сначала отключаемся от текущей сети
+                PluginLogger.info(LogCategory.NETWORK, "Disconnecting from current WiFi network")
+                val disconnectCommand = "netsh wlan disconnect interface=\"${interfaceName}\""
+                val disconnectProcess = ProcessBuilder("cmd.exe", "/c", disconnectCommand)
+                    .redirectErrorStream(true)
+                    .start()
+                disconnectProcess.waitFor(3, TimeUnit.SECONDS)
+                
+                // Небольшая задержка после отключения
+                Thread.sleep(1000)
+                
+                // Проверяем доступность сети
+                PluginLogger.info(LogCategory.NETWORK, "Checking if network %s is available", networkInfo.ssid)
+                val scanCommand = "netsh wlan show networks interface=\"${interfaceName}\""
+                val scanProcess = ProcessBuilder("cmd.exe", "/c", scanCommand)
+                    .redirectErrorStream(true)
+                    .start()
+                
+                val scanOutput = scanProcess.inputStream.bufferedReader().readText()
+                scanProcess.waitFor(5, TimeUnit.SECONDS)
+                
+                val networkAvailable = scanOutput.contains(networkInfo.ssid)
+                
+                if (!networkAvailable) {
+                    PluginLogger.warn(LogCategory.NETWORK, "Network %s is not in range", networkInfo.ssid)
+                    PluginLogger.info(LogCategory.NETWORK, "Available networks: %s", scanOutput.take(500))
+                    
+                    // Пытаемся обновить список сетей
+                    PluginLogger.info(LogCategory.NETWORK, "Refreshing network list...")
+                    Thread.sleep(2000)
+                    
+                    // Повторно сканируем после задержки
+                    val rescanProcess = ProcessBuilder("cmd.exe", "/c", scanCommand)
+                        .redirectErrorStream(true)
+                        .start()
+                    val rescanOutput = rescanProcess.inputStream.bufferedReader().readText()
+                    rescanProcess.waitFor(5, TimeUnit.SECONDS)
+                    
+                    if (!rescanOutput.contains(networkInfo.ssid)) {
+                        PluginLogger.error(LogCategory.NETWORK, "Network %s still not available after refresh", null, networkInfo.ssid)
+                    }
+                }
+                
+                // Формируем команду подключения
+                // Используем правильный формат: netsh wlan connect name="SSID" interface="Interface"
+                val connectCommand = "netsh wlan connect name=\"${networkInfo.ssid}\" interface=\"${interfaceName}\""
+                
+                PluginLogger.info(LogCategory.NETWORK, "Executing WiFi connect command: %s", connectCommand)
+                
+                val connectProcess = ProcessBuilder("cmd.exe", "/c", connectCommand)
                     .redirectErrorStream(true)
                     .start()
                 
