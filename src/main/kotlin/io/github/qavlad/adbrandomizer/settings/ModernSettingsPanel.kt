@@ -965,18 +965,69 @@ open class ModernSettingsPanel : JBPanel<ModernSettingsPanel>() {
                 }
             }
             
-            FileChooser.chooseFile(descriptor, null, null)?.let {
+            // Определяем начальную директорию
+            val currentPath = adbPathField.text.trim()
+            val initialDir = if (currentPath.isNotBlank()) {
+                val path = File(currentPath)
+                when {
+                    path.exists() && path.isFile && path.parentFile != null -> path.parentFile
+                    path.exists() && path.isDirectory -> path
+                    else -> {
+                        // Если путь не существует, начинаем с корня диска C:\ на Windows или домашней директории
+                        if (isWindows) File("C:\\") else File(System.getProperty("user.home"))
+                    }
+                }
+            } else {
+                // Если поле пустое, начинаем с корня диска C:\ на Windows или домашней директории
+                if (isWindows) File("C:\\") else File(System.getProperty("user.home"))
+            }
+            
+            val initialVirtualFile = initialDir?.let { dir ->
+                if (dir.exists() && dir.isDirectory) {
+                    com.intellij.openapi.vfs.LocalFileSystem.getInstance().findFileByIoFile(dir)
+                } else {
+                    null
+                }
+            }
+            
+            FileChooser.chooseFile(descriptor, null, initialVirtualFile)?.let {
                 adbPathField.text = it.path
             }
         }
         
         // Scrcpy path browse
         scrcpyPathButton.addActionListener {
+            val isWindows = System.getProperty("os.name").startsWith("Windows")
             val descriptor = FileChooserDescriptor(true, true, true, true, false, false).apply {
                 title = "Select Scrcpy Executable, Folder or Archive"
             }
             
-            FileChooser.chooseFile(descriptor, null, null)?.let {
+            // Определяем начальную директорию
+            val currentPath = scrcpyPathField.text.trim()
+            val initialDir = if (currentPath.isNotBlank()) {
+                val path = File(currentPath)
+                when {
+                    path.exists() && path.isFile && path.parentFile != null -> path.parentFile
+                    path.exists() && path.isDirectory -> path
+                    else -> {
+                        // Если путь не существует, начинаем с корня диска C:\ на Windows или домашней директории
+                        if (isWindows) File("C:\\") else File(System.getProperty("user.home"))
+                    }
+                }
+            } else {
+                // Если поле пустое, начинаем с корня диска C:\ на Windows или домашней директории
+                if (isWindows) File("C:\\") else File(System.getProperty("user.home"))
+            }
+            
+            val initialVirtualFile = initialDir?.let { dir ->
+                if (dir.exists() && dir.isDirectory) {
+                    com.intellij.openapi.vfs.LocalFileSystem.getInstance().findFileByIoFile(dir)
+                } else {
+                    null
+                }
+            }
+            
+            FileChooser.chooseFile(descriptor, null, initialVirtualFile)?.let {
                 scrcpyPathField.text = it.path
             }
         }
@@ -1275,13 +1326,42 @@ open class ModernSettingsPanel : JBPanel<ModernSettingsPanel>() {
         scrcpyPathField.text = settings.scrcpyPath
         scrcpyFlagsField.text = settings.scrcpyCustomFlags
         
-        if (settings.adbPath.isBlank()) {
-            val autoPath = AdbPathResolver.findAdbExecutable()
-            if (autoPath != null) {
-                adbPathField.text = File(autoPath).parent ?: ""
+        // Всегда пытаемся найти актуальный путь к ADB
+        val savedPath = settings.adbPath
+        if (savedPath.isNotBlank()) {
+            // Проверяем, существует ли сохранённый путь
+            val savedFile = File(savedPath)
+            val isWindows = System.getProperty("os.name").startsWith("Windows")
+            val adbName = if (isWindows) "adb.exe" else "adb"
+            
+            val pathIsValid = when {
+                savedFile.isDirectory -> File(savedFile, adbName).exists()
+                savedFile.isFile -> savedFile.exists() && savedFile.name.equals(adbName, ignoreCase = true)
+                else -> false
+            }
+            
+            if (pathIsValid) {
+                // Сохранённый путь валиден, используем его
+                adbPathField.text = savedPath
+            } else {
+                // Сохранённый путь невалиден, ищем ADB автоматически
+                val autoPath = AdbPathResolver.findAdbExecutable()
+                if (autoPath != null) {
+                    // Используем родительскую директорию найденного ADB
+                    adbPathField.text = File(autoPath).parent ?: autoPath
+                } else {
+                    // Оставляем старый путь, чтобы пользователь видел, что было настроено
+                    adbPathField.text = savedPath
+                }
             }
         } else {
-            adbPathField.text = settings.adbPath
+            // Путь не был сохранён, пытаемся найти автоматически
+            val autoPath = AdbPathResolver.findAdbExecutable()
+            if (autoPath != null) {
+                adbPathField.text = File(autoPath).parent ?: autoPath
+            } else {
+                adbPathField.text = ""
+            }
         }
         adbPortField.text = settings.adbPort.toString()
         

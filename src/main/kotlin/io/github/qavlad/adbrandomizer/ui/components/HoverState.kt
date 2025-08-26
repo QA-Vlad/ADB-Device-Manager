@@ -75,6 +75,7 @@ data class HoverState(
     companion object {
         const val BUTTON_TYPE_MIRROR = PluginConfig.UIConstants.BUTTON_TYPE_MIRROR
         const val BUTTON_TYPE_WIFI = PluginConfig.UIConstants.BUTTON_TYPE_WIFI
+        const val BUTTON_TYPE_CONFIGURE_ADB = "configure_adb"
 
         /**
          * Создает состояние без hover эффектов

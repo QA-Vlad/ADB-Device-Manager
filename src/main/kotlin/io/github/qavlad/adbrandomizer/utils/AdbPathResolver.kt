@@ -1,6 +1,7 @@
 // Файл: src/main/kotlin/io/github/qavlad/adbrandomizer/utils/AdbPathResolver.kt
 package io.github.qavlad.adbrandomizer.utils
 
+import io.github.qavlad.adbrandomizer.settings.PluginSettings
 import java.io.File
 
 object AdbPathResolver {
@@ -12,14 +13,38 @@ object AdbPathResolver {
      * @return String? - путь к ADB или null, если не найден
      */
     fun findAdbExecutable(): String? {
-        println("ADB_Randomizer: Starting ADB search...")
-        println("ADB_Randomizer: Looking for: $adbName")
+        // Сначала проверяем пользовательский путь из настроек
+        val customPath = PluginSettings.instance.adbPath
+        
+        if (customPath.isNotBlank()) {
+            
+            val customFile = File(customPath)
+            
+            // Если указана директория, добавляем имя исполняемого файла
+            val adbFile = if (customFile.isDirectory || !customPath.endsWith(adbName, ignoreCase = true)) {
+                File(customFile, adbName)
+            } else {
+                customFile
+            }
+            
+            if (adbFile.exists() && adbFile.isFile) {
+                val isWindows = System.getProperty("os.name").startsWith("Windows")
+                val canExecute = if (isWindows && adbFile.name.endsWith(".exe", ignoreCase = true)) {
+                    true
+                } else {
+                    adbFile.canExecute()
+                }
+                
+                if (canExecute) {
+                    return adbFile.absolutePath
+                }
+            }
+        }
         
         val isWindows = System.getProperty("os.name").startsWith("Windows")
         
         // Проверяем стандартные пути для разных ОС
         val standardPaths = getStandardAdbPaths()
-        println("ADB_Randomizer: Checking standard paths: ${standardPaths.joinToString()}")
 
         for (path in standardPaths) {
             val file = File(path)
@@ -35,22 +60,17 @@ object AdbPathResolver {
                 false
             }
             
-            println("ADB_Randomizer: Checking standard path: $path - exists: $exists, canExecute: $canExecute")
             if (exists && canExecute) {
-                println("ADB_Randomizer: Found ADB at: $path")
                 return path
             }
         }
 
         // Ищем в PATH
-        println("ADB_Randomizer: Searching in system PATH...")
         val pathFromSystem = findExecutableInSystemPath(adbName)
         if (pathFromSystem != null) {
-            println("ADB_Randomizer: Found ADB in PATH at: $pathFromSystem")
             return pathFromSystem
         }
 
-        println("ADB_Randomizer: ADB not found in standard locations or PATH")
         return null
     }
 
@@ -82,16 +102,15 @@ object AdbPathResolver {
      */
     fun findExecutableInSystemPath(executableName: String): String? {
         val pathEnv = System.getenv("PATH")
-        println("ADB_Randomizer: PATH environment variable: ${pathEnv?.take(200)}...") // Показываем первые 200 символов PATH
         
         val pathDirs = pathEnv?.split(File.pathSeparator) ?: emptyList()
-        println("ADB_Randomizer: Found ${pathDirs.size} directories in PATH")
         
         val isWindows = System.getProperty("os.name").startsWith("Windows")
         
         for (dir in pathDirs) {
             val file = File(dir, executableName)
             val exists = file.exists()
+            
             val canExecute = if (exists) {
                 // На Windows для .exe файлов проверяем только существование
                 if (isWindows && executableName.endsWith(".exe", ignoreCase = true)) {
@@ -103,23 +122,11 @@ object AdbPathResolver {
                 false
             }
             
-            // Логируем только для директорий где есть adb или интересных путей
-            if (exists || dir.contains("adb", ignoreCase = true) || dir.contains("android", ignoreCase = true)) {
-                println("ADB_Randomizer: Checking PATH dir: $dir")
-                println("ADB_Randomizer:   File: ${file.absolutePath}")
-                println("ADB_Randomizer:   Exists: $exists, CanExecute: $canExecute")
-                if (exists && isWindows) {
-                    println("ADB_Randomizer:   (Windows detected - treating .exe as executable)")
-                }
-            }
-            
             if (exists && canExecute) {
-                println("ADB_Randomizer: SUCCESS! Found executable in PATH")
                 return file.absolutePath
             }
         }
         
-        println("ADB_Randomizer: Executable '$executableName' not found in any PATH directory")
         return null
     }
 }

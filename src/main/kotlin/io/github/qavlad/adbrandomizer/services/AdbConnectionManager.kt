@@ -21,6 +21,8 @@ internal object AdbConnectionManager {
     private var isInitialized = false
     private var lastDeviceCount = -1
     private var lastDeviceSerials = emptySet<String>()
+    private var hasLoggedAdbNotFound = false
+    private var hasLoggedBridgeError = false
 
     @Suppress("DEPRECATION")
     suspend fun getOrCreateDebugBridge(): Result<AndroidDebugBridge> = withContext(Dispatchers.IO) {
@@ -30,8 +32,15 @@ internal object AdbConnectionManager {
 
         val adbPath = AdbPathResolver.findAdbExecutable()
         if (adbPath == null) {
-            PluginLogger.warn(LogCategory.ADB_CONNECTION, "ADB executable not found")
+            // Логируем только при первом обнаружении отсутствия ADB
+            if (!hasLoggedAdbNotFound) {
+                PluginLogger.warn(LogCategory.ADB_CONNECTION, "ADB executable not found")
+                hasLoggedAdbNotFound = true
+            }
             return@withContext Result.Error(Exception("ADB executable not found"), "ADB executable not found")
+        } else {
+            // Сбрасываем флаг, если ADB найден
+            hasLoggedAdbNotFound = false
         }
 
         runAdbOperation("create debug bridge") {
@@ -66,11 +75,18 @@ internal object AdbConnectionManager {
 
     suspend fun getConnectedDevices(): Result<List<IDevice>> = withContext(Dispatchers.IO) {
         runAdbOperation("get connected devices") {
-            val bridgeResult = getOrCreateDebugBridge()
-            val bridge = when (bridgeResult) {
-                is Result.Success -> bridgeResult.data
+            val bridge = when (val bridgeResult = getOrCreateDebugBridge()) {
+                is Result.Success -> {
+                    // Сбрасываем флаг ошибки при успешном подключении
+                    hasLoggedBridgeError = false
+                    bridgeResult.data
+                }
                 is Result.Error -> {
-                    PluginLogger.warn(LogCategory.ADB_CONNECTION, "Failed to create debug bridge: %s", bridgeResult.exception.message)
+                    // Логируем только первую ошибку
+                    if (!hasLoggedBridgeError) {
+                        PluginLogger.warn(LogCategory.ADB_CONNECTION, "Failed to create debug bridge: %s", bridgeResult.exception.message)
+                        hasLoggedBridgeError = true
+                    }
                     null
                 }
             }

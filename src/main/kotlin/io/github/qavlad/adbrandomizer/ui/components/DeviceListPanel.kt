@@ -8,6 +8,7 @@ import com.intellij.ui.components.JBList
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.util.ui.JBFont
 import com.intellij.util.ui.JBUI
+import com.intellij.util.ui.UIUtil
 import io.github.qavlad.adbrandomizer.services.AdbService
 import io.github.qavlad.adbrandomizer.services.DeviceInfo
 import io.github.qavlad.adbrandomizer.services.DeviceOrderService
@@ -16,8 +17,10 @@ import io.github.qavlad.adbrandomizer.settings.PluginSettings
 import io.github.qavlad.adbrandomizer.ui.config.DeviceType
 import io.github.qavlad.adbrandomizer.ui.config.HitboxConfigManager
 import io.github.qavlad.adbrandomizer.ui.config.HitboxType
+import io.github.qavlad.adbrandomizer.ui.dialogs.AdbConfigurationDialog
 import io.github.qavlad.adbrandomizer.ui.models.CombinedDeviceInfo
 import io.github.qavlad.adbrandomizer.ui.renderers.DeviceListRenderer
+import io.github.qavlad.adbrandomizer.utils.AdbPathResolver
 import io.github.qavlad.adbrandomizer.utils.DeviceConnectionUtils
 import io.github.qavlad.adbrandomizer.utils.PluginLogger
 import io.github.qavlad.adbrandomizer.utils.logging.LogCategory
@@ -39,6 +42,7 @@ sealed class DeviceListItem {
         val entry: WifiDeviceHistoryService.WifiDeviceHistoryEntry,
         val otherIPs: List<String>
     ) : DeviceListItem()
+    data class AdbWarning(val message: String) : DeviceListItem()
 }
 
 class DeviceListPanel(
@@ -131,6 +135,7 @@ class DeviceListPanel(
                         else -> null
                     }
                 }
+                is DeviceListItem.AdbWarning -> null // Никакой подсказки для предупреждения
                 else -> null
             }
         }
@@ -556,6 +561,93 @@ class DeviceListPanel(
                         
                         panel
                     }
+                    is DeviceListItem.AdbWarning -> {
+                        // Создаем панель с предупреждением о недоступности ADB
+                        val panel = JPanel(BorderLayout()).apply {
+                            border = BorderFactory.createEmptyBorder(8, 12, 8, 12)
+                            background = JBColor(Color(255, 248, 235), Color(60, 52, 44))
+                            isOpaque = true
+                        }
+                        
+                        // Левая часть - иконка и текст
+                        val leftPanel = JPanel(BorderLayout()).apply {
+                            isOpaque = false
+                        }
+                        
+                        // Иконка предупреждения слева
+                        val iconLabel = JLabel(AllIcons.General.Warning).apply {
+                            border = BorderFactory.createEmptyBorder(0, 0, 0, 10)
+                        }
+                        leftPanel.add(iconLabel, BorderLayout.WEST)
+                        
+                        // Панель с двумя строками текста
+                        val textPanel = JPanel().apply {
+                            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+                            isOpaque = false
+                        }
+                        
+                        // Основное сообщение
+                        val titleLabel = JLabel("ADB not found").apply {
+                            font = UIUtil.getLabelFont().deriveFont(Font.BOLD)
+                            foreground = JBColor(Color(140, 60, 0), Color(220, 140, 40))
+                            alignmentX = LEFT_ALIGNMENT
+                        }
+                        textPanel.add(titleLabel)
+                        
+                        // Дополнительная информация
+                        val infoLabel = JLabel("Android Debug Bridge is required for device connection").apply {
+                            font = JBFont.small()
+                            foreground = JBColor.GRAY
+                            alignmentX = LEFT_ALIGNMENT
+                        }
+                        textPanel.add(infoLabel)
+                        
+                        leftPanel.add(textPanel, BorderLayout.CENTER)
+                        panel.add(leftPanel, BorderLayout.CENTER)
+                        
+                        // Проверяем, находится ли курсор над кнопкой для hover эффекта
+                        val isButtonHovered = if (selected || focused) {
+                            false // Не показываем hover если элемент выделен
+                        } else {
+                            // Проверяем текущее hover состояние
+                            val currentHoverState = getHoverState()
+                            currentHoverState.hoveredDeviceIndex == index && 
+                            currentHoverState.hoveredButtonType == HoverState.BUTTON_TYPE_CONFIGURE_ADB
+                        }
+                        
+                        // Кнопка "Configure" справа с hover эффектом
+                        val fixButton = JButton("Configure").apply {
+                            preferredSize = Dimension(90, 26)
+                            cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+                            
+                            // Применяем стиль кнопки
+                            if (isButtonHovered) {
+                                // При наведении
+                                background = JBUI.CurrentTheme.ActionButton.hoverBackground()
+                                foreground = JBColor.foreground()
+                                isContentAreaFilled = true
+                                isBorderPainted = true
+                                border = BorderFactory.createCompoundBorder(
+                                    BorderFactory.createLineBorder(JBUI.CurrentTheme.Focus.focusColor(), 1),
+                                    BorderFactory.createEmptyBorder(3, 8, 3, 8)
+                                )
+                            } else {
+                                // Обычное состояние - делаем кнопку видимой
+                                background = JBColor(Color(90, 140, 60), Color(70, 120, 50))
+                                foreground = JBColor.WHITE
+                                isContentAreaFilled = true
+                                isBorderPainted = true
+                                isOpaque = true
+                                border = BorderFactory.createCompoundBorder(
+                                    BorderFactory.createLineBorder(JBColor(Color(70, 120, 40), Color(60, 100, 40)), 1),
+                                    BorderFactory.createEmptyBorder(3, 8, 3, 8)
+                                )
+                            }
+                        }
+                        panel.add(fixButton, BorderLayout.EAST)
+                        
+                        panel
+                    }
                 }
             }
         }
@@ -729,6 +821,37 @@ class DeviceListPanel(
                     val newHoverState = HoverState(hoveredDeviceIndex = index, hoveredButtonType = newButtonType)
                     if (getHoverState() != newHoverState) {
                         setHoverState(newHoverState)
+                        deviceList.repaint()
+                    }
+                } else {
+                    deviceList.cursor = Cursor.getDefaultCursor()
+                    if (getHoverState().hoveredDeviceIndex == index) {
+                        setHoverState(HoverState.noHover())
+                        deviceList.repaint()
+                    }
+                }
+            }
+            is DeviceListItem.AdbWarning -> {
+                // Проверяем, находится ли курсор над кнопкой Configure
+                val cellBounds = deviceList.getCellBounds(index, index)
+                val cellRelativePoint = Point(e.x - cellBounds.x, e.y - cellBounds.y)
+                
+                // Определяем область кнопки (она справа, размер 90x26)
+                val buttonWidth = 90
+                val buttonHeight = 26
+                val buttonX = cellBounds.width - buttonWidth - 12 // 12px отступ справа
+                val buttonY = (cellBounds.height - buttonHeight) / 2
+                val buttonRect = Rectangle(buttonX, buttonY, buttonWidth, buttonHeight)
+                
+                if (buttonRect.contains(cellRelativePoint)) {
+                    deviceList.cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+                    // Устанавливаем hover состояние для кнопки
+                    val newState = HoverState(
+                        hoveredDeviceIndex = index,
+                        hoveredButtonType = HoverState.BUTTON_TYPE_CONFIGURE_ADB
+                    )
+                    if (getHoverState() != newState) {
+                        setHoverState(newState)
                         deviceList.repaint()
                     }
                 } else {
@@ -915,6 +1038,27 @@ class DeviceListPanel(
                     }
                 }
             }
+            is DeviceListItem.AdbWarning -> {
+                // Проверяем, попал ли клик в область кнопки Configure
+                val cellBounds = deviceList.getCellBounds(index, index)
+                val cellRelativePoint = Point(e.x - cellBounds.x, e.y - cellBounds.y)
+                
+                // Определяем область кнопки (она справа, размер 90x26)
+                val buttonWidth = 90
+                val buttonHeight = 26
+                val buttonX = cellBounds.width - buttonWidth - 12 // 12px отступ справа
+                val buttonY = (cellBounds.height - buttonHeight) / 2
+                val buttonRect = Rectangle(buttonX, buttonY, buttonWidth, buttonHeight)
+                
+                if (buttonRect.contains(cellRelativePoint)) {
+                    // Клик по кнопке - открываем диалог настройки ADB
+                    val dialog = AdbConfigurationDialog(null)
+                    if (dialog.showAndGet()) {
+                        onForceUpdate()
+                    }
+                }
+                // Если клик не в кнопку - ничего не делаем
+            }
             else -> return
         }
         deviceList.clearSelection()
@@ -936,8 +1080,17 @@ class DeviceListPanel(
         SwingUtilities.invokeLater {
             deviceListModel.clear()
             
+            // Проверяем наличие ADB
+            val adbPath = AdbPathResolver.findAdbExecutable()
+            val adbAvailable = adbPath != null
+            
+            if (!adbAvailable) {
+                // ADB не найден - показываем предупреждение
+                deviceListModel.addElement(DeviceListItem.AdbWarning("ADB not found"))
+            }
+            
             // Обновляем текст для пустого списка
-            if (devices.isEmpty() && deviceListModel.isEmpty) {
+            if (devices.isEmpty() && deviceListModel.isEmpty && adbAvailable) {
                 deviceList.emptyText.clear()
                 deviceList.emptyText.text = "No devices found"
                 deviceList.emptyText.appendLine("Connect a device via USB or enable Wi-Fi debugging")
@@ -1581,6 +1734,17 @@ class DeviceListPanel(
     }
 
     private fun handleConnectHistoryDevice(entry: WifiDeviceHistoryService.WifiDeviceHistoryEntry) {
+        // Проверяем наличие ADB перед попыткой подключения
+        val adbPath = AdbPathResolver.findAdbExecutable()
+        if (adbPath == null) {
+            // ADB не найден - открываем диалог настройки
+            val dialog = AdbConfigurationDialog(null)
+            if (dialog.showAndGet()) {
+                onForceUpdate()
+            }
+            return
+        }
+        
         // Используем тот же метод подключения, что и в Connected devices
         onWifiConnectByIp(entry.ipAddress, entry.port)
     }
@@ -1654,6 +1818,17 @@ class DeviceListPanel(
      * Подключается ко всем IP адресам группированного устройства параллельно
      */
     private fun handleConnectGroupedHistoryDevice(item: DeviceListItem.GroupedWifiHistoryDevice) {
+        // Проверяем наличие ADB перед попыткой подключения
+        val adbPath = AdbPathResolver.findAdbExecutable()
+        if (adbPath == null) {
+            // ADB не найден - открываем диалог настройки
+            val dialog = AdbConfigurationDialog(null)
+            if (dialog.showAndGet()) {
+                onForceUpdate()
+            }
+            return
+        }
+        
         // Собираем все IP адреса устройства
         val allIPs = mutableListOf<Pair<String, Int>>()
         
