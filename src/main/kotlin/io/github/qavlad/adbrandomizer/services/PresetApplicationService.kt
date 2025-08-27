@@ -358,10 +358,54 @@ object PresetApplicationService {
                 
                 // Дополнительная задержка после установки размера
                 Thread.sleep(500)
+                
+                // Проверяем реальное разрешение после установки
+                val actualSizeResult = AdbService.getCurrentSize(device)
+                val actualSize = actualSizeResult.getOrNull()
+                
+                if (actualSize != null && (actualSize.first != finalWidth || actualSize.second != finalHeight)) {
+                    val requestedRes = "${finalWidth}x${finalHeight}"
+                    val actualRes = "${actualSize.first}x${actualSize.second}"
+                    
+                    SwingUtilities.invokeLater {
+                        NotificationUtils.showWarning(
+                            project,
+                            "<html>Device <b>${device.name}</b> limited the resolution due to hardware constraints.<br>" +
+                            "Requested: <b>$requestedRes</b><br>" +
+                            "Applied: <b>$actualRes</b></html>"
+                        )
+                    }
+                    
+                    PluginLogger.info(LogCategory.PRESET_SERVICE, 
+                        "Resolution limited by device %s: requested %s, got %s", 
+                        device.name, requestedRes, actualRes
+                    )
+                }
             }
             
             if (presetData.dpi != null) {
                 AdbService.setDpi(device, presetData.dpi)
+                
+                // Проверяем реальное DPI после установки
+                Thread.sleep(300)
+                val actualDpiResult = AdbService.getCurrentDpi(device)
+                val actualDpi = actualDpiResult.getOrNull()
+                
+                if (actualDpi != null && actualDpi != presetData.dpi) {
+                    SwingUtilities.invokeLater {
+                        NotificationUtils.showWarning(
+                            project,
+                            "<html>Device <b>${device.name}</b> limited the DPI due to hardware constraints.<br>" +
+                            "Requested: <b>${presetData.dpi}</b><br>" +
+                            "Applied: <b>$actualDpi</b></html>"
+                        )
+                    }
+                    
+                    PluginLogger.info(LogCategory.PRESET_SERVICE, 
+                        "DPI limited by device %s: requested %d, got %d", 
+                        device.name, presetData.dpi, actualDpi
+                    )
+                }
             }
         }
         
