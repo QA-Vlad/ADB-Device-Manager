@@ -960,6 +960,14 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                     val success = connectResult.getOrNull() ?: run {
                         connectResult.onError { exception, _ ->
                             PluginLogger.wifiConnectionFailed(ipAddress, port, exception)
+                            
+                            // Check if the error was due to different Wi-Fi networks
+                            // If so, don't show additional error in handleConnectionResult
+                            if (exception is io.github.qavlad.adbrandomizer.exceptions.DifferentWifiNetworksException ||
+                                exception is io.github.qavlad.adbrandomizer.exceptions.ManualWifiSwitchRequiredException) {
+                                // These exceptions already show their own warning, just return
+                                return
+                            }
                         }
                         false
                     }
