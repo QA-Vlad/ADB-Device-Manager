@@ -88,6 +88,12 @@ open class ModernSettingsPanel : JBPanel<ModernSettingsPanel>() {
     private val hitboxesSwitch = createModernSwitch("Show UI hitbox overlays").apply {
         toolTipText = "Display visual boundaries of UI elements for debugging"
     }
+    private val simulateAdbNotFoundSwitch = createModernSwitch("Simulate ADB not found").apply {
+        toolTipText = "Make plugin behave as if ADB is not installed (for testing)"
+    }
+    private val simulateScrcpyNotFoundSwitch = createModernSwitch("Simulate Scrcpy not found").apply {
+        toolTipText = "Make plugin behave as if Scrcpy is not installed (for testing)"
+    }
     private val openLogsButton = createModernButton("Open Logs", AllIcons.Actions.Show).apply {
         toolTipText = "Open the plugin's log directory"
     }
@@ -394,6 +400,18 @@ open class ModernSettingsPanel : JBPanel<ModernSettingsPanel>() {
                         showError("Failed to open logs: ${e.message}")
                     }
                 }
+            }
+            
+            addCard("Testing Options", "Simulate errors for testing") {
+                addSwitch(simulateAdbNotFoundSwitch,
+                    "Simulate ADB not found (for testing ADB configuration dialog)")
+                
+                addSwitch(simulateScrcpyNotFoundSwitch, 
+                    "Simulate Scrcpy not found (for testing Scrcpy compatibility dialog)")
+                
+                addSpace(8)
+                
+                addInfoBox("⚠️ These options make the plugin behave as if ADB/Scrcpy are not installed")
             }
             
             addCard("Danger Zone", "Actions that cannot be undone") {
@@ -1251,6 +1269,8 @@ open class ModernSettingsPanel : JBPanel<ModernSettingsPanel>() {
         
         modified = modified || debugModeSwitch.isSelected != settings.debugMode
         modified = modified || hitboxesSwitch.isSelected != settings.debugHitboxes
+        modified = modified || simulateAdbNotFoundSwitch.isSelected != settings.debugSimulateAdbNotFound
+        modified = modified || simulateScrcpyNotFoundSwitch.isSelected != settings.debugSimulateScrcpyNotFound
         modified = modified || scrcpyPathField.text != settings.scrcpyPath
         modified = modified || scrcpyFlagsField.text != settings.scrcpyCustomFlags
         modified = modified || adbPathField.text != settings.adbPath
@@ -1291,6 +1311,8 @@ open class ModernSettingsPanel : JBPanel<ModernSettingsPanel>() {
         val debugModeChanged = settings.debugMode != debugModeSwitch.isSelected
         settings.debugMode = debugModeSwitch.isSelected
         settings.debugHitboxes = hitboxesSwitch.isSelected
+        settings.debugSimulateAdbNotFound = simulateAdbNotFoundSwitch.isSelected
+        settings.debugSimulateScrcpyNotFound = simulateScrcpyNotFoundSwitch.isSelected
         
         if (debugModeChanged) {
             FileLogger.reinitialize()
@@ -1315,6 +1337,8 @@ open class ModernSettingsPanel : JBPanel<ModernSettingsPanel>() {
         
         debugModeSwitch.isSelected = settings.debugMode
         hitboxesSwitch.isSelected = settings.debugHitboxes
+        simulateAdbNotFoundSwitch.isSelected = settings.debugSimulateAdbNotFound
+        simulateScrcpyNotFoundSwitch.isSelected = settings.debugSimulateScrcpyNotFound
         
         if (settings.scrcpyPath.isBlank()) {
             val oldPath = PresetStorageService.getScrcpyPath()
@@ -1348,17 +1372,24 @@ open class ModernSettingsPanel : JBPanel<ModernSettingsPanel>() {
                 val autoPath = AdbPathResolver.findAdbExecutable()
                 if (autoPath != null) {
                     // Используем родительскую директорию найденного ADB
-                    adbPathField.text = File(autoPath).parent ?: autoPath
+                    val newPath = File(autoPath).parent ?: autoPath
+                    adbPathField.text = newPath
+                    // Автоматически обновляем сохранённый путь на найденный
+                    settings.adbPath = newPath
                 } else {
-                    // Оставляем старый путь, чтобы пользователь видел, что было настроено
-                    adbPathField.text = savedPath
+                    // Если ADB не найден, очищаем поле
+                    adbPathField.text = ""
+                    settings.adbPath = ""
                 }
             }
         } else {
             // Путь не был сохранён, пытаемся найти автоматически
             val autoPath = AdbPathResolver.findAdbExecutable()
             if (autoPath != null) {
-                adbPathField.text = File(autoPath).parent ?: autoPath
+                val newPath = File(autoPath).parent ?: autoPath
+                adbPathField.text = newPath
+                // Сохраняем автоматически найденный путь
+                settings.adbPath = newPath
             } else {
                 adbPathField.text = ""
             }

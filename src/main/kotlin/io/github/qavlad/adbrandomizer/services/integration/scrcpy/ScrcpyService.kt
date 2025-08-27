@@ -59,6 +59,11 @@ object ScrcpyService {
     private val launchLock = Object()
 
     fun findScrcpyExecutable(): String? {
+        // Проверяем настройку симуляции для тестирования
+        if (PluginSettings.instance.debugSimulateScrcpyNotFound) {
+            return null
+        }
+        
         // 1. Проверяем путь из настроек плагина (если пользователь явно задал)
         val settingsPath = PluginSettings.instance.scrcpyPath
         if (settingsPath.isNotBlank()) {

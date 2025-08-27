@@ -13,6 +13,11 @@ object AdbPathResolver {
      * @return String? - путь к ADB или null, если не найден
      */
     fun findAdbExecutable(): String? {
+        // Проверяем настройку симуляции для тестирования
+        if (PluginSettings.instance.debugSimulateAdbNotFound) {
+            return null
+        }
+        
         // Сначала проверяем пользовательский путь из настроек
         val customPath = PluginSettings.instance.adbPath
         

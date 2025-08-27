@@ -31,6 +31,10 @@ class PluginSettings : PersistentStateComponent<PluginSettings> {
     // Настройка для включения визуальной отладки хитбоксов
     var debugHitboxes: Boolean = false
     
+    // Настройки для эмуляции отсутствия ADB/Scrcpy (для тестирования)
+    var debugSimulateAdbNotFound: Boolean = false
+    var debugSimulateScrcpyNotFound: Boolean = false
+    
     // Пользовательские флаги для scrcpy
     var scrcpyCustomFlags: String = "--show-touches --stay-awake --always-on-top"
     
