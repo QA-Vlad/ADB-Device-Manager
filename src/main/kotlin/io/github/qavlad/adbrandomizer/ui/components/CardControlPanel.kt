@@ -493,12 +493,22 @@ class CardControlPanel(
                 // Добавляем tooltip с информацией о пресете
                 val size = lastUsedPreset!!.size
                 val dpi = lastUsedPreset!!.dpi
-                val tooltipText = when {
+                
+                // Формируем вторую строку с Resolution и DPI
+                val presetDetails = when {
                     size.isNotBlank() && dpi.isNotBlank() -> "Resolution: $size | DPI: $dpi"
                     size.isNotBlank() -> "Resolution: $size"
                     dpi.isNotBlank() -> "DPI: $dpi"
                     else -> null
                 }
+                
+                // Формируем полный tooltip с именем пресета на первой строке
+                val tooltipText = if (presetDetails != null) {
+                    "<html>$presetName<br>$presetDetails</html>"
+                } else {
+                    presetName
+                }
+                
                 activePresetPanel.toolTipText = tooltipText
                 
                 // Логирование активного пресета
