@@ -634,7 +634,8 @@ class DeviceListPanel(
                             } else {
                                 // Обычное состояние - делаем кнопку видимой
                                 background = JBColor(Color(90, 140, 60), Color(70, 120, 50))
-                                foreground = JBColor.WHITE
+                                @Suppress("UseJBColor")
+                                foreground = Color.WHITE  // Намеренно используем Color.WHITE для гарантированной видимости текста
                                 isContentAreaFilled = true
                                 isBorderPainted = true
                                 isOpaque = true
