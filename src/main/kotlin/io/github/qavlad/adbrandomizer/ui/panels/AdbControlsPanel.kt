@@ -908,14 +908,65 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                     if (success) {
                         NotificationUtils.showSuccess(project, "ADB server killed successfully")
                         // Форсируем обновление списка устройств через увеличенную задержку
-                        Timer(2000) { // Увеличиваем задержку до 2 секунд
-                            // Снимаем блокировку и обновляем устройства
-                            devicePollingService.setAdbRestarting(false)
-                            devicePollingService.forceCombinedUpdate()
-                        }.apply {
-                            isRepeats = false
-                            start()
-                        }
+                        // Проверяем состояние ADB асинхронно, но не блокируем слишком долго
+                        Thread {
+                            PluginLogger.info("ADB restart recovery thread started")
+                            
+                            // Ждём базовое время для восстановления ADB (3 секунды)
+                            Thread.sleep(3000)
+                            PluginLogger.info("Initial 3-second wait completed, checking ADB availability")
+                            
+                            var adbReady = false
+                            var attempts = 0
+                            val maxAttempts = 7 // Максимум 7 попыток (ещё 7 секунд после начальной задержки)
+                            
+                            while (!adbReady && attempts < maxAttempts) {
+                                try {
+                                    PluginLogger.info("Checking ADB availability, attempt %d/%d", attempts + 1, maxAttempts)
+                                    // Пытаемся получить список устройств - это покажет что ADB работает
+                                    val devicesResult = AdbService.getConnectedDevices()
+                                    if (devicesResult.isSuccess()) {
+                                        adbReady = true
+                                        PluginLogger.info("ADB server is ready after %d attempts, found %d devices", 
+                                            attempts + 1, devicesResult.getOrNull()?.size ?: 0)
+                                    } else {
+                                        PluginLogger.warn("ADB not ready yet, result: %s", devicesResult)
+                                        Thread.sleep(1000) // Ждём секунду перед следующей попыткой
+                                        attempts++
+                                    }
+                                } catch (e: Exception) {
+                                    PluginLogger.warn("Error checking ADB availability: %s", e.message)
+                                    Thread.sleep(1000)
+                                    attempts++
+                                }
+                            }
+                            
+                            ApplicationManager.getApplication().invokeLater {
+                                PluginLogger.info("Clearing ADB restarting flag, ADB ready: %s", adbReady)
+                                // Всегда снимаем блокировку и пытаемся обновить устройства
+                                // Это важно для переподключения Wi-Fi устройств
+                                devicePollingService.setAdbRestarting(false)
+                                
+                                // Небольшая задержка для синхронизации флага
+                                Timer(200) {
+                                    PluginLogger.info("Starting device list update after ADB restart")
+                                    // Всегда пытаемся обновить список устройств
+                                    devicePollingService.forceCombinedUpdate()
+                                    
+                                    if (!adbReady) {
+                                        // Если ADB не готов, показываем предупреждение
+                                        PluginLogger.warn("ADB server not fully ready after %d attempts", maxAttempts)
+                                        NotificationUtils.showWarning(project, 
+                                            "ADB server may not be fully restored. Device list will update automatically when ready.")
+                                    } else {
+                                        PluginLogger.info("Device list update initiated successfully")
+                                    }
+                                }.apply {
+                                    isRepeats = false
+                                    start()
+                                }
+                            }
+                        }.start()
                     } else {
                         // В случае ошибки тоже снимаем блокировку
                         devicePollingService.setAdbRestarting(false)
@@ -1419,6 +1470,17 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
     // ==================== SCREEN MIRRORING ====================
 
     private fun startScreenMirroring(deviceInfo: DeviceInfo) {
+        // Проверяем, не идёт ли сейчас рестарт ADB
+        if (AdbStateManager.isAdbRestarting()) {
+            NotificationUtils.showWarning(project, 
+                "ADB server is restarting. Please wait for it to complete before launching screen mirroring.")
+            
+            // Добавляем запрос в очередь для выполнения после рестарта
+            AdbStateManager.addPendingScrcpyRequest(deviceInfo.logicalSerialNumber)
+            
+            return
+        }
+        
         object : Task.Backgroundable(project, "Starting screen mirroring") {
             private var scrcpyPath: String? = null
 

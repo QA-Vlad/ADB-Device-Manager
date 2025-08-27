@@ -33,12 +33,11 @@ class DevicePollingService(private val project: Project) {
             "Loaded %d saved device selections", savedSelections.size)
     }
     
-    // Флаг блокировки обновлений во время рестарта ADB сервера
-    @Volatile
-    private var isAdbRestarting = false
-    
     // Хранилище устройств с активным scrcpy по Wi-Fi
     private val devicesWithActiveWifiScrcpy = mutableSetOf<String>()
+    
+    // Хранилище Wi-Fi устройств, которые были подключены до рестарта ADB
+    private val wifiDevicesBeforeRestart = mutableSetOf<String>()
 
     fun stopDevicePolling() {
         pollingJob?.cancel()
@@ -49,11 +48,40 @@ class DevicePollingService(private val project: Project) {
      * Устанавливает флаг блокировки обновлений на время рестарта ADB
      */
     fun setAdbRestarting(restarting: Boolean) {
-        isAdbRestarting = restarting
         if (restarting) {
-            PluginLogger.info("DevicePollingService: ADB restart started, blocking updates")
+            // Перед рестартом сохраняем список текущих Wi-Fi подключений
+            saveCurrentWifiDevices()
+            PluginLogger.info("DevicePollingService: ADB restart started, saved %d Wi-Fi devices", 
+                wifiDevicesBeforeRestart.size)
         } else {
-            PluginLogger.info("DevicePollingService: ADB restart completed, resuming updates")
+            PluginLogger.info("DevicePollingService: ADB restart completed, will reconnect %d Wi-Fi devices", 
+                wifiDevicesBeforeRestart.size)
+        }
+        
+        // Используем только глобальный менеджер состояния
+        AdbStateManager.setAdbRestarting(restarting)
+    }
+    
+    /**
+     * Сохраняет список текущих Wi-Fi устройств перед рестартом ADB
+     */
+    private fun saveCurrentWifiDevices() {
+        wifiDevicesBeforeRestart.clear()
+        
+        // Получаем текущий список устройств синхронно
+        try {
+            val devicesResult = AdbService.getConnectedDevices()
+            val devices = devicesResult.getOrNull() ?: emptyList()
+            
+            // Сохраняем только Wi-Fi подключения
+            devices.forEach { device ->
+                if (DeviceConnectionUtils.isWifiConnection(device.serialNumber)) {
+                    wifiDevicesBeforeRestart.add(device.serialNumber)
+                    PluginLogger.info("Saved Wi-Fi device before restart: %s", device.serialNumber)
+                }
+            }
+        } catch (e: Exception) {
+            PluginLogger.warn("Failed to save Wi-Fi devices before restart: %s", e.message)
         }
     }
     
@@ -73,7 +101,7 @@ class DevicePollingService(private val project: Project) {
                     PluginLogger.warn(LogCategory.DEVICE_POLLING, "Starting initial device scan")
                     // Запускаем в отдельной корутине чтобы не блокировать основной flow
                     for (attempt in 1..5) {
-                        if (!isAdbRestarting) {
+                        if (!AdbStateManager.isAdbRestarting()) {
                             try {
                                 PluginLogger.warn(LogCategory.DEVICE_POLLING, "Initial scan attempt %d - getting devices", attempt)
                                 val firstDevicesRaw = AdbServiceAsync.getConnectedDevicesAsync(project).getOrNull()
@@ -106,7 +134,7 @@ class DevicePollingService(private val project: Project) {
                 PluginLogger.warn(LogCategory.DEVICE_POLLING, "Starting periodic device flow")
                 AdbServiceAsync.deviceFlow(project, PluginConfig.UI.DEVICE_POLLING_INTERVAL_MS.toLong())
                     .collect { deviceInfos ->
-                        if (!isAdbRestarting) {
+                        if (!AdbStateManager.isAdbRestarting()) {
                             PluginLogger.debug(LogCategory.DEVICE_POLLING, "Periodic flow received %d devices", deviceInfos.size)
                             val combined = combineDevices(deviceInfos)
                             SwingUtilities.invokeLater { 
@@ -129,23 +157,100 @@ class DevicePollingService(private val project: Project) {
      * Форсирует немедленное обновление списка объединённых устройств
      */
     fun forceCombinedUpdate() {
-        // Не обновляем во время рестарта ADB
-        if (isAdbRestarting) {
-            PluginLogger.info("DevicePollingService: Skipping force update - ADB is restarting")
-            return
+        // Если ADB рестартится, логируем, но всё равно пытаемся обновить
+        // Это важно для переподключения Wi-Fi устройств после рестарта
+        if (AdbStateManager.isAdbRestarting()) {
+            PluginLogger.info("DevicePollingService: Force update during ADB restart - attempting Wi-Fi reconnection")
         }
         
         lastCombinedUpdateCallback?.let { callback ->
             pollingScope.launch {
                 try {
+                    PluginLogger.info("DevicePollingService: Starting forced combined update")
+                    
+                    // Если ADB только что перезапустился, пробуем переподключить Wi-Fi устройства из истории
+                    if (!AdbStateManager.isAdbRestarting()) {
+                        reconnectWifiDevicesFromHistory()
+                    }
+                    
                     val devicesRaw = AdbServiceAsync.getConnectedDevicesAsync(project).getOrNull() ?: emptyList()
+                    PluginLogger.info("DevicePollingService: Found %d raw devices", devicesRaw.size)
                     val devices = devicesRaw.map { DeviceInfo(it, null) }
                     val combined = combineDevices(devices)
+                    PluginLogger.info("DevicePollingService: Combined into %d devices", combined.size)
                     SwingUtilities.invokeLater { callback(combined) }
                 } catch (e: Exception) {
                     PluginLogger.error("Error in force combined update", e)
                 }
             }
+        }
+    }
+    
+    /**
+     * Переподключает Wi-Fi устройства после рестарта ADB
+     */
+    private suspend fun reconnectWifiDevicesFromHistory() {
+        try {
+            // Если нет сохраненных Wi-Fi устройств, ничего не делаем
+            if (wifiDevicesBeforeRestart.isEmpty()) {
+                PluginLogger.info("No Wi-Fi devices were connected before restart, skipping reconnection")
+                return
+            }
+            
+            PluginLogger.info("Starting reconnection of %d Wi-Fi devices that were connected before restart", 
+                wifiDevicesBeforeRestart.size)
+            
+            // Получаем историю Wi-Fi устройств для получения IP адресов
+            val wifiHistory = WifiDeviceHistoryService.getHistory()
+            
+            // Получаем список текущих подключенных устройств
+            val currentDevicesRaw = AdbServiceAsync.getConnectedDevicesAsync(project).getOrNull() ?: emptyList()
+            val currentDeviceSerials = currentDevicesRaw.map { it.serialNumber }.toSet()
+            
+            // Переподключаем только те устройства, которые:
+            // 1. Были подключены по Wi-Fi до рестарта
+            // 2. Сейчас не подключены
+            // 3. Есть в истории (чтобы знать IP адрес)
+            for (deviceSerial in wifiDevicesBeforeRestart) {
+                if (currentDeviceSerials.contains(deviceSerial)) {
+                    PluginLogger.info("Wi-Fi device %s is already connected, skipping", deviceSerial)
+                    continue
+                }
+                
+                // Ищем устройство в истории для получения IP адреса
+                val historyEntry = wifiHistory.find { it.logicalSerialNumber == deviceSerial }
+                if (historyEntry == null) {
+                    PluginLogger.warn("Wi-Fi device %s not found in history, cannot reconnect", deviceSerial)
+                    continue
+                }
+                
+                try {
+                    PluginLogger.info("Attempting to reconnect Wi-Fi device: %s (%s)", 
+                        historyEntry.displayName, historyEntry.ipAddress)
+                    
+                    // Вызываем метод подключения по Wi-Fi
+                    val connectResult = AdbService.connectWifi(project, historyEntry.ipAddress, historyEntry.port)
+                    
+                    if (connectResult.isSuccess() && connectResult.getOrNull() == true) {
+                        PluginLogger.info("Successfully reconnected Wi-Fi device: %s", historyEntry.displayName)
+                    } else {
+                        PluginLogger.warn("Failed to reconnect Wi-Fi device: %s", historyEntry.displayName)
+                    }
+                    
+                    // Небольшая задержка между попытками подключения
+                    delay(200)
+                } catch (e: Exception) {
+                    PluginLogger.warn("Error reconnecting Wi-Fi device %s: %s", deviceSerial, e.message)
+                }
+            }
+            
+            // Очищаем список после попытки переподключения
+            wifiDevicesBeforeRestart.clear()
+            PluginLogger.info("Wi-Fi devices reconnection completed")
+            
+        } catch (e: Exception) {
+            PluginLogger.error("Error during Wi-Fi devices reconnection", e)
+            wifiDevicesBeforeRestart.clear()
         }
     }
     
@@ -168,6 +273,15 @@ class DevicePollingService(private val project: Project) {
      */
     private suspend fun combineDevices(devices: List<DeviceInfo>): List<CombinedDeviceInfo> {
         val startTime = System.currentTimeMillis()
+        PluginLogger.info("combineDevices: Starting with %d devices", devices.size)
+        
+        // Логируем все переданные устройства
+        devices.forEach { device ->
+            PluginLogger.info("combineDevices: Device serial=%s, display=%s, isWifi=%s", 
+                device.logicalSerialNumber, 
+                device.displayName,
+                DeviceConnectionUtils.isWifiConnection(device.logicalSerialNumber))
+        }
         
         // Проверяем активные scrcpy процессы и поддерживаем TCP/IP
         maintainTcpIpForActiveScrcpy(devices)
@@ -441,6 +555,15 @@ class DevicePollingService(private val project: Project) {
             } catch (e: Exception) {
                 PluginLogger.debug("Error enabling TCP/IP for USB devices: ${e.message}")
             }
+        }
+        
+        PluginLogger.info("combineDevices: Completed. Result contains %d combined devices:", combinedList.size)
+        combinedList.forEach { combined ->
+            PluginLogger.info("  - %s: hasUSB=%s, hasWifi=%s, IP=%s", 
+                combined.displayName, 
+                combined.usbDevice != null, 
+                combined.wifiDevice != null,
+                combined.ipAddress)
         }
         
         return combinedList

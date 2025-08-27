@@ -14,6 +14,11 @@ object AdbServerService {
      */
     fun killAdbServer(): Boolean {
         return try {
+            // Уведомляем о начале рестарта ADB (если ещё не установлено)
+            if (!AdbStateManager.isAdbRestarting()) {
+                AdbStateManager.setAdbRestarting(true)
+            }
+            
             // Сначала отключаем все устройства
             disconnectAll()
             
@@ -28,17 +33,22 @@ object AdbServerService {
             val success = exitCode == 0
             if (success) {
                 PluginLogger.info("ADB server killed successfully")
+                // Не снимаем флаг здесь - его снимет вызывающий код после полного рестарта
             } else {
                 PluginLogger.error("Failed to kill ADB server, exit code: $exitCode")
+                // При ошибке снимаем флаг
+                AdbStateManager.setAdbRestarting(false)
             }
             
             success
         } catch (e: IOException) {
             PluginLogger.error("Error killing ADB server", e)
+            AdbStateManager.setAdbRestarting(false)
             false
         } catch (e: InterruptedException) {
             PluginLogger.error("ADB kill-server command was interrupted", e)
             Thread.currentThread().interrupt()
+            AdbStateManager.setAdbRestarting(false)
             false
         }
     }

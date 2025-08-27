@@ -10,6 +10,7 @@ import com.intellij.util.ui.JBFont
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.UIUtil
 import io.github.qavlad.adbrandomizer.services.AdbService
+import io.github.qavlad.adbrandomizer.services.AdbStateManager
 import io.github.qavlad.adbrandomizer.services.DeviceInfo
 import io.github.qavlad.adbrandomizer.services.DeviceOrderService
 import io.github.qavlad.adbrandomizer.services.WifiDeviceHistoryService
@@ -152,6 +153,23 @@ class DeviceListPanel(
         setupDragAndDrop()
         // Включаем подсказки для JList
         ToolTipManager.sharedInstance().registerComponent(deviceList)
+        
+        // Подписываемся на изменения состояния ADB для обновления UI
+        AdbStateManager.addStateListener(object : AdbStateManager.AdbStateListener {
+            override fun onAdbRestartStarted() {
+                // Обновляем UI когда начинается рестарт
+                SwingUtilities.invokeLater {
+                    deviceList.repaint()
+                }
+            }
+            
+            override fun onAdbRestartCompleted() {
+                // Обновляем UI когда рестарт завершён
+                SwingUtilities.invokeLater {
+                    deviceList.repaint()
+                }
+            }
+        })
     }
 
     private fun setupUI() {

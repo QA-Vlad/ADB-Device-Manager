@@ -9,6 +9,7 @@ import com.intellij.openapi.project.ProjectManager
 import io.github.qavlad.adbrandomizer.config.PluginConfig
 import io.github.qavlad.adbrandomizer.core.Result
 import io.github.qavlad.adbrandomizer.services.AdbService
+import io.github.qavlad.adbrandomizer.services.AdbStateManager
 import io.github.qavlad.adbrandomizer.services.PresetStorageService
 import io.github.qavlad.adbrandomizer.services.WifiDeviceHistoryService
 import io.github.qavlad.adbrandomizer.services.integration.scrcpy.ui.ScrcpyCompatibilityDialog
@@ -661,6 +662,22 @@ object ScrcpyService {
      */
     private fun ensureAdbStable() {
         try {
+            // Если идёт рестарт ADB, ждём его завершения
+            if (AdbStateManager.isAdbRestarting()) {
+                PluginLogger.warn(LogCategory.SCRCPY, "ADB is restarting, waiting for completion...")
+                var waitTime = 0
+                while (AdbStateManager.isAdbRestarting() && waitTime < 10000) {
+                    Thread.sleep(500)
+                    waitTime += 500
+                }
+                if (waitTime >= 10000) {
+                    PluginLogger.warn(LogCategory.SCRCPY, "ADB restart timeout after 10 seconds")
+                    return
+                }
+                // Даём дополнительное время после завершения рестарта
+                Thread.sleep(1000)
+            }
+            
             // Проверяем состояние ADB через наш сервис
             val devicesResult = AdbService.getConnectedDevices()
             if (devicesResult is Result.Error) {
@@ -711,6 +728,23 @@ object ScrcpyService {
         
         // Сохраняем project для возможного перезапуска
         lastProject = project
+        
+        // Проверяем, не идёт ли рестарт ADB
+        if (AdbStateManager.isAdbRestarting()) {
+            println("ADB_Randomizer: ADB is restarting, cannot launch scrcpy for device $serialNumber")
+            PluginLogger.warn(LogCategory.SCRCPY, "ADB is restarting, cannot launch scrcpy for device %s", serialNumber)
+            
+            // Добавляем запрос в очередь для выполнения после рестарта
+            AdbStateManager.addPendingScrcpyRequest(serialNumber)
+            
+            ApplicationManager.getApplication().invokeLater {
+                NotificationUtils.showWarning(
+                    project,
+                    "ADB server is restarting. Scrcpy will be launched after the restart completes."
+                )
+            }
+            return false
+        }
         
         // Проверяем базовые условия сразу
         if (wasIntentionallyStopped(serialNumber)) {

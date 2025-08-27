@@ -3,6 +3,7 @@ package io.github.qavlad.adbrandomizer.ui.renderers
 import com.android.ddmlib.IDevice
 import com.intellij.openapi.util.IconLoader
 import com.intellij.ui.JBColor
+import io.github.qavlad.adbrandomizer.services.AdbStateManager
 import io.github.qavlad.adbrandomizer.services.DeviceInfo
 import io.github.qavlad.adbrandomizer.ui.components.HoverState
 import io.github.qavlad.adbrandomizer.utils.DeviceConnectionUtils
@@ -59,15 +60,28 @@ class DeviceButtonPanelRenderer {
     ): JButton {
         return JButton(scrcpyIcon).apply {
             preferredSize = Dimension(35, 25)
-            toolTipText = "Mirror screen with scrcpy"
             isBorderPainted = false
             isFocusPainted = false
 
-            // Применяем hover эффект
-            applyHoverEffect(this, index, HoverState.BUTTON_TYPE_MIRROR, hoverState)
+            // Блокируем кнопку во время рестарта ADB
+            val isAdbRestarting = AdbStateManager.isAdbRestarting()
+            isEnabled = !isAdbRestarting
+            
+            toolTipText = if (isAdbRestarting) {
+                "ADB server is restarting. Please wait..."
+            } else {
+                "Mirror screen with scrcpy"
+            }
+
+            // Применяем hover эффект (только если кнопка активна)
+            if (isEnabled) {
+                applyHoverEffect(this, index, HoverState.BUTTON_TYPE_MIRROR, hoverState)
+            }
 
             addActionListener {
-                onMirrorClick(deviceInfo)
+                if (!AdbStateManager.isAdbRestarting()) {
+                    onMirrorClick(deviceInfo)
+                }
             }
         }
     }
