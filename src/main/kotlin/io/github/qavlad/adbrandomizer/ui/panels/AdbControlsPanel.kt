@@ -18,6 +18,8 @@ import io.github.qavlad.adbrandomizer.utils.PluginLogger
 import io.github.qavlad.adbrandomizer.utils.logging.LogCategory
 import io.github.qavlad.adbrandomizer.settings.PluginSettings
 import com.intellij.openapi.options.ShowSettingsUtil
+import com.intellij.ui.JBColor
+import com.intellij.util.ui.JBUI
 import java.awt.*
 import java.util.Locale
 import javax.swing.*
@@ -925,28 +927,137 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
     }
 
     private fun promptForManualConnection() {
-        val input = Messages.showInputDialog(
-            project,
-            "Enter device IP address and port (example: 192.168.1.100:5555):",
-            "Connect Device via Wi-Fi",
-            Messages.getQuestionIcon(),
-            "192.168.1.100:5555",
-            null
-        ) ?: return
-
-        val connectionData = ValidationUtils.parseConnectionString(input)
-        if (connectionData == null) {
-            Messages.showErrorDialog(project, "Please enter in format: IP:PORT", "Invalid Format")
-            return
+        val settings = PluginSettings.instance
+        val defaultPort = settings.adbPort.toString()
+        
+        val dialog = object : com.intellij.openapi.ui.DialogWrapper(project) {
+            private val ipField = JTextField(20)
+            private val portField = JTextField(6).apply {
+                text = defaultPort
+            }
+            
+            init {
+                title = "Connect Device via Wi-Fi"
+                init()
+                
+                // Add document listener to auto-parse IP:PORT format in IP field
+                ipField.document.addDocumentListener(object : javax.swing.event.DocumentListener {
+                    override fun insertUpdate(e: javax.swing.event.DocumentEvent) = checkForIpPortFormat()
+                    override fun removeUpdate(e: javax.swing.event.DocumentEvent) = checkForIpPortFormat()
+                    override fun changedUpdate(e: javax.swing.event.DocumentEvent) = checkForIpPortFormat()
+                    
+                    private fun checkForIpPortFormat() {
+                        val text = ipField.text
+                        if (text.contains(":")) {
+                            val parts = text.split(":")
+                            if (parts.size == 2 && ValidationUtils.isValidIpAddress(parts[0].trim())) {
+                                SwingUtilities.invokeLater {
+                                    ipField.text = parts[0].trim()
+                                    portField.text = parts[1].trim()
+                                }
+                            }
+                        }
+                    }
+                })
+                
+                // Add document listener to auto-parse IP:PORT format in port field
+                portField.document.addDocumentListener(object : javax.swing.event.DocumentListener {
+                    override fun insertUpdate(e: javax.swing.event.DocumentEvent) = checkForIpPortFormat()
+                    override fun removeUpdate(e: javax.swing.event.DocumentEvent) = checkForIpPortFormat()
+                    override fun changedUpdate(e: javax.swing.event.DocumentEvent) = checkForIpPortFormat()
+                    
+                    private fun checkForIpPortFormat() {
+                        val text = portField.text
+                        if (text.contains(":")) {
+                            val parts = text.split(":")
+                            if (parts.size == 2 && ValidationUtils.isValidIpAddress(parts[0].trim())) {
+                                SwingUtilities.invokeLater {
+                                    ipField.text = parts[0].trim()
+                                    portField.text = parts[1].trim()
+                                }
+                            }
+                        }
+                    }
+                })
+            }
+            
+            override fun createCenterPanel(): JComponent {
+                val panel = JPanel(GridBagLayout())
+                val gbc = GridBagConstraints()
+                
+                // IP Address label and field
+                gbc.gridx = 0
+                gbc.gridy = 0
+                gbc.anchor = GridBagConstraints.WEST
+                gbc.insets = JBUI.insets(5)
+                panel.add(JLabel("IP Address:"), gbc)
+                
+                gbc.gridx = 1
+                gbc.fill = GridBagConstraints.HORIZONTAL
+                gbc.weightx = 1.0
+                panel.add(ipField, gbc)
+                
+                // Port label and field
+                gbc.gridx = 0
+                gbc.gridy = 1
+                gbc.fill = GridBagConstraints.NONE
+                gbc.weightx = 0.0
+                panel.add(JLabel("Port:"), gbc)
+                
+                gbc.gridx = 1
+                gbc.fill = GridBagConstraints.HORIZONTAL
+                gbc.weightx = 1.0
+                panel.add(portField, gbc)
+                
+                // Info label
+                gbc.gridx = 0
+                gbc.gridy = 2
+                gbc.gridwidth = 2
+                gbc.insets = JBUI.insetsTop(10)
+                val infoLabel = JLabel("<html><i>Tip: You can paste IP:PORT format (e.g., 192.168.1.100:5555) in either field and it will auto-split</i></html>")
+                infoLabel.foreground = JBColor.GRAY
+                panel.add(infoLabel, gbc)
+                
+                return panel
+            }
+            
+            override fun getPreferredFocusedComponent(): JComponent = ipField
+            
+            override fun doOKAction() {
+                val ip = ipField.text.trim()
+                val portText = portField.text.trim()
+                
+                if (ip.isEmpty()) {
+                    Messages.showErrorDialog(this.contentPanel, "Please enter IP address", "Invalid Input")
+                    return
+                }
+                
+                if (!ValidationUtils.isValidIpAddress(ip)) {
+                    Messages.showErrorDialog(this.contentPanel, "Please enter a valid IP address", "Invalid IP")
+                    return
+                }
+                
+                val port = portText.toIntOrNull()
+                if (port == null) {
+                    Messages.showErrorDialog(this.contentPanel, "Please enter a valid port number", "Invalid Port")
+                    return
+                }
+                
+                if (!ValidationUtils.isValidAdbPort(port)) {
+                    Messages.showErrorDialog(this.contentPanel, "Port must be between 1024 and 65535", "Invalid Port")
+                    return
+                }
+                
+                super.doOKAction()
+            }
+            
+            fun getIpAddress(): String = ipField.text.trim()
+            fun getPort(): Int = portField.text.trim().toIntOrNull() ?: settings.adbPort
         }
-
-        val (ip, port) = connectionData
-        if (!ValidationUtils.isValidAdbPort(port)) {
-            Messages.showErrorDialog(project, "Port must be between 1024 and 65535", "Invalid Port")
-            return
+        
+        if (dialog.showAndGet()) {
+            executeManualWifiConnection(dialog.getIpAddress(), dialog.getPort())
         }
-
-        executeManualWifiConnection(ip, port)
     }
 
     private fun executeManualWifiConnection(ipAddress: String, port: Int) {
