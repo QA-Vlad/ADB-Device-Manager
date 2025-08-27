@@ -50,6 +50,10 @@ open class ModernSettingsPanel : JBPanel<ModernSettingsPanel>() {
     private val adbPortField = createModernTextField().apply {
         toolTipText = "TCP/IP port for wireless device connections (default: 5555)"
     }
+    private val maxDpiField = createModernTextField().apply {
+        toolTipText = "Maximum DPI value that can be applied to prevent device crashes (default: 640)"
+    }
+    private var dangerousDpiConfirmed = false // Track if user confirmed dangerous DPI value
     
     private val restartScrcpySwitch = createModernSwitch("Auto-restart scrcpy").apply {
         toolTipText = "Automatically restart scrcpy when device resolution changes"
@@ -311,7 +315,14 @@ open class ModernSettingsPanel : JBPanel<ModernSettingsPanel>() {
                 )
                 
                 addSpace(8)
-                addInfoBox("💡 Leave fields empty to use default values (auto-detect ADB, port 5555)")
+                
+                addLabeledField("Maximum DPI Limit",
+                    "Maximum DPI value allowed to prevent device crashes (default: 640)",
+                    maxDpiField
+                )
+                
+                addSpace(8)
+                addInfoBox("💡 Leave fields empty to use default values (auto-detect ADB, port 5555, max DPI 640)")
             }
         }
     }
@@ -1133,6 +1144,51 @@ open class ModernSettingsPanel : JBPanel<ModernSettingsPanel>() {
             }
         })
         
+        // Reset confirmation flag when text changes
+        maxDpiField.document.addDocumentListener(object : DocumentListener {
+            override fun insertUpdate(e: DocumentEvent) {
+                dangerousDpiConfirmed = false
+            }
+            override fun removeUpdate(e: DocumentEvent) {
+                dangerousDpiConfirmed = false
+            }
+            override fun changedUpdate(e: DocumentEvent) {
+                dangerousDpiConfirmed = false
+            }
+        })
+        
+        maxDpiField.addFocusListener(object : FocusAdapter() {
+            override fun focusLost(e: FocusEvent) {
+                SwingUtilities.invokeLater {
+                    val text = maxDpiField.text.trim()
+                    if (text.isBlank()) {
+                        maxDpiField.text = "640"
+                        dangerousDpiConfirmed = false
+                    } else {
+                        val value = text.toIntOrNull()
+                        if (value != null && value > 999 && !dangerousDpiConfirmed) {
+                            val result = com.intellij.openapi.ui.Messages.showYesNoDialog(
+                                maxDpiField,
+                                "Setting maximum DPI limit above 999 can cause devices to crash or reboot.\n\n" +
+                                "Values above 999 are extremely dangerous and may require factory reset to recover.\n" +
+                                "Are you absolutely sure you want to set the limit to $value?",
+                                "Dangerous DPI Limit Warning",
+                                com.intellij.openapi.ui.Messages.getWarningIcon()
+                            )
+                            if (result == com.intellij.openapi.ui.Messages.YES) {
+                                dangerousDpiConfirmed = true
+                            } else {
+                                maxDpiField.text = "640"
+                                dangerousDpiConfirmed = false
+                            }
+                        } else if (value != null && value <= 999) {
+                            dangerousDpiConfirmed = false
+                        }
+                    }
+                }
+            }
+        })
+        
         // Scrcpy path validation
         scrcpyPathField.document.addDocumentListener(object : DocumentListener {
             override fun insertUpdate(e: DocumentEvent) = validateScrcpyPath()
@@ -1278,6 +1334,9 @@ open class ModernSettingsPanel : JBPanel<ModernSettingsPanel>() {
         val currentPort = adbPortField.text.trim().toIntOrNull() ?: 5555
         modified = modified || currentPort != settings.adbPort
         
+        val currentMaxDpi = maxDpiField.text.trim().toIntOrNull() ?: 640
+        modified = modified || currentMaxDpi != settings.maxDpiLimit
+        
         return modified
     }
     
@@ -1307,6 +1366,29 @@ open class ModernSettingsPanel : JBPanel<ModernSettingsPanel>() {
         settings.scrcpyCustomFlags = scrcpyFlagsField.text
         settings.adbPath = adbPathField.text
         settings.adbPort = adbPortField.text.trim().toIntOrNull() ?: 5555
+        
+        // Check max DPI limit before applying
+        val maxDpiValue = maxDpiField.text.trim().toIntOrNull() ?: 640
+        if (maxDpiValue > 999 && !dangerousDpiConfirmed) {
+            val result = com.intellij.openapi.ui.Messages.showYesNoDialog(
+                maxDpiField,
+                "Setting maximum DPI limit above 999 can cause devices to crash or reboot.\n\n" +
+                "Values above 999 are extremely dangerous and may require factory reset to recover.\n" +
+                "Are you absolutely sure you want to set the limit to $maxDpiValue?",
+                "Dangerous DPI Limit Warning",
+                com.intellij.openapi.ui.Messages.getWarningIcon()
+            )
+            if (result == com.intellij.openapi.ui.Messages.YES) {
+                dangerousDpiConfirmed = true
+                settings.maxDpiLimit = maxDpiValue
+            } else {
+                maxDpiField.text = "640"
+                settings.maxDpiLimit = 640
+                dangerousDpiConfirmed = false
+            }
+        } else {
+            settings.maxDpiLimit = maxDpiValue
+        }
         
         val debugModeChanged = settings.debugMode != debugModeSwitch.isSelected
         settings.debugMode = debugModeSwitch.isSelected
@@ -1395,6 +1477,8 @@ open class ModernSettingsPanel : JBPanel<ModernSettingsPanel>() {
             }
         }
         adbPortField.text = settings.adbPort.toString()
+        maxDpiField.text = settings.maxDpiLimit.toString()
+        dangerousDpiConfirmed = false // Reset confirmation flag when loading settings
         
         openLogsButton.isEnabled = settings.debugMode
     }

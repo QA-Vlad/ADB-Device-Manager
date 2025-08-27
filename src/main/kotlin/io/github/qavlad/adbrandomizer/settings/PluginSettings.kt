@@ -47,6 +47,9 @@ class PluginSettings : PersistentStateComponent<PluginSettings> {
     // Порт для TCP/IP подключения к устройствам (по умолчанию 5555)
     var adbPort: Int = 5555
     
+    // Максимальное значение DPI для защиты от экстремальных значений
+    var maxDpiLimit: Int = 640
+    
     override fun getState(): PluginSettings = this
     
     override fun loadState(state: PluginSettings) {

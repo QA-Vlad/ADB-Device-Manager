@@ -40,22 +40,23 @@ object PresetApplicationService {
                     return
                 }
                 
-                applyPresetToAllDevices(devices, preset, presetData, indicator, project)
+                val applicationResult = applyPresetToAllDevices(devices, preset, presetData, indicator, project)
                 
                 // Обновляем состояние устройств после применения пресета
-                updateDeviceStatesAfterPresetApplication(devices, presetData)
+                updateDeviceStatesAfterPresetApplication(devices, presetData, applicationResult)
                 
-                // Увеличиваем счетчики использования
+                // Увеличиваем счетчики использования только если значения были действительно применены
                 if (setSize && preset.size.isNotBlank()) {
                     UsageCounterService.incrementSizeCounter(preset.size)
                 }
-                if (setDpi && preset.dpi.isNotBlank()) {
+                if (setDpi && preset.dpi.isNotBlank() && applicationResult.dpiApplied) {
                     UsageCounterService.incrementDpiCounter(preset.dpi)
                 }
                 
                 // Отслеживаем какой пресет был применен (сохраняем полную копию текущего состояния пресета)
-                val appliedSizePreset = if (setSize) preset.copy(id = preset.id) else null
-                val appliedDpiPreset = if (setDpi) preset.copy(id = preset.id) else null
+                // Но только если значения были действительно применены
+                val appliedSizePreset = if (setSize && applicationResult.sizeApplied) preset.copy(id = preset.id) else null
+                val appliedDpiPreset = if (setDpi && applicationResult.dpiApplied) preset.copy(id = preset.id) else null
                 
                 DeviceStateService.setLastAppliedPresets(appliedSizePreset, appliedDpiPreset)
                 
@@ -100,7 +101,22 @@ object PresetApplicationService {
                     }
                     
                         PluginLogger.debug(LogCategory.PRESET_SERVICE, "Showing result with displayNumber: %s", displayNumber)
-                        showPresetApplicationResult(project, preset, displayNumber, presetData.appliedSettings)
+                        
+                        // Показываем уведомление об успехе только если хотя бы что-то было применено
+                        val shouldShowSuccess = (setSize && applicationResult.sizeApplied) || 
+                                              (setDpi && applicationResult.dpiApplied)
+                        
+                        if (shouldShowSuccess) {
+                            // Корректируем список примененных настроек на основе фактического результата
+                            val actuallyAppliedSettings = mutableListOf<String>()
+                            if (setSize && applicationResult.sizeApplied && preset.size.isNotBlank()) {
+                                actuallyAppliedSettings.add("Size: ${preset.size}")
+                            }
+                            if (setDpi && applicationResult.dpiApplied && preset.dpi.isNotBlank()) {
+                                actuallyAppliedSettings.add("DPI: ${preset.dpi}")
+                            }
+                            showPresetApplicationResult(project, preset, displayNumber, actuallyAppliedSettings)
+                        }
                     }
                     // Уведомляем все открытые диалоги настроек об обновлении
                     PresetsDialogUpdateNotifier.notifyUpdate()
@@ -114,6 +130,11 @@ object PresetApplicationService {
         val height: Int?,
         val dpi: Int?,
         val appliedSettings: List<String>
+    )
+    
+    private data class ApplicationResult(
+        val dpiApplied: Boolean,
+        val sizeApplied: Boolean
     )
     
     private fun validateAndParsePresetData(preset: DevicePreset, setSize: Boolean, setDpi: Boolean): PresetData? {
@@ -142,7 +163,7 @@ object PresetApplicationService {
         return PresetData(width, height, dpi, appliedSettings)
     }
     
-    private fun applyPresetToAllDevices(devices: List<IDevice>, preset: DevicePreset, presetData: PresetData, indicator: ProgressIndicator, project: Project) {
+    private fun applyPresetToAllDevices(devices: List<IDevice>, preset: DevicePreset, presetData: PresetData, indicator: ProgressIndicator, project: Project): ApplicationResult {
         PluginLogger.info(LogCategory.PRESET_SERVICE, 
             "===== APPLY PRESET TO ALL DEVICES START =====\nPreset: %s\nDevices count: %d\nDevices: %s\nPresetData: width=%s, height=%s, dpi=%s", 
             preset.label,
@@ -250,6 +271,10 @@ object PresetApplicationService {
             )
         }
         
+        // Отслеживаем, был ли DPI действительно применён
+        var dpiWasActuallyApplied = false
+        var sizeWasActuallyApplied = false
+        
         // Сохраняем состояния автоповорота для всех устройств перед применением пресетов
         val devicesWithAutoRotation = mutableListOf<IDevice>()
         devices.forEach { device ->
@@ -352,6 +377,7 @@ object PresetApplicationService {
                 )
                 
                 AdbService.setSize(device, finalWidth, finalHeight)
+                sizeWasActuallyApplied = true
                 
                 // Помечаем что пресет был применен для этого устройства
                 DeviceStateService.markPresetApplied(device.serialNumber)
@@ -384,27 +410,57 @@ object PresetApplicationService {
             }
             
             if (presetData.dpi != null) {
-                AdbService.setDpi(device, presetData.dpi)
+                // Проверяем, не превышает ли DPI максимальный лимит из настроек
+                val settings = PluginSettings.instance
+                val maxDpiLimit = settings.maxDpiLimit
                 
-                // Проверяем реальное DPI после установки
-                Thread.sleep(300)
-                val actualDpiResult = AdbService.getCurrentDpi(device)
-                val actualDpi = actualDpiResult.getOrNull()
-                
-                if (actualDpi != null && actualDpi != presetData.dpi) {
+                if (presetData.dpi > maxDpiLimit) {
                     SwingUtilities.invokeLater {
-                        NotificationUtils.showWarning(
-                            project,
-                            "<html>Device <b>${device.name}</b> limited the DPI due to hardware constraints.<br>" +
-                            "Requested: <b>${presetData.dpi}</b><br>" +
-                            "Applied: <b>$actualDpi</b></html>"
-                        )
+                        val notification = com.intellij.notification.NotificationGroupManager.getInstance()
+                            .getNotificationGroup("ADB Randomizer Notifications")
+                            .createNotification(
+                                "DPI safety limit",
+                                "<html>DPI value <b>${presetData.dpi}</b> exceeds maximum safe limit (<b>$maxDpiLimit</b>).<br>" +
+                                "DPI was not applied to prevent device issues.</html>",
+                                com.intellij.notification.NotificationType.WARNING
+                            )
+                            .addAction(object : com.intellij.notification.NotificationAction("Change limit in settings") {
+                                override fun actionPerformed(e: com.intellij.openapi.actionSystem.AnActionEvent, notification: com.intellij.notification.Notification) {
+                                    com.intellij.openapi.options.ShowSettingsUtil.getInstance().showSettingsDialog(project, "ADB Screen Randomizer")
+                                    notification.expire()
+                                }
+                            })
+                        notification.notify(project)
                     }
                     
                     PluginLogger.info(LogCategory.PRESET_SERVICE, 
-                        "DPI limited by device %s: requested %d, got %d", 
-                        device.name, presetData.dpi, actualDpi
+                        "DPI blocked for safety: requested %d, limit %d", 
+                        presetData.dpi, maxDpiLimit
                     )
+                } else {
+                    AdbService.setDpi(device, presetData.dpi)
+                    dpiWasActuallyApplied = true
+                    
+                    // Проверяем реальное DPI после установки
+                    Thread.sleep(300)
+                    val actualDpiResult = AdbService.getCurrentDpi(device)
+                    val actualDpi = actualDpiResult.getOrNull()
+                    
+                    if (actualDpi != null && actualDpi != presetData.dpi) {
+                        SwingUtilities.invokeLater {
+                            NotificationUtils.showWarning(
+                                project,
+                                "<html>Device <b>${device.name}</b> limited the DPI due to hardware constraints.<br>" +
+                                "Requested: <b>${presetData.dpi}</b><br>" +
+                                "Applied: <b>$actualDpi</b></html>"
+                            )
+                        }
+                        
+                        PluginLogger.info(LogCategory.PRESET_SERVICE, 
+                            "DPI limited by device %s: requested %d, got %d", 
+                            device.name, presetData.dpi, actualDpi
+                        )
+                    }
                 }
             }
         }
@@ -438,18 +494,30 @@ object PresetApplicationService {
                 }
             }.start()
         }
+        
+        // Возвращаем результат применения
+        return ApplicationResult(
+            dpiApplied = dpiWasActuallyApplied,
+            sizeApplied = sizeWasActuallyApplied
+        )
     }
     
-    private fun updateDeviceStatesAfterPresetApplication(devices: List<IDevice>, presetData: PresetData) {
+    private fun updateDeviceStatesAfterPresetApplication(devices: List<IDevice>, presetData: PresetData, applicationResult: ApplicationResult) {
         devices.forEach { device ->
-            // Если мы применили новые значения, обновляем их в состоянии
-            // Если какое-то значение не применялось (null), оно не изменится
-            DeviceStateService.updateDeviceState(
-                device.serialNumber,
-                presetData.width,
-                presetData.height,
-                presetData.dpi
-            )
+            // Обновляем только те значения, которые были действительно применены
+            val widthToUpdate = if (applicationResult.sizeApplied) presetData.width else null
+            val heightToUpdate = if (applicationResult.sizeApplied) presetData.height else null
+            val dpiToUpdate = if (applicationResult.dpiApplied) presetData.dpi else null
+            
+            // Обновляем состояние только если хотя бы что-то было применено
+            if (widthToUpdate != null || heightToUpdate != null || dpiToUpdate != null) {
+                DeviceStateService.updateDeviceState(
+                    device.serialNumber,
+                    widthToUpdate,
+                    heightToUpdate,
+                    dpiToUpdate
+                )
+            }
         }
     }
     
