@@ -430,6 +430,9 @@ class DevicePollingService(private val project: Project) {
         // Сохраняем IP адреса USB устройств в историю Wi-Fi подключений
         saveUsbDeviceIpsToHistory(combinedList)
         
+        // Сохраняем Wi-Fi устройства в историю (для устройств, которые уже были подключены)
+        saveWifiDevicesToHistory(combinedList)
+        
         // Автоматическое включение TCP/IP для новых USB устройств запускаем асинхронно
         // чтобы не блокировать обновление UI
         pollingScope.launch {
@@ -496,6 +499,68 @@ class DevicePollingService(private val project: Project) {
                     }
                 }
             }.awaitAll()
+        }
+    }
+    
+    /**
+     * Сохраняет Wi-Fi устройства в историю при первом обнаружении
+     */
+    private fun saveWifiDevicesToHistory(devices: List<CombinedDeviceInfo>) {
+        for (device in devices) {
+            // Проверяем только Wi-Fi устройства
+            if (device.wifiDevice != null) {
+                val wifiDevice = device.wifiDevice
+                val ipAddress = if (DeviceConnectionUtils.isWifiConnection(wifiDevice.logicalSerialNumber)) {
+                    wifiDevice.logicalSerialNumber.substringBefore(":")
+                } else {
+                    device.ipAddress
+                } ?: continue
+                
+                val port = if (wifiDevice.logicalSerialNumber.contains(":")) {
+                    wifiDevice.logicalSerialNumber.substringAfter(":").toIntOrNull() ?: 5555
+                } else {
+                    5555
+                }
+                
+                // Создаем запись для истории
+                val historyEntry = WifiDeviceHistoryService.WifiDeviceHistoryEntry(
+                    ipAddress = ipAddress,
+                    port = port,
+                    displayName = device.displayName,
+                    androidVersion = wifiDevice.androidVersion,
+                    apiLevel = wifiDevice.apiLevel,
+                    logicalSerialNumber = wifiDevice.logicalSerialNumber,
+                    realSerialNumber = wifiDevice.displaySerialNumber ?: device.baseSerialNumber,
+                    defaultResolutionWidth = device.defaultResolution?.first,
+                    defaultResolutionHeight = device.defaultResolution?.second,
+                    defaultDpi = device.defaultDpi
+                )
+                
+                // Проверяем, есть ли уже такая запись в истории
+                val currentHistory = WifiDeviceHistoryService.getHistory()
+                val existingEntry = currentHistory.find { 
+                    it.ipAddress == ipAddress || 
+                    it.realSerialNumber == device.baseSerialNumber
+                }
+                
+                if (existingEntry == null) {
+                    // Добавляем новую запись
+                    WifiDeviceHistoryService.addOrUpdateDevice(historyEntry)
+                    PluginLogger.debug("Added Wi-Fi device to history: $ipAddress for ${device.displayName}")
+                } else if (existingEntry.displayName != device.displayName || 
+                          existingEntry.androidVersion != wifiDevice.androidVersion ||
+                          (existingEntry.defaultResolutionWidth == null && device.defaultResolution != null) ||
+                          (existingEntry.defaultDpi == null && device.defaultDpi != null)) {
+                    // Обновляем существующую запись если изменились данные устройства
+                    val updatedEntry = historyEntry.copy(
+                        defaultResolutionWidth = existingEntry.defaultResolutionWidth ?: historyEntry.defaultResolutionWidth,
+                        defaultResolutionHeight = existingEntry.defaultResolutionHeight ?: historyEntry.defaultResolutionHeight,
+                        defaultDpi = existingEntry.defaultDpi ?: historyEntry.defaultDpi
+                    )
+                    WifiDeviceHistoryService.addOrUpdateDevice(updatedEntry)
+                    PluginLogger.debug("Updated Wi-Fi device in history: $ipAddress for ${device.displayName}")
+                }
+            }
         }
     }
     
