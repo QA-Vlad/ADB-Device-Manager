@@ -605,12 +605,12 @@ class DeviceListPanel(
                         }
                         
                         // Основное сообщение
-                        val titleLabel = JLabel("ADB not found").apply {
+                        val adbNotFoundLabel = JLabel("ADB not found").apply {
                             font = UIUtil.getLabelFont().deriveFont(Font.BOLD)
                             foreground = JBColor(Color(140, 60, 0), Color(220, 140, 40))
                             alignmentX = LEFT_ALIGNMENT
                         }
-                        textPanel.add(titleLabel)
+                        textPanel.add(adbNotFoundLabel)
                         
                         // Дополнительная информация
                         val infoLabel = JLabel("Android Debug Bridge is required for device connection").apply {

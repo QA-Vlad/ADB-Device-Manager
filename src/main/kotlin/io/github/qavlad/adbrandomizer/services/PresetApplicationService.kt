@@ -411,7 +411,6 @@ object PresetApplicationService {
             
             if (presetData.dpi != null) {
                 // Проверяем, не превышает ли DPI максимальный лимит из настроек
-                val settings = PluginSettings.instance
                 val maxDpiLimit = settings.maxDpiLimit
                 
                 if (presetData.dpi > maxDpiLimit) {
