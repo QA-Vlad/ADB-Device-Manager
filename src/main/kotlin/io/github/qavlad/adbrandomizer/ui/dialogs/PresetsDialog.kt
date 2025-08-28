@@ -43,7 +43,7 @@ class PresetsDialog(
 
     init {
         PluginLogger.info(LogCategory.UI_EVENTS, "PresetsDialog: Constructor called")
-        title = "ADB Randomizer Presets"
+        title = "Presets Manager"
         setOKButtonText("Save")
         init()
         
