@@ -10,14 +10,14 @@ plugins {
 }
 
 group = "io.github.qavlad"
-version = "0.1.0-SNAPSHOT"
+version = "1.0"
 
 // Загружаем локальные properties если они есть
 val localPropertiesFile = rootProject.file("gradle-local.properties")
 if (localPropertiesFile.exists()) {
     val localProperties = Properties()
     FileInputStream(localPropertiesFile).use { localProperties.load(it) }
-    localProperties.forEach { key, value ->
+    localProperties.forEach { (key, value) ->
         project.ext[key.toString()] = value
     }
 }
