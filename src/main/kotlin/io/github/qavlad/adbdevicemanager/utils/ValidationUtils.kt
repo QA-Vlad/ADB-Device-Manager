@@ -184,6 +184,7 @@ object ValidationUtils {
      * @param connectionString строка вида "192.168.1.100:5555"
      * @return Pair<String, Int>? или null если не удалось распарсить
      */
+    @Suppress("unused") // Может пригодиться для вставки из буфера обмена или импорта настроек
     fun parseConnectionString(connectionString: String): Pair<String, Int>? {
         if (!isValidConnectionString(connectionString)) return null
 
