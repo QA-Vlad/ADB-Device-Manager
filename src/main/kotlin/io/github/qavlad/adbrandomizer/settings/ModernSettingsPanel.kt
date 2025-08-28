@@ -188,6 +188,7 @@ open class ModernSettingsPanel : JBPanel<ModernSettingsPanel>() {
         }
     }
     
+    @Suppress("UseJBColor", "UseGrayConstants")
     private fun createNavigationButton(category: SettingsCategory): JButton {
         return JButton(category.displayName, category.icon).apply {
             isOpaque = true
@@ -201,8 +202,8 @@ open class ModernSettingsPanel : JBPanel<ModernSettingsPanel>() {
                 RoundedBorder(16, JBColor.border()),
                 JBUI.Borders.empty(5, 12)
             )
-            background = JBColor(Color.WHITE, Color(60, 63, 65))
-            foreground = JBColor(Gray._70, Gray._187)
+            background = if (UIUtil.isUnderDarcula()) Color(60, 63, 65) else Gray._230
+            foreground = if (UIUtil.isUnderDarcula()) Gray._187 else Color.BLACK
             
             addActionListener {
                 selectCategory(category)
@@ -212,13 +213,13 @@ open class ModernSettingsPanel : JBPanel<ModernSettingsPanel>() {
             addMouseListener(object : MouseAdapter() {
                 override fun mouseEntered(e: MouseEvent) {
                     if (!isSelected) {
-                        background = JBColor(Color(240, 242, 245), Color(55, 57, 59))
+                        background = JBColor(Gray._210, Color(55, 57, 59))  // Более тёмный при наведении
                     }
                 }
                 
                 override fun mouseExited(e: MouseEvent) {
                     if (!isSelected) {
-                        background = JBColor(Color.WHITE, Color(60, 63, 65))
+                        background = JBColor(Gray._230, Color(60, 63, 65))  // Возврат к начальному цвету
                     }
                 }
                 
@@ -230,7 +231,7 @@ open class ModernSettingsPanel : JBPanel<ModernSettingsPanel>() {
     
     private var currentCategory: SettingsCategory? = null
     
-    @Suppress("UseJBColor")
+    @Suppress("UseJBColor", "UseGrayConstants")
     private fun selectCategory(category: SettingsCategory) {
         currentCategory = category
         
@@ -238,17 +239,17 @@ open class ModernSettingsPanel : JBPanel<ModernSettingsPanel>() {
         categoryButtons.forEach { (cat, button) ->
             if (cat == category) {
                 // Выбранная кнопка
-                button.background = JBColor(Color(66, 133, 244), Color(80, 150, 255))
-                button.foreground = Color.WHITE
+                button.background = if (UIUtil.isUnderDarcula()) Color(80, 150, 255) else Color(66, 133, 244)
+                button.foreground = if (UIUtil.isUnderDarcula()) Color.WHITE else Color.BLACK  // Чёрный текст для светлой темы
                 button.font = UIUtil.getLabelFont().deriveFont(Font.BOLD, 13f)
                 button.border = JBUI.Borders.compound(
-                    RoundedBorder(16, JBColor(Color(66, 133, 244), Color(80, 150, 255))),
+                    RoundedBorder(16, if (UIUtil.isUnderDarcula()) Color(80, 150, 255) else Color(66, 133, 244)),
                     JBUI.Borders.empty(5, 12)
                 )
             } else {
                 // Невыбранные кнопки
-                button.background = JBColor(Color.WHITE, Color(60, 63, 65))
-                button.foreground = JBColor(Gray._70, Gray._187)
+                button.background = if (UIUtil.isUnderDarcula()) Color(60, 63, 65) else Gray._230
+                button.foreground = if (UIUtil.isUnderDarcula()) Gray._187 else Color.BLACK
                 button.font = UIUtil.getLabelFont().deriveFont(13f)
                 button.border = JBUI.Borders.compound(
                     RoundedBorder(16, JBColor.border()),
@@ -587,36 +588,58 @@ open class ModernSettingsPanel : JBPanel<ModernSettingsPanel>() {
         }
     }
     
-    @Suppress("UseJBColor")
+    @Suppress("UseJBColor", "UseGrayConstants")
     private fun createDangerButton(): JButton {
         return JButton("Reset All Settings", AllIcons.General.Reset).apply {
             isOpaque = true
             isFocusPainted = false
-            foreground = Color.WHITE
-            background = JBColor(Color(220, 53, 69), Color(176, 42, 55))
-            border = JBUI.Borders.compound(
-                RoundedBorder(6, JBColor(Color(220, 53, 69), Color(176, 42, 55)), 2),
-                JBUI.Borders.empty(6, 12)
-            )
+            foreground = if (UIUtil.isUnderDarcula()) Color.WHITE else Color.BLACK  // Чёрный текст для светлой темы
+            background = if (UIUtil.isUnderDarcula()) Color(176, 42, 55) else Color(220, 53, 69)
+            border = if (UIUtil.isUnderDarcula()) {
+                JBUI.Borders.compound(
+                    RoundedBorder(6, Color(176, 42, 55), 2),  // Красная обводка для тёмной темы
+                    JBUI.Borders.empty(6, 12)
+                )
+            } else {
+                JBUI.Borders.compound(
+                    RoundedBorder(6, Gray._180, 1),  // Серая обводка для светлой темы
+                    JBUI.Borders.empty(6, 12)
+                )
+            }
             cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
             font = UIUtil.getLabelFont().deriveFont(Font.BOLD)
             
             addMouseListener(object : MouseAdapter() {
                 override fun mouseEntered(e: MouseEvent) {
-                    background = JBColor(Color(255, 80, 90), Color(200, 60, 70))
-                    border = JBUI.Borders.compound(
-                        RoundedBorder(6, JBColor(Color(255, 120, 130), Color(220, 80, 90)), 2),
-                        JBUI.Borders.empty(6, 12)
-                    )
-                    foreground = Color.WHITE
+                    // Более яркий/тёмный красный при наведении
+                    background = if (UIUtil.isUnderDarcula()) Color(220, 70, 85) else Color(255, 100, 110)  // Светлее для светлой темы
+                    border = if (UIUtil.isUnderDarcula()) {
+                        JBUI.Borders.compound(
+                            RoundedBorder(6, Color(240, 90, 105), 2),  // Красная обводка для тёмной темы
+                            JBUI.Borders.empty(6, 12)
+                        )
+                    } else {
+                        JBUI.Borders.compound(
+                            RoundedBorder(6, Gray._150, 1),  // Более тёмная серая обводка при hover
+                            JBUI.Borders.empty(6, 12)
+                        )
+                    }
+                    foreground = if (UIUtil.isUnderDarcula()) Color.WHITE else Color.BLACK  // Чёрный текст для светлой темы при hover
                 }
                 override fun mouseExited(e: MouseEvent) {
-                    background = JBColor(Color(220, 53, 69), Color(176, 42, 55))
-                    border = JBUI.Borders.compound(
-                        RoundedBorder(6, JBColor(Color(220, 53, 69), Color(176, 42, 55)), 2),
-                        JBUI.Borders.empty(6, 12)
-                    )
-                    foreground = Color.WHITE
+                    background = if (UIUtil.isUnderDarcula()) Color(176, 42, 55) else Color(220, 53, 69)
+                    border = if (UIUtil.isUnderDarcula()) {
+                        JBUI.Borders.compound(
+                            RoundedBorder(6, Color(176, 42, 55), 2),  // Красная обводка для тёмной темы
+                            JBUI.Borders.empty(6, 12)
+                        )
+                    } else {
+                        JBUI.Borders.compound(
+                            RoundedBorder(6, Gray._180, 1),  // Серая обводка для светлой темы
+                            JBUI.Borders.empty(6, 12)
+                        )
+                    }
+                    foreground = if (UIUtil.isUnderDarcula()) Color.WHITE else Color.BLACK
                 }
             })
         }

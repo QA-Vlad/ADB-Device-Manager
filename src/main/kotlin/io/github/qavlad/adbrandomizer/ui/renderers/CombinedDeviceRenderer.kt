@@ -5,6 +5,7 @@ import com.intellij.ui.Gray
 import com.intellij.ui.JBColor
 import com.intellij.util.ui.JBFont
 import com.intellij.util.ui.JBUI
+import com.intellij.util.ui.UIUtil
 import io.github.qavlad.adbrandomizer.ui.components.HoverState
 import io.github.qavlad.adbrandomizer.ui.models.CombinedDeviceInfo
 import io.github.qavlad.adbrandomizer.settings.PluginSettings
@@ -12,6 +13,7 @@ import io.github.qavlad.adbrandomizer.ui.config.HitboxConfigManager
 import io.github.qavlad.adbrandomizer.ui.config.DeviceType
 import io.github.qavlad.adbrandomizer.ui.config.HitboxType
 import io.github.qavlad.adbrandomizer.utils.PluginLogger
+import io.github.qavlad.adbrandomizer.utils.ThemeUtils
 import io.github.qavlad.adbrandomizer.utils.logging.LogCategory
 import java.awt.*
 import javax.swing.*
@@ -30,28 +32,62 @@ class CombinedDeviceRenderer(
         var debugHoveredIndex: Int = -1
     }
 
-    private val usbIcon: Icon = IconLoader.getIcon("/icons/usb.svg", javaClass)
-    // Используем ленивую инициализацию для проблемной иконки
-    private val usbOffIcon: Icon by lazy { 
-        loadUsbOffIcon()
-    }
-    private val wifiIcon: Icon = IconLoader.getIcon("/icons/wifi.svg", javaClass)
-    private val wifiOffIcon: Icon = IconLoader.getIcon("/icons/wifi_off.svg", javaClass)
-    private val mirrorIcon = IconLoader.getIcon("/icons/scrcpy.svg", javaClass)
-    private val resetIcon = IconLoader.getIcon("/icons/reset.svg", javaClass)
+    // Загружаем иконки динамически с учётом текущей темы
+    private val usbIcon: Icon
+        get() = if (UIUtil.isUnderDarcula()) {
+            IconLoader.getIcon("/icons/usb_dark_theme_only.svg", javaClass)
+        } else {
+            IconLoader.getIcon("/icons/usb_light_theme_only.svg", javaClass)
+        }
     
-    private fun loadUsbOffIcon(): Icon {
+    // Динамическая загрузка иконки отключенного USB
+    private val usbOffIcon: Icon
+        get() = if (UIUtil.isUnderDarcula()) {
+            loadUsbOffIcon("/icons/usb_off_dark_theme_only.svg")
+        } else {
+            loadUsbOffIcon("/icons/usb_off_light_theme_only.svg")
+        }
+    
+    private val wifiIcon: Icon
+        get() = if (UIUtil.isUnderDarcula()) {
+            IconLoader.getIcon("/icons/wifi_dark_theme_only.svg", javaClass)
+        } else {
+            IconLoader.getIcon("/icons/wifi_light_theme_only.svg", javaClass)
+        }
+    
+    private val wifiOffIcon: Icon
+        get() = if (UIUtil.isUnderDarcula()) {
+            IconLoader.getIcon("/icons/wifi_off_dark_theme_only.svg", javaClass)
+        } else {
+            IconLoader.getIcon("/icons/wifi_off_light_theme_only.svg", javaClass)
+        }
+    
+    private val mirrorIcon: Icon
+        get() = if (UIUtil.isUnderDarcula()) {
+            IconLoader.getIcon("/icons/scrcpy_dark_theme_only.svg", javaClass)
+        } else {
+            IconLoader.getIcon("/icons/scrcpy_light_theme_only.svg", javaClass)
+        }
+    
+    private val resetIcon: Icon
+        get() = if (UIUtil.isUnderDarcula()) {
+            IconLoader.getIcon("/icons/reset_dark_theme_only.svg", javaClass)
+        } else {
+            IconLoader.getIcon("/icons/reset_light_theme_only.svg", javaClass)
+        }
+    
+    private fun loadUsbOffIcon(path: String): Icon {
         
         // Пробуем разные способы загрузки
         val attempts = listOf(
-            { IconLoader.getIcon("/icons/usb_off.svg", javaClass) },
-            { IconLoader.findIcon("/icons/usb_off.svg", javaClass.classLoader) },
-            { IconLoader.getIcon("/icons/usb_off.svg", CombinedDeviceRenderer::class.java) },
+            { IconLoader.getIcon(path, javaClass) },
+            { IconLoader.findIcon(path, javaClass.classLoader) },
+            { IconLoader.getIcon(path, CombinedDeviceRenderer::class.java) },
             {
                 // Пробуем загрузить как ресурс и проверить его наличие
-                val resource = javaClass.getResource("/icons/usb_off.svg")
+                val resource = javaClass.getResource("/icons/usb_off_light_theme_only.svg")
                 if (resource != null) {
-                    IconLoader.getIcon("/icons/usb_off.svg", javaClass)
+                    IconLoader.getIcon("/icons/usb_off_light_theme_only.svg", javaClass)
                 } else {
                     null
                 }
@@ -359,7 +395,7 @@ class CombinedDeviceRenderer(
             
             // Делаем иконку полупрозрачной если неактивна
             if (!isActive) {
-                foreground = JBColor.GRAY
+                foreground = ThemeUtils.getInactiveIconJBColor()
             }
             
             toolTipText = when {
@@ -642,11 +678,16 @@ class CombinedDeviceRenderer(
                 BorderFactory.createLineBorder(JBColor(Color.WHITE, Color.WHITE), 1)
             }
             background = if (device.hasModifiedResolution) 
-                JBColor(Color(255, 250, 240), Color(60, 50, 40))
+                JBColor(Color(255, 230, 200), Color(60, 50, 40))  // Светлая тема - персиковый, тёмная - тёмно-коричневый
             else JBColor.background()
-            foreground = if (device.hasModifiedResolution) 
-                JBColor(Color(255, 140, 0), Color(255, 160, 0))
-            else JBColor.foreground()
+            @Suppress("UseJBColor")  // Намеренно используем динамический выбор цвета
+            foreground = if (device.hasModifiedResolution) {
+                if (UIUtil.isUnderDarcula()) {
+                    Color(255, 160, 0)  // Ярко-оранжевый для тёмной темы
+                } else {
+                    Color(140, 70, 0)  // Очень тёмно-оранжевый для светлой темы
+                }
+            } else JBColor.foreground()
         }
         panel.add(sizeField)
         
@@ -696,11 +737,16 @@ class CombinedDeviceRenderer(
                 BorderFactory.createLineBorder(JBColor(Color.WHITE, Color.WHITE), 1)
             }
             background = if (device.hasModifiedDpi) 
-                JBColor(Color(255, 250, 240), Color(60, 50, 40))
+                JBColor(Color(255, 230, 200), Color(60, 50, 40))  // Светлая тема - персиковый, тёмная - тёмно-коричневый
             else JBColor.background()
-            foreground = if (device.hasModifiedDpi) 
-                JBColor(Color(255, 140, 0), Color(255, 160, 0))
-            else JBColor.foreground()
+            @Suppress("UseJBColor")  // Намеренно используем динамический выбор цвета
+            foreground = if (device.hasModifiedDpi) {
+                if (UIUtil.isUnderDarcula()) {
+                    Color(255, 160, 0)  // Ярко-оранжевый для тёмной темы
+                } else {
+                    Color(140, 70, 0)  // Очень тёмно-оранжевый для светлой темы
+                }
+            } else JBColor.foreground()
         }
         panel.add(dpiField)
         

@@ -650,17 +650,19 @@ class DeviceListPanel(
                                     BorderFactory.createEmptyBorder(3, 8, 3, 8)
                                 )
                             } else {
-                                // Обычное состояние - делаем кнопку видимой
-                                background = JBColor(Color(90, 140, 60), Color(70, 120, 50))
-                                @Suppress("UseJBColor")
-                                foreground = Color.WHITE  // Намеренно используем Color.WHITE для гарантированной видимости текста
+                                // Обычное состояние - используем стандартные цвета для кнопок действий
+                                // Используем JBColor которые автоматически переключаются
+                                background = JBColor(Color(34, 139, 34), Color(70, 120, 50)) // ForestGreen для светлой, зелёный для тёмной
+                                foreground = JBColor.WHITE
+                                border = BorderFactory.createCompoundBorder(
+                                    BorderFactory.createLineBorder(JBColor(Color(25, 100, 25), Color(60, 100, 40)), 2),
+                                    BorderFactory.createEmptyBorder(2, 7, 2, 7)
+                                )
+                                val isDark = UIUtil.isUnderDarcula()
+                                println("DeviceListPanel Configure button: Theme is ${if (isDark) "DARK" else "LIGHT"}, bg: $background")
                                 isContentAreaFilled = true
                                 isBorderPainted = true
                                 isOpaque = true
-                                border = BorderFactory.createCompoundBorder(
-                                    BorderFactory.createLineBorder(JBColor(Color(70, 120, 40), Color(60, 100, 40)), 1),
-                                    BorderFactory.createEmptyBorder(3, 8, 3, 8)
-                                )
                             }
                         }
                         panel.add(fixButton, BorderLayout.EAST)

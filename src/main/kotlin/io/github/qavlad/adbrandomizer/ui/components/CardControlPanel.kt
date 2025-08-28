@@ -279,7 +279,17 @@ class CardControlPanel(
             gbc.insets = JBUI.insetsBottom(1)
             activePresetLabel = JLabel("Not selected").apply {
                 font = UIUtil.getLabelFont().deriveFont(Font.BOLD, 12f)
-                foreground = JBColor(Color(50, 100, 150), Color(100, 150, 200))
+                val isDark = UIUtil.isUnderDarcula()
+                @Suppress("UseJBColor")  // Намеренно используем динамический выбор цвета
+                val textColor = if (isDark) {
+                    Color(100, 150, 200)  // Светло-синий для тёмной темы  
+                } else {
+                    Color(20, 50, 120)     // Очень тёмно-синий для светлой темы
+                }
+                foreground = textColor
+                // Принудительно устанавливаем цвет
+                setForeground(textColor)
+                println("CardControlPanel: Theme is ${if (isDark) "DARK" else "LIGHT"}, preset color: $textColor, actual: $foreground")
                 horizontalAlignment = SwingConstants.CENTER
             }
             centerPanel.add(activePresetLabel, gbc)
@@ -477,7 +487,15 @@ class CardControlPanel(
                 }
                 
                 activePresetLabel.text = displayName
-                activePresetLabel.foreground = JBColor(Color(50, 100, 150), Color(100, 150, 200))
+                val isDark = UIUtil.isUnderDarcula()
+                @Suppress("UseJBColor")  // Намеренно используем динамический выбор цвета
+                activePresetLabel.foreground = if (isDark) {
+                    Color(100, 150, 200)  // Светло-синий для тёмной темы  
+                } else {
+                    Color(0, 80, 150)     // Тёмно-синий для светлой темы
+                }
+                activePresetLabel.repaint()
+                println("Updating preset label color: Theme is ${if (isDark) "DARK" else "LIGHT"}, color: ${activePresetLabel.foreground}")
                 
                 // Показываем имя листа
                 if (lastUsedPresetListName != null) {
