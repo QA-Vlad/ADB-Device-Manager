@@ -1,3 +1,5 @@
+@file:Suppress("ComponentNotRegistered")
+
 package io.github.qavlad.adbdevicemanager.actions
 
 import com.intellij.openapi.actionSystem.AnAction
@@ -7,6 +9,7 @@ import io.github.qavlad.adbdevicemanager.utils.logging.LogCategory
 import io.github.qavlad.adbdevicemanager.utils.logging.LogLevel
 import io.github.qavlad.adbdevicemanager.utils.logging.LoggingConfiguration
 
+@Suppress("unused")
 class ResetLogLevelsAction : AnAction("Reset Log Levels to Defaults", "Reset all log levels to their default values", null) {
     
     override fun actionPerformed(e: AnActionEvent) {

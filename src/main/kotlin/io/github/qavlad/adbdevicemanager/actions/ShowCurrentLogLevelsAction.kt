@@ -1,3 +1,5 @@
+@file:Suppress("ComponentNotRegistered")
+
 package io.github.qavlad.adbdevicemanager.actions
 
 import com.intellij.openapi.actionSystem.AnAction
@@ -6,6 +8,7 @@ import com.intellij.openapi.ui.Messages
 import io.github.qavlad.adbdevicemanager.utils.logging.LogCategory
 import io.github.qavlad.adbdevicemanager.utils.logging.LoggingConfiguration
 
+@Suppress("unused")
 class ShowCurrentLogLevelsAction : AnAction("Show Current Log Levels", "Display current log levels for all categories", null) {
     
     override fun actionPerformed(e: AnActionEvent) {

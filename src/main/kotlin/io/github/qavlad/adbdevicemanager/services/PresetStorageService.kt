@@ -13,7 +13,8 @@ object PresetStorageService {
     // Ключ для хранения пути к scrcpy
     private const val SCRCPY_PATH_KEY = PluginConfig.SettingsKeys.SCRCPY_PATH_KEY
 
-    private val properties = PropertiesComponent.getInstance()
+    private val properties: PropertiesComponent
+        get() = PropertiesComponent.getInstance()
     private val gson = Gson()
 
     /**

@@ -129,6 +129,7 @@ object FileLogger {
     /**
      * Logs an error with exception details
      */
+    @Suppress("unused")
     fun logError(message: String, throwable: Throwable? = null) {
         val errorMessage = if (throwable != null) {
             "$message\nException: ${throwable.message}\nStackTrace:\n${throwable.stackTraceToString()}"
@@ -141,6 +142,7 @@ object FileLogger {
     /**
      * Logs Running Devices specific messages
      */
+    @Suppress("unused")
     fun logRunningDevices(message: String) {
         log("RUNNING_DEVICES: $message", "INFO")
     }

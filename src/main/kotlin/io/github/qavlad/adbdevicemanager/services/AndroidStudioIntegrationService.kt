@@ -31,16 +31,7 @@ class AndroidStudioIntegrationService {
             classLoaderService.loadAndroidStudioClasses()
         }
     }
-    
-    /**
-     * Checks if Running Devices is active for the given device
-     * @deprecated Use hasActiveDeviceTab() for more accurate check
-     */
-    fun isRunningDevicesActive(device: IDevice): Boolean {
-        if (!AndroidStudioDetector.isAndroidStudio()) return false
-        return runningDevicesManager.isRunningDevicesActive(device)
-    }
-    
+
     /**
      * Checks if Running Devices has an active tab for the given device
      */
@@ -48,15 +39,7 @@ class AndroidStudioIntegrationService {
         if (!AndroidStudioDetector.isAndroidStudio()) return false
         return runningDevicesManager.hasActiveDeviceTab(device)
     }
-    
-    /**
-     * Restarts Running Devices mirroring for the given device
-     */
-    fun restartRunningDevices(device: IDevice): Boolean {
-        if (!AndroidStudioDetector.isAndroidStudio()) return false
-        return runningDevicesManager.restartRunningDevices(device)
-    }
-    
+
     /**
      * Restarts Running Devices mirroring for multiple devices
      * Closes all tabs first, then reopens them
