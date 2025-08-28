@@ -2,18 +2,18 @@
 <!--suppress PluginXmlI18n -->
 <idea-plugin>
     <!-- 1. Уникальный ID плагина, основанный на пакете -->
-    <id>io.github.qavlad.adbrandomizer</id>
+    <id>io.github.qavlad.adbdevicemanager</id>
 
     <!-- 2. Публичное имя плагина -->
-    <name>ADB Screen Randomizer</name>
+    <name>ADB Device Manager</name>
 
     <!-- 3. Информация об авторе -->
     <vendor url="https://github.com/QA-Vlad">QA-Vlad</vendor>
 
     <!-- 4. Описание плагина -->
     <description><![CDATA[
-    A simple plugin to set random screen Sizes and DPI on connected Android devices using ADB commands.
-    Very useful for testing UI adaptability and different screen configurations directly from the IDE.
+    Essential toolkit for mobile QA engineers and developers. Manage Android device display settings, presets, and testing configurations directly from your IDE.
+    Features: Screen resolution & DPI management, device presets, Wi-Fi debugging, scrcpy integration, and more.
     ]]></description>
 
     <!-- Версии IDE -->
@@ -21,34 +21,37 @@
 
     <!-- 5. Секция зависимостей. Это критически важно. -->
     <depends>com.intellij.modules.platform</depends>
+    <!-- Опциональная зависимость для Android Studio -->
+    <!--suppress PluginXmlValidity -->
+    <depends optional="true" config-file="plugin-android.xml">org.jetbrains.android</depends>
 
     <!-- 6. Секция расширений. Здесь мы "встраиваемся" в IDE. -->
     <extensions defaultExtensionNs="com.intellij">
         <!-- Startup activity для инициализации плагина при открытии проекта -->
-        <postStartupActivity implementation="io.github.qavlad.adbrandomizer.startup.PluginStartupActivity"/>
+        <postStartupActivity implementation="io.github.qavlad.adbdevicemanager.startup.PluginStartupActivity"/>
         
         <!-- Регистрация  бокового окна (Tool Window) -->
         <toolWindow
-                id="ADB Randomizer"
+                id="ADB Device Manager"
                 anchor="right"
                 icon="/icons/pluginIcon.svg"
-                factoryClass="io.github.qavlad.adbrandomizer.ui.PluginToolWindowFactory"/>
+                factoryClass="io.github.qavlad.adbdevicemanager.ui.PluginToolWindowFactory"/>
 
         <!-- Регистрация группы для уведомлений, чтобы они красиво отображались -->
         <notificationGroup
-                id="ADB Randomizer Notifications"
+                id="ADB Device Manager Notifications"
                 displayType="BALLOON"/>
                 
         <!-- Регистрация группы для отладочных уведомлений -->
         <notificationGroup
-                id="ADB Randomizer Debug"
+                id="ADB Device Manager Debug"
                 displayType="BALLOON"/>
                 
         <!-- Регистрация настроек плагина в разделе Tools -->
         <applicationConfigurable
-                id="io.github.qavlad.adbrandomizer.settings"
-                displayName="ADB Screen Randomizer"
-                instance="io.github.qavlad.adbrandomizer.settings.PluginSettingsConfigurable"
+                id="io.github.qavlad.adbdevicemanager.settings"
+                displayName="ADB Device Manager"
+                instance="io.github.qavlad.adbdevicemanager.settings.PluginSettingsConfigurable"
                 parentId="tools"
                 order="first"/>
     </extensions>
@@ -56,10 +59,10 @@
     <!-- Actions section -->
     <actions>
         <!-- Add action to Tools menu -->
-        <action id="io.github.qavlad.adbrandomizer.OpenToolWindow"
-                class="io.github.qavlad.adbrandomizer.actions.OpenToolWindowAction"
-                text="ADB Screen Randomizer"
-                description="Open ADB Screen Randomizer tool window"
+        <action id="io.github.qavlad.adbdevicemanager.OpenToolWindow"
+                class="io.github.qavlad.adbdevicemanager.actions.OpenToolWindowAction"
+                text="ADB Device Manager"
+                description="Open ADB Device Manager tool window"
                 icon="/icons/pluginIcon.svg">
             <add-to-group group-id="ToolsMenu" anchor="last"/>
         </action>

@@ -1,0 +1,12 @@
+<!--suppress PluginXmlI18n -->
+<idea-plugin>
+    <!-- Android-specific extensions -->
+    <extensions defaultExtensionNs="com.intellij">
+
+    </extensions>
+    
+    <!-- Android-specific actions if needed -->
+    <actions>
+        <!-- Действия специфичные для Android Studio -->
+    </actions>
+</idea-plugin>

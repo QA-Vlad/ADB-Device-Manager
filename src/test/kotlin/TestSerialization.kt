@@ -1,7 +1,7 @@
 import com.google.gson.Gson
 import com.google.gson.GsonBuilder
-import io.github.qavlad.adbrandomizer.services.DevicePreset
-import io.github.qavlad.adbrandomizer.services.PresetList
+import io.github.qavlad.adbdevicemanager.services.DevicePreset
+import io.github.qavlad.adbdevicemanager.services.PresetList
 
 fun main() {
     // Тест с обычным Gson

@@ -5,4 +5,4 @@ pluginManagement {
     }
 }
 
-rootProject.name = "adbrandomizer"
+rootProject.name = "adbdevicemanager"

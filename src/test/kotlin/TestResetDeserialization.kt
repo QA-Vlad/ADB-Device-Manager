@@ -1,7 +1,7 @@
-package io.github.qavlad.adbrandomizer
+package io.github.qavlad.adbdevicemanager
 
 import com.google.gson.Gson
-import io.github.qavlad.adbrandomizer.services.PresetList
+import io.github.qavlad.adbdevicemanager.services.PresetList
 import java.io.File
 
 fun main() {

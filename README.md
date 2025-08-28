@@ -1,4 +1,4 @@
-# ADB Screen Randomizer
+# ADB Device Manager
 
 > 🔧 **An IntelliJ IDEA/Android Studio plugin created with love for mobile QA and developers**
 
@@ -9,7 +9,7 @@
 
 ## 📱 About the Project
 
-**ADB Screen Randomizer** is an IntelliJ IDEA plugin designed to simplify the process of testing mobile applications on various screen resolutions and DPIs. The plugin allows you to quickly and conveniently change the screen parameters of connected Android devices directly from the IDE, significantly speeding up the UI adaptability testing process.
+**ADB Device Manager** is an IntelliJ IDEA plugin designed to simplify the process of testing mobile applications on various screen resolutions and DPIs. This essential toolkit for mobile QA engineers and developers allows you to manage Android device display settings, presets, and testing configurations directly from your IDE.
 
 ### 🎯 Project Goal
 
@@ -18,7 +18,7 @@ Every mobile QA knows how tedious it can be to test an application on multiple d
 - Manually entering ADB commands in the terminal.
 - Constantly remembering the screen Sizes of various devices.
 
-**ADB Screen Randomizer** solves these problems by providing a simple and intuitive interface for instantly changing screen parameters and performing other useful actions.
+**ADB Device Manager** solves these problems by providing a comprehensive and intuitive interface for managing device configurations, screen parameters, and testing workflows.
 
 ## ✨ Key Features
 
@@ -45,8 +45,8 @@ Every mobile QA knows how tedious it can be to test an application on multiple d
 
 ```bash
 # Clone the repository
-git clone [https://github.com/QA-Vlad/ADB-Screen-Randomizer.git](https://github.com/QA-Vlad/ADB-Screen-Randomizer.git)
-cd ADB-Screen-Randomizer
+git clone [https://github.com/QA-Vlad/ADB-Device-Manager.git](https://github.com/QA-Vlad/ADB-Device-Manager.git)
+cd ADB-Device-Manager
 
 # Open the project in IntelliJ IDEA and run it
 # using the green 'Run' button or the 'runIde' Gradle task
@@ -55,7 +55,7 @@ cd ADB-Screen-Randomizer
 ### First Use
 
 1. **Connect an Android device** via USB.
-2. **Open the plugin panel** — find "ADB Randomizer" in the right sidebar.
+2. **Open the plugin panel** — find "ADB Device Manager" in the right sidebar.
 3. **Ensure your device is displayed** in the list.
 4. **Click "RANDOM SIZE AND DPI"** to apply a random configuration.
 
@@ -114,13 +114,13 @@ Add these VM options when running your IDE:
 
 ```bash
 # Enable DEBUG level for all categories
--Dadb.randomizer.log.level=DEBUG
+-Dadb.device.manager.log.level=DEBUG
 
 # Enable TRACE level for all categories (very verbose)
--Dadb.randomizer.log.level=TRACE
+-Dadb.device.manager.log.level=TRACE
 
 # Enable DEBUG only for specific category
--Dadb.randomizer.log.level=DEBUG -Dadb.randomizer.log.category=SYNC_OPERATIONS
+-Dadb.device.manager.log.level=DEBUG -Dadb.device.manager.log.category=SYNC_OPERATIONS
 ```
 
 ### Available Log Categories
@@ -146,7 +146,7 @@ IDE logs are located at:
 
 Or use **Help → Show Log in Explorer/Finder** in your IDE.
 
-Search for `ADB_Randomizer` to filter plugin-specific logs.
+Search for `ADB_Device_Manager` to filter plugin-specific logs.
 
 ## 🤝 Contributing
 
