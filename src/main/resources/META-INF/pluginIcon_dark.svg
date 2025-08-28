@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 40 40">
+  <defs>
+    <filter id="lighten">
+      <feColorMatrix in="SourceGraphic" type="matrix" values="0 0 0 0 0.686275 0 0 0 0 0.694118 0 0 0 0 0.701961 0 0 0 1.000000 0"/>
+    </filter>
+  </defs>
+  
+  <!-- Dark marketplace icon - Phone with Android logo -->
+  <g transform="translate(20, 20)" filter="url(#lighten)">
+    <!-- Phone outline with rounded corners -->
+    <rect x="-10" y="-16" width="20" height="32" rx="4" fill="none" stroke="#293449" stroke-width="3"/>
+    
+    <!-- Notch at top -->
+    <rect x="-4" y="-16" width="8" height="2" rx="1" fill="#293449"/>
+    
+    <!-- Android robot head (85% size) -->
+    <g transform="translate(0, 0) scale(1.7)">
+      <!-- Head (half circle) -->
+      <path d="M -3.5 1.5 A 3.5 3.5 0 0 0 3.5 1.5 Z" fill="none" stroke="#293449" stroke-width="1.3"/>
+      
+      <!-- Left antenna -->
+      <line x1="-2" y1="-2" x2="-1.5" y2="-0.5" stroke="#293449" stroke-width="1.3" stroke-linecap="round"/>
+      
+      <!-- Right antenna -->
+      <line x1="2" y1="-2" x2="1.5" y2="-0.5" stroke="#293449" stroke-width="1.3" stroke-linecap="round"/>
+      
+      <!-- Left eye -->
+      <circle cx="-1.2" cy="0" r="0.4" fill="#293449"/>
+      
+      <!-- Right eye -->
+      <circle cx="1.2" cy="0" r="0.4" fill="#293449"/>
+    </g>
+  </g>
+</svg>
