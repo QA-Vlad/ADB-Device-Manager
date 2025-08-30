@@ -18,7 +18,8 @@
 
 ⚡ **All in One Place** — forget about terminal and ADB commands, everything you need is now in a convenient toolbar
 
-![ezgif-7e192abe8b719d](https://github.com/user-attachments/assets/8c5dd3d2-f6e5-4af5-afdc-b4faf45bbbef)
+![ADB Device Manager](https://github.com/user-attachments/assets/ad4157eb-7365-4f99-bbac-fb08d5c776d3)
+
 
 ## 🚀 Quick Start
 
