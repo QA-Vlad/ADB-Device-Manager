@@ -12,10 +12,81 @@
 
     <!-- 4. Описание плагина -->
     <description><![CDATA[
-    Essential toolkit for mobile QA engineers and developers. Manage Android device display settings, presets, and testing configurations directly from your IDE.
-    Features: Screen resolution & DPI management, device presets, Wi-Fi debugging, scrcpy integration, and more.
+    Manage Android device screens and testing configs
+    
+    <p><b>ADB Device Manager</b> helps QA engineers and developers test mobile apps across different screen configurations directly from the IDE.</p>
+    
+    <p align="center">
+        <img src="https://raw.githubusercontent.com/QA-Vlad/ADB-Device-Manager/refs/heads/main/docs/images/for%20marketplace.gif" 
+             alt="ADB Device Manager Demo"/>
+    </p>
+    
+    <h3>Key Benefits</h3>
+    <ul>
+        <li>Test your app on 100+ device configurations without switching physical devices</li>
+        <li>Apply random screen sizes and DPIs with one click</li>
+        <li>Connect devices wirelessly without terminal commands</li>
+        <li>Mirror and control device screens with integrated scrcpy support</li>
+    </ul>
+    
+    <h3>Features</h3>
+    <ul>
+        <li><b>Screen Randomization</b> - Apply random screen sizes and DPIs from extensive device presets</li>
+        <li><b>Device Management</b> - Monitor connected devices, enable wireless debugging, organize device order</li>
+        <li><b>Screen Mirroring</b> - Launch scrcpy directly from the plugin for device control</li>
+        <li><b>Preset System</b> - Use 12+ curated device lists or create custom presets</li>
+        <li><b>Automation</b> - Auto-restart apps after resolution changes, auto-switch Wi-Fi networks</li>
+    </ul>
+    
+    <h3>Who Should Use This Plugin</h3>
+    <ul>
+        <li>QA Engineers testing responsive layouts</li>
+        <li>Mobile Developers checking UI on different screens</li>
+        <li>UI/UX Designers validating designs across devices</li>
+        <li>Automation Engineers setting up test environments</li>
+    </ul>
+    
+    <h3>Getting Started</h3>
+    <ol>
+        <li>Connect your Android device (USB debugging enabled)</li>
+        <li>Open ADB Device Manager panel on the right</li>
+        <li>Click RANDOM SIZE AND DPI - watch your screen transform!</li>
+    </ol>
+    
+    <h3>What's Included</h3>
+    <ul>
+        <li>Random screen size and DPI generator</li>
+        <li>200+ device presets in 12 categories</li>
+        <li>Wireless ADB connection management</li>
+        <li>Scrcpy integration for screen mirroring</li>
+        <li>Custom preset creation and sharing</li>
+        <li>Auto-reconnect after resolution changes</li>
+        <li>Drag & drop device ordering</li>
+        <li>One-click factory reset</li>
+    </ul>
+    
+    <p>For detailed documentation, visit the <a href="https://github.com/QA-Vlad/ADB-Device-Manager">project repository</a>.</p>
+    
+    <p><b>Support:</b> <a href="https://github.com/QA-Vlad/ADB-Device-Manager/issues">Report issues on GitHub</a></p>
     ]]></description>
 
+    <!-- Change notes -->
+    <change-notes><![CDATA[
+    <h3>Version 1.0.0 - Initial Release</h3>
+    <ul>
+        <li><b>Added:</b> Screen randomization with 200+ device presets across 12 categories</li>
+        <li><b>Added:</b> One-click wireless ADB connection for USB-connected devices</li>
+        <li><b>Added:</b> Full scrcpy integration for screen mirroring and control</li>
+        <li><b>Added:</b> Custom preset creation with import/export functionality</li>
+        <li><b>Added:</b> Drag and drop device ordering</li>
+        <li><b>Added:</b> Auto-reconnect after resolution changes</li>
+        <li><b>Added:</b> Automatic app restart after screen resolution changes</li>
+        <li><b>Added:</b> Wi-Fi network auto-switching to match PC network</li>
+        <li><b>Added:</b> Separate controls for screen size and DPI</li>
+        <li><b>Added:</b> Factory reset functionality for device display settings</li>
+    </ul>
+    ]]></change-notes>
+    
     <!-- Версии IDE -->
     <idea-version since-build="223"/>
 
