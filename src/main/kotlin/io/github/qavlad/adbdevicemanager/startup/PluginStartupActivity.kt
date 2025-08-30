@@ -2,7 +2,7 @@ package io.github.qavlad.adbdevicemanager.startup
 
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.startup.ProjectActivity
+import com.intellij.openapi.startup.StartupActivity
 import com.intellij.openapi.wm.ToolWindowManager
 import io.github.qavlad.adbdevicemanager.settings.PluginSettings
 import io.github.qavlad.adbdevicemanager.telemetry.SentryInitializer
@@ -10,10 +10,11 @@ import io.github.qavlad.adbdevicemanager.utils.PluginLogger
 
 /**
  * Startup activity для автоматической инициализации плагина при открытии проекта
+ * Использует StartupActivity.DumbAware для совместимости с билдом 223+
  */
-class PluginStartupActivity : ProjectActivity {
+class PluginStartupActivity : StartupActivity.DumbAware {
     
-    override suspend fun execute(project: Project) {
+    override fun runActivity(project: Project) {
         PluginLogger.info("ADB Device Manager startup activity executing")
         
         // Инициализируем Sentry при запуске (opt-out модель)
