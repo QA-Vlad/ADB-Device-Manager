@@ -6,6 +6,7 @@ import com.intellij.ui.JBColor
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.UIUtil
 import io.github.qavlad.adbdevicemanager.services.DevicePreset
+import io.github.qavlad.adbdevicemanager.utils.ThemeChecker
 import java.awt.*
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
@@ -279,7 +280,7 @@ class CardControlPanel(
             gbc.insets = JBUI.insetsBottom(1)
             activePresetLabel = JLabel("Not selected").apply {
                 font = UIUtil.getLabelFont().deriveFont(Font.BOLD, 12f)
-                val isDark = UIUtil.isUnderDarcula()
+                val isDark = ThemeChecker.isDarkTheme()
                 @Suppress("UseJBColor")  // Намеренно используем динамический выбор цвета
                 val textColor = if (isDark) {
                     Color(100, 150, 200)  // Светло-синий для тёмной темы  
@@ -447,7 +448,7 @@ class CardControlPanel(
                     val g2d = graphics as Graphics2D
                     g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
                     
-                    val color = if (UIUtil.isUnderDarcula()) Gray._200 else Gray._60
+                    val color = if (ThemeChecker.isDarkTheme()) Gray._200 else Gray._60
                     g2d.color = color
                     
                     // Рисуем папку
@@ -455,7 +456,7 @@ class CardControlPanel(
                     g2d.fillRect(x + 2, y + 4, 10, 4)
                     
                     // Рисуем линии документов внутри
-                    g2d.color = if (UIUtil.isUnderDarcula()) Gray._80 else Gray._240
+                    g2d.color = if (ThemeChecker.isDarkTheme()) Gray._80 else Gray._240
                     g2d.fillRect(x + 6, y + 12, 20, 1)
                     g2d.fillRect(x + 6, y + 16, 20, 1)
                     g2d.fillRect(x + 6, y + 20, 16, 1)
@@ -487,7 +488,7 @@ class CardControlPanel(
                 }
                 
                 activePresetLabel.text = displayName
-                val isDark = UIUtil.isUnderDarcula()
+                val isDark = ThemeChecker.isDarkTheme()
                 @Suppress("UseJBColor")  // Намеренно используем динамический выбор цвета
                 activePresetLabel.foreground = if (isDark) {
                     Color(100, 150, 200)  // Светло-синий для тёмной темы  

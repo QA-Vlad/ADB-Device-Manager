@@ -9,6 +9,7 @@ import com.intellij.ui.components.*
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.UIUtil
 import io.github.qavlad.adbdevicemanager.services.PluginResetService
+import io.github.qavlad.adbdevicemanager.utils.ThemeChecker
 import io.github.qavlad.adbdevicemanager.services.PresetStorageService
 import io.github.qavlad.adbdevicemanager.services.integration.scrcpy.ScrcpyService
 import io.github.qavlad.adbdevicemanager.utils.*
@@ -206,8 +207,8 @@ open class ModernSettingsPanel : JBPanel<ModernSettingsPanel>() {
                 RoundedBorder(16, JBColor.border()),
                 JBUI.Borders.empty(5, 8)
             )
-            background = if (UIUtil.isUnderDarcula()) Color(60, 63, 65) else Gray._230
-            foreground = if (UIUtil.isUnderDarcula()) Gray._187 else Color.BLACK
+            background = if (ThemeChecker.isDarkTheme()) Color(60, 63, 65) else Gray._230
+            foreground = if (ThemeChecker.isDarkTheme()) Gray._187 else Color.BLACK
             
             addActionListener {
                 selectCategory(category)
@@ -243,17 +244,17 @@ open class ModernSettingsPanel : JBPanel<ModernSettingsPanel>() {
         categoryButtons.forEach { (cat, button) ->
             if (cat == category) {
                 // Выбранная кнопка
-                button.background = if (UIUtil.isUnderDarcula()) Color(80, 150, 255) else Color(66, 133, 244)
-                button.foreground = if (UIUtil.isUnderDarcula()) Color.WHITE else Color.BLACK  // Чёрный текст для светлой темы
+                button.background = if (ThemeChecker.isDarkTheme()) Color(80, 150, 255) else Color(66, 133, 244)
+                button.foreground = if (ThemeChecker.isDarkTheme()) Color.WHITE else Color.BLACK  // Чёрный текст для светлой темы
                 button.font = UIUtil.getLabelFont().deriveFont(Font.BOLD, 13f)
                 button.border = JBUI.Borders.compound(
-                    RoundedBorder(16, if (UIUtil.isUnderDarcula()) Color(80, 150, 255) else Color(66, 133, 244)),
+                    RoundedBorder(16, if (ThemeChecker.isDarkTheme()) Color(80, 150, 255) else Color(66, 133, 244)),
                     JBUI.Borders.empty(5, 8)
                 )
             } else {
                 // Невыбранные кнопки
-                button.background = if (UIUtil.isUnderDarcula()) Color(60, 63, 65) else Gray._230
-                button.foreground = if (UIUtil.isUnderDarcula()) Gray._187 else Color.BLACK
+                button.background = if (ThemeChecker.isDarkTheme()) Color(60, 63, 65) else Gray._230
+                button.foreground = if (ThemeChecker.isDarkTheme()) Gray._187 else Color.BLACK
                 button.font = UIUtil.getLabelFont().deriveFont(13f)
                 button.border = JBUI.Borders.compound(
                     RoundedBorder(16, JBColor.border()),
@@ -610,9 +611,9 @@ open class ModernSettingsPanel : JBPanel<ModernSettingsPanel>() {
         return JButton("Reset All Settings", AllIcons.General.Reset).apply {
             isOpaque = true
             isFocusPainted = false
-            foreground = if (UIUtil.isUnderDarcula()) Color.WHITE else Color.BLACK  // Чёрный текст для светлой темы
-            background = if (UIUtil.isUnderDarcula()) Color(176, 42, 55) else Color(220, 53, 69)
-            border = if (UIUtil.isUnderDarcula()) {
+            foreground = if (ThemeChecker.isDarkTheme()) Color.WHITE else Color.BLACK  // Чёрный текст для светлой темы
+            background = if (ThemeChecker.isDarkTheme()) Color(176, 42, 55) else Color(220, 53, 69)
+            border = if (ThemeChecker.isDarkTheme()) {
                 JBUI.Borders.compound(
                     RoundedBorder(6, Color(176, 42, 55), 2),  // Красная обводка для тёмной темы
                     JBUI.Borders.empty(6, 12)
@@ -629,8 +630,8 @@ open class ModernSettingsPanel : JBPanel<ModernSettingsPanel>() {
             addMouseListener(object : MouseAdapter() {
                 override fun mouseEntered(e: MouseEvent) {
                     // Более яркий/тёмный красный при наведении
-                    background = if (UIUtil.isUnderDarcula()) Color(220, 70, 85) else Color(255, 100, 110)  // Светлее для светлой темы
-                    border = if (UIUtil.isUnderDarcula()) {
+                    background = if (ThemeChecker.isDarkTheme()) Color(220, 70, 85) else Color(255, 100, 110)  // Светлее для светлой темы
+                    border = if (ThemeChecker.isDarkTheme()) {
                         JBUI.Borders.compound(
                             RoundedBorder(6, Color(240, 90, 105), 2),  // Красная обводка для тёмной темы
                             JBUI.Borders.empty(6, 12)
@@ -641,11 +642,11 @@ open class ModernSettingsPanel : JBPanel<ModernSettingsPanel>() {
                             JBUI.Borders.empty(6, 12)
                         )
                     }
-                    foreground = if (UIUtil.isUnderDarcula()) Color.WHITE else Color.BLACK  // Чёрный текст для светлой темы при hover
+                    foreground = if (ThemeChecker.isDarkTheme()) Color.WHITE else Color.BLACK  // Чёрный текст для светлой темы при hover
                 }
                 override fun mouseExited(e: MouseEvent) {
-                    background = if (UIUtil.isUnderDarcula()) Color(176, 42, 55) else Color(220, 53, 69)
-                    border = if (UIUtil.isUnderDarcula()) {
+                    background = if (ThemeChecker.isDarkTheme()) Color(176, 42, 55) else Color(220, 53, 69)
+                    border = if (ThemeChecker.isDarkTheme()) {
                         JBUI.Borders.compound(
                             RoundedBorder(6, Color(176, 42, 55), 2),  // Красная обводка для тёмной темы
                             JBUI.Borders.empty(6, 12)
@@ -656,7 +657,7 @@ open class ModernSettingsPanel : JBPanel<ModernSettingsPanel>() {
                             JBUI.Borders.empty(6, 12)
                         )
                     }
-                    foreground = if (UIUtil.isUnderDarcula()) Color.WHITE else Color.BLACK
+                    foreground = if (ThemeChecker.isDarkTheme()) Color.WHITE else Color.BLACK
                 }
             })
         }

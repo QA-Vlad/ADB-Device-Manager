@@ -8,8 +8,8 @@ import com.intellij.ui.components.JBList
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.util.ui.JBFont
 import com.intellij.util.ui.JBUI
-import com.intellij.util.ui.UIUtil
 import io.github.qavlad.adbdevicemanager.services.AdbService
+import io.github.qavlad.adbdevicemanager.utils.ThemeChecker
 import io.github.qavlad.adbdevicemanager.services.AdbStateManager
 import io.github.qavlad.adbdevicemanager.services.DeviceInfo
 import io.github.qavlad.adbdevicemanager.services.DeviceOrderService
@@ -606,7 +606,7 @@ class DeviceListPanel(
                         
                         // Основное сообщение
                         val adbNotFoundLabel = JLabel("ADB not found").apply {
-                            font = UIUtil.getLabelFont().deriveFont(Font.BOLD)
+                            font = JBFont.label().deriveFont(Font.BOLD)
                             foreground = JBColor(Color(140, 60, 0), Color(220, 140, 40))
                             alignmentX = LEFT_ALIGNMENT
                         }
@@ -658,7 +658,7 @@ class DeviceListPanel(
                                     BorderFactory.createLineBorder(JBColor(Color(25, 100, 25), Color(60, 100, 40)), 2),
                                     BorderFactory.createEmptyBorder(2, 7, 2, 7)
                                 )
-                                val isDark = UIUtil.isUnderDarcula()
+                                val isDark = ThemeChecker.isDarkTheme()
                                 println("DeviceListPanel Configure button: Theme is ${if (isDark) "DARK" else "LIGHT"}, bg: $background")
                                 isContentAreaFilled = true
                                 isBorderPainted = true
