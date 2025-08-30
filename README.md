@@ -148,6 +148,30 @@ Or use **Help → Show Log in Explorer/Finder** in your IDE.
 
 Search for `ADB_Device_Manager` to filter plugin-specific logs.
 
+## 📊 Privacy & Telemetry
+
+This plugin collects anonymous crash reports to help improve stability and identify issues. **The telemetry is enabled by default**, but you can opt out at any time.
+
+### What data is collected?
+- **Crash reports** — stack traces and error information when the plugin encounters issues
+- **IDE version** — to ensure compatibility across different versions
+- **OS information** — basic system information (OS name and version)
+- **Anonymous identifier** — a unique ID based on your IDE installation (not personally identifiable)
+
+### What data is NOT collected?
+- Your source code or project files
+- Personal information or user credentials
+- Device serial numbers or identifiers
+- File paths that might contain usernames
+
+### How to opt-out?
+You can disable telemetry at any time:
+1. Go to **Settings → ADB Device Manager**
+2. Navigate to the **Other** tab
+3. Uncheck **"Send anonymous crash reports"**
+
+All telemetry data is processed through [Sentry](https://sentry.io) with strict privacy settings to ensure your data remains anonymous and secure.
+
 ## 🤝 Contributing
 
 The project is open to community contributions! As the plugin is under active development, your input is especially valuable.

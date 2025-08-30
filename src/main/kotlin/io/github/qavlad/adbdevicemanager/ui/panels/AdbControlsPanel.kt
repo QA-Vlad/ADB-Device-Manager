@@ -27,6 +27,11 @@ import javax.swing.Timer
 
 class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
 
+    companion object {
+        @Volatile
+        private var sentryInitialized = false
+    }
+
     private var lastUsedPreset: DevicePreset? = null
     private var currentPresetIndex: Int = -1
     // Отслеживаем, какой пресет дал текущий Size и DPI
@@ -43,9 +48,20 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
     private lateinit var compactActionPanel: CompactActionPanel
 
     init {
+        // Инициализируем Sentry при создании панели
+        initializeSentry()
+        
         setupUI()
         PluginLogger.info("AdbControlsPanel initialized, starting device polling...")
         startDevicePolling()
+    }
+    
+    private fun initializeSentry() {
+        if (!sentryInitialized) {
+            sentryInitialized = true
+            val settings = PluginSettings.instance
+            io.github.qavlad.adbdevicemanager.telemetry.SentryInitializer.initialize(settings.enableTelemetry)
+        }
     }
 
     private fun setupUI() {

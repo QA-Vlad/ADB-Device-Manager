@@ -4,14 +4,27 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.wm.ToolWindow
 import com.intellij.openapi.wm.ToolWindowFactory
 import com.intellij.ui.content.ContentFactory
+import io.github.qavlad.adbdevicemanager.settings.PluginSettings
+import io.github.qavlad.adbdevicemanager.telemetry.SentryInitializer
 import io.github.qavlad.adbdevicemanager.ui.panels.AdbControlsPanel
 import io.github.qavlad.adbdevicemanager.utils.PluginLogger
 import java.awt.BorderLayout
 import javax.swing.JPanel
 
 class PluginToolWindowFactory : ToolWindowFactory {
+    
+    @Volatile
+    private var sentryInitialized = false
 
     override fun createToolWindowContent(project: Project, toolWindow: ToolWindow) {
+        // Инициализируем Sentry при первом создании tool window
+        if (!sentryInitialized) {
+            sentryInitialized = true
+            val settings = PluginSettings.instance
+            // Инициализируем с учётом настройки пользователя (по умолчанию включено)
+            SentryInitializer.initialize(settings.enableTelemetry)
+        }
+        
         PluginLogger.info("Creating tool window content for ADB Device Manager")
         val mainPanel = JPanel(BorderLayout())
         val adbControlsPanel = AdbControlsPanel(project)

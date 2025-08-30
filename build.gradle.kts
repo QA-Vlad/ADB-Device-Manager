@@ -44,6 +44,9 @@ dependencies {
     implementation("com.android.tools.ddms:ddmlib:31.3.2")
     implementation("com.android.tools:sdk-common:31.3.2")
     
+    // Sentry для отслеживания крашей
+    implementation("io.sentry:sentry:7.3.0")
+    
     // Тестовые зависимости
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlin:kotlin-test-junit")

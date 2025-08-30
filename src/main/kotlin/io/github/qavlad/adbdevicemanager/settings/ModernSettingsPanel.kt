@@ -36,6 +36,7 @@ open class ModernSettingsPanel : JBPanel<ModernSettingsPanel>() {
         DISPLAY("Mirroring", AllIcons.General.FitContent, "Screen mirroring and display settings"),
         NETWORK("Wi-Fi", AllIcons.General.Web, "WiFi and network configuration"),
         DEVELOPER("Developer", AllIcons.Nodes.Tag, "Advanced developer settings"),
+        OTHER("Other", AllIcons.General.Settings, "Privacy, telemetry and other settings"),
         ABOUT("About", AllIcons.Actions.Help, "Plugin information and support")
     }
     
@@ -88,6 +89,9 @@ open class ModernSettingsPanel : JBPanel<ModernSettingsPanel>() {
     
     private val debugModeSwitch = createModernSwitch("Enable debug logging").apply {
         toolTipText = "Enable detailed logging for troubleshooting issues"
+    }
+    private val telemetrySwitch = createModernSwitch("Send anonymous crash reports").apply {
+        toolTipText = "Automatically sends anonymous crash reports to help improve stability. You can opt-out by disabling this option"
     }
     private val hitboxesSwitch = createModernSwitch("Show UI hitbox overlays").apply {
         toolTipText = "Display visual boundaries of UI elements for debugging"
@@ -171,7 +175,7 @@ open class ModernSettingsPanel : JBPanel<ModernSettingsPanel>() {
             background = JBColor(Color(248, 249, 251), Color(40, 42, 44))
             border = JBUI.Borders.compound(
                 JBUI.Borders.customLine(JBColor.border(), 0, 0, 1, 0),
-                JBUI.Borders.empty(8, 10)
+                JBUI.Borders.empty(8, 6)
             )
             
             // Создаём кнопки для каждой категории
@@ -182,7 +186,7 @@ open class ModernSettingsPanel : JBPanel<ModernSettingsPanel>() {
                 
                 // Добавляем небольшой отступ между кнопками
                 if (category != SettingsCategory.values().last()) {
-                    add(Box.createHorizontalStrut(8))
+                    add(Box.createHorizontalStrut(4))
                 }
             }
         }
@@ -200,7 +204,7 @@ open class ModernSettingsPanel : JBPanel<ModernSettingsPanel>() {
             // Начальный стиль
             border = JBUI.Borders.compound(
                 RoundedBorder(16, JBColor.border()),
-                JBUI.Borders.empty(5, 12)
+                JBUI.Borders.empty(5, 8)
             )
             background = if (UIUtil.isUnderDarcula()) Color(60, 63, 65) else Gray._230
             foreground = if (UIUtil.isUnderDarcula()) Gray._187 else Color.BLACK
@@ -244,7 +248,7 @@ open class ModernSettingsPanel : JBPanel<ModernSettingsPanel>() {
                 button.font = UIUtil.getLabelFont().deriveFont(Font.BOLD, 13f)
                 button.border = JBUI.Borders.compound(
                     RoundedBorder(16, if (UIUtil.isUnderDarcula()) Color(80, 150, 255) else Color(66, 133, 244)),
-                    JBUI.Borders.empty(5, 12)
+                    JBUI.Borders.empty(5, 8)
                 )
             } else {
                 // Невыбранные кнопки
@@ -253,7 +257,7 @@ open class ModernSettingsPanel : JBPanel<ModernSettingsPanel>() {
                 button.font = UIUtil.getLabelFont().deriveFont(13f)
                 button.border = JBUI.Borders.compound(
                     RoundedBorder(16, JBColor.border()),
-                    JBUI.Borders.empty(5, 12)
+                    JBUI.Borders.empty(5, 8)
                 )
             }
         }
@@ -296,6 +300,7 @@ open class ModernSettingsPanel : JBPanel<ModernSettingsPanel>() {
             SettingsCategory.DISPLAY -> createDisplayPanel()
             SettingsCategory.NETWORK -> createNetworkPanel()
             SettingsCategory.DEVELOPER -> createDeveloperPanel()
+            SettingsCategory.OTHER -> createOtherPanel()
             SettingsCategory.ABOUT -> createAboutPanel()
         }
     }
@@ -424,6 +429,18 @@ open class ModernSettingsPanel : JBPanel<ModernSettingsPanel>() {
                 addSpace(8)
                 
                 addInfoBox("⚠️ These options make the plugin behave as if ADB/Scrcpy are not installed")
+            }
+        }
+    }
+    
+    private fun createOtherPanel(): JPanel {
+        return createScrollablePanel {
+            addCard("Privacy & Telemetry", "Control how the plugin collects data") {
+                addSwitch(telemetrySwitch,
+                    "Helps improve plugin stability by automatically sending anonymous crash reports")
+                
+                addSpace(8)
+                addInfoBox("💡 Only crash reports and basic system info are collected. No personal data or source code is ever sent.")
             }
             
             addCard("Danger Zone", "Actions that cannot be undone") {
@@ -1347,6 +1364,7 @@ open class ModernSettingsPanel : JBPanel<ModernSettingsPanel>() {
         modified = modified || currentWifiMode != savedWifiMode
         
         modified = modified || debugModeSwitch.isSelected != settings.debugMode
+        modified = modified || telemetrySwitch.isSelected != settings.enableTelemetry
         modified = modified || hitboxesSwitch.isSelected != settings.debugHitboxes
         modified = modified || simulateAdbNotFoundSwitch.isSelected != settings.debugSimulateAdbNotFound
         modified = modified || simulateScrcpyNotFoundSwitch.isSelected != settings.debugSimulateScrcpyNotFound
@@ -1415,12 +1433,21 @@ open class ModernSettingsPanel : JBPanel<ModernSettingsPanel>() {
         
         val debugModeChanged = settings.debugMode != debugModeSwitch.isSelected
         settings.debugMode = debugModeSwitch.isSelected
+        
+        val telemetryChanged = settings.enableTelemetry != telemetrySwitch.isSelected
+        settings.enableTelemetry = telemetrySwitch.isSelected
+        
         settings.debugHitboxes = hitboxesSwitch.isSelected
         settings.debugSimulateAdbNotFound = simulateAdbNotFoundSwitch.isSelected
         settings.debugSimulateScrcpyNotFound = simulateScrcpyNotFoundSwitch.isSelected
         
         if (debugModeChanged) {
             FileLogger.reinitialize()
+        }
+        
+        if (telemetryChanged) {
+            // Обновляем состояние Sentry при изменении настройки
+            io.github.qavlad.adbdevicemanager.telemetry.SentryInitializer.setEnabled(settings.enableTelemetry)
         }
         
         PluginLogger.info(LogCategory.GENERAL, "Settings applied")
@@ -1441,6 +1468,7 @@ open class ModernSettingsPanel : JBPanel<ModernSettingsPanel>() {
         }
         
         debugModeSwitch.isSelected = settings.debugMode
+        telemetrySwitch.isSelected = settings.enableTelemetry
         hitboxesSwitch.isSelected = settings.debugHitboxes
         simulateAdbNotFoundSwitch.isSelected = settings.debugSimulateAdbNotFound
         simulateScrcpyNotFoundSwitch.isSelected = settings.debugSimulateScrcpyNotFound

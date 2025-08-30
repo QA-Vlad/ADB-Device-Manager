@@ -43,6 +43,7 @@ class PresetsDialog(
 
     init {
         PluginLogger.info(LogCategory.UI_EVENTS, "PresetsDialog: Constructor called")
+        
         title = "Presets Manager"
         setOKButtonText("Save")
         init()

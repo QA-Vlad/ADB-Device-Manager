@@ -50,6 +50,10 @@ class PluginSettings : PersistentStateComponent<PluginSettings> {
     // Максимальное значение DPI для защиты от экстремальных значений
     var maxDpiLimit: Int = 640
     
+    // Настройка для включения телеметрии (Sentry)
+    // По умолчанию включена, пользователь может отключить в настройках
+    var enableTelemetry: Boolean = true
+
     override fun getState(): PluginSettings = this
     
     override fun loadState(state: PluginSettings) {

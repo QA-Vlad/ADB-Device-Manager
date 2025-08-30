@@ -4,6 +4,8 @@ import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.startup.ProjectActivity
 import com.intellij.openapi.wm.ToolWindowManager
+import io.github.qavlad.adbdevicemanager.settings.PluginSettings
+import io.github.qavlad.adbdevicemanager.telemetry.SentryInitializer
 import io.github.qavlad.adbdevicemanager.utils.PluginLogger
 
 /**
@@ -14,7 +16,11 @@ class PluginStartupActivity : ProjectActivity {
     override suspend fun execute(project: Project) {
         PluginLogger.info("ADB Device Manager startup activity executing")
         
-        // Запускаем в UI потоке после небольшой задержки
+        // Инициализируем Sentry при запуске (opt-out модель)
+        val settings = PluginSettings.instance
+        SentryInitializer.initialize(settings.enableTelemetry)
+        
+        // Запускаем в UI потоке, после небольшой задержки
         ApplicationManager.getApplication().invokeLater {
             initializeToolWindow(project)
         }
