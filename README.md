@@ -18,6 +18,8 @@
 
 ⚡ **All in One Place** — forget about terminal and ADB commands, everything you need is now in a convenient toolbar
 
+![ezgif-7e192abe8b719d](https://github.com/user-attachments/assets/8c5dd3d2-f6e5-4af5-afdc-b4faf45bbbef)
+
 ## 🚀 Quick Start
 
 ### Installation
