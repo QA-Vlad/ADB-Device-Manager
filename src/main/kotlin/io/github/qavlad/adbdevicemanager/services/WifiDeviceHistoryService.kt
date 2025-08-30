@@ -18,7 +18,9 @@ object WifiDeviceHistoryService {
         val realSerialNumber: String? = null,  // Настоящий серийный номер устройства
         val defaultResolutionWidth: Int? = null,  // Дефолтная ширина экрана
         val defaultResolutionHeight: Int? = null, // Дефолтная высота экрана
-        val defaultDpi: Int? = null  // Дефолтный DPI
+        val defaultDpi: Int? = null,  // Дефолтный DPI
+        val alternativeIpAddresses: MutableSet<String>? = mutableSetOf(), // История всех IP-адресов устройства
+        val lastSuccessfulConnection: Long? = null // Время последнего успешного подключения
     )
 
     fun getHistory(): List<WifiDeviceHistoryEntry> {
@@ -27,7 +29,15 @@ object WifiDeviceHistoryService {
         if (json.isNullOrBlank()) return emptyList()
         return try {
             val type = object : TypeToken<List<WifiDeviceHistoryEntry>>() {}.type
-            gson.fromJson(json, type)
+            val entries: List<WifiDeviceHistoryEntry> = gson.fromJson(json, type)
+            // Исправляем null значения для старых данных
+            entries.map { entry ->
+                if (entry.alternativeIpAddresses == null) {
+                    entry.copy(alternativeIpAddresses = mutableSetOf())
+                } else {
+                    entry
+                }
+            }
         } catch (_: Exception) {
             emptyList()
         }
@@ -60,8 +70,59 @@ object WifiDeviceHistoryService {
     
     fun getDeviceByIpAddress(ipAddress: String): WifiDeviceHistoryEntry? {
         return getHistory().find { 
-            it.ipAddress == ipAddress
+            it.ipAddress == ipAddress || (it.alternativeIpAddresses?.contains(ipAddress) == true)
         }
+    }
+    
+    /**
+     * Добавляет альтернативный IP-адрес к устройству
+     */
+    fun addAlternativeIpAddress(deviceSerial: String, newIpAddress: String) {
+        val current = getHistory().toMutableList()
+        val deviceIndex = current.indexOfFirst { 
+            it.logicalSerialNumber == deviceSerial || it.realSerialNumber == deviceSerial
+        }
+        
+        if (deviceIndex >= 0) {
+            val device = current[deviceIndex]
+            val updatedIps = device.alternativeIpAddresses ?: mutableSetOf()
+            updatedIps.add(newIpAddress)
+            current[deviceIndex] = device.copy(alternativeIpAddresses = updatedIps)
+            saveHistory(current)
+        }
+    }
+    
+    /**
+     * Обновляет время последнего успешного подключения
+     */
+    fun updateLastSuccessfulConnection(deviceSerial: String) {
+        val current = getHistory().toMutableList()
+        val deviceIndex = current.indexOfFirst { 
+            it.logicalSerialNumber == deviceSerial || it.realSerialNumber == deviceSerial
+        }
+        
+        if (deviceIndex >= 0) {
+            val device = current[deviceIndex]
+            current[deviceIndex] = device.copy(
+                lastSuccessfulConnection = System.currentTimeMillis()
+            )
+            saveHistory(current)
+        }
+    }
+    
+    /**
+     * Получает все известные IP-адреса для устройства
+     */
+    fun getAllKnownIpAddresses(deviceSerial: String): Set<String> {
+        val device = getHistory().find { 
+            it.logicalSerialNumber == deviceSerial || it.realSerialNumber == deviceSerial
+        }
+        
+        return device?.let {
+            mutableSetOf(it.ipAddress).apply {
+                it.alternativeIpAddresses?.let { ips -> addAll(ips) }
+            }
+        } ?: emptySet()
     }
 
 } 

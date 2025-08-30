@@ -1173,7 +1173,23 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
 
     private fun handleConnectionResult(success: Boolean, ipAddress: String, port: Int) {
         if (success) {
+            // Даём ADB время на установку соединения
             Thread.sleep(PluginConfig.Network.CONNECTION_VERIFY_DELAY_MS)
+            
+            // Проверяем реальную доступность устройства через порт ADB
+            val isReallyConnected = NetworkConnectivityService.checkAdbPortAvailability(ipAddress, port)
+            
+            if (!isReallyConnected) {
+                // ADB сказал что, подключился, но устройство недоступно
+                ApplicationManager.getApplication().invokeLater {
+                    NotificationUtils.showWarning(
+                        "Connection Failed",
+                        "Device at $ipAddress:$port is not reachable. Check if Wi-Fi is enabled on the device."
+                    )
+                }
+                return
+            }
+            
             val devicesResult = AdbService.getConnectedDevices()
             val devices = devicesResult.getOrNull() ?: run {
                 devicesResult.onError { exception, _ ->
@@ -1197,12 +1213,23 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                         realSerialNumber = deviceInfo.displaySerialNumber  // Сохраняем настоящий серийник
                     )
                 )
-            }
-
-            ApplicationManager.getApplication().invokeLater {
-                NotificationUtils.showSuccess(project, "Successfully connected to device at $ipAddress:$port")
-                // Форсируем обновление списка устройств
-                devicePollingService.forceCombinedUpdate()
+                
+                // Очищаем флаг intentionallyStopped для этого устройства, так как оно снова доступно
+                ScrcpyService.clearIntentionallyStopped("$ipAddress:$port")
+                
+                ApplicationManager.getApplication().invokeLater {
+                    NotificationUtils.showSuccess(project, "Successfully connected to device at $ipAddress:$port")
+                    // Форсируем обновление списка устройств
+                    devicePollingService.forceCombinedUpdate()
+                }
+            } else {
+                // ADB подключился, порт доступен, но устройства в списке нет
+                ApplicationManager.getApplication().invokeLater {
+                    NotificationUtils.showWarning(
+                        "Connection Issue", 
+                        "Connected to $ipAddress:$port but device is not responding. Try reconnecting."
+                    )
+                }
             }
         } else {
             ApplicationManager.getApplication().invokeLater {
@@ -1456,7 +1483,16 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
                         realSerialNumber = deviceInfo.displaySerialNumber  // Сохраняем настоящий серийник
                     )
                 )
+                
+                // Очищаем флаг intentionallyStopped при успешном подключении
+                ScrcpyService.clearIntentionallyStopped("$ipAddress:5555")
+                deviceInfo.displaySerialNumber?.let { ScrcpyService.clearIntentionallyStopped(it) }
+                ScrcpyService.clearIntentionallyStopped(deviceInfo.logicalSerialNumber)
+            } else {
+                // Если не нашли устройство в списке, всё равно очищаем флаг для IP адреса
+                ScrcpyService.clearIntentionallyStopped("$ipAddress:5555")
             }
+            
             NotificationUtils.showSuccess(project, "Successfully connected to $deviceName at $ipAddress.")
             // Форсируем обновление списка устройств с небольшой задержкой
             SwingUtilities.invokeLater {
@@ -1554,8 +1590,28 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
 
     private fun launchScrcpyProcess(deviceInfo: DeviceInfo, scrcpyPath: String, indicator: ProgressIndicator) {
         val serialToUse = deviceInfo.logicalSerialNumber
+        
+        // Для Wi-Fi устройств проверяем доступность перед запуском
+        if (serialToUse.contains(":")) {
+            indicator.text = "Checking device connectivity..."
+            val parts = serialToUse.split(":")
+            if (parts.size == 2) {
+                val ipAddress = parts[0]
+                val port = parts[1].toIntOrNull() ?: 5555
+                
+                if (!NetworkConnectivityService.checkAdbPortAvailability(ipAddress, port)) {
+                    ApplicationManager.getApplication().invokeLater {
+                        NotificationUtils.showWarning(
+                            "Device Unreachable",
+                            "${deviceInfo.displayName} is not reachable at $serialToUse. Check Wi-Fi connection."
+                        )
+                    }
+                    return
+                }
+            }
+        }
+        
         indicator.text = "Running: scrcpy -s $serialToUse"
-
         val success = ScrcpyService.launchScrcpy(scrcpyPath, serialToUse, project)
 
         ApplicationManager.getApplication().invokeLater {

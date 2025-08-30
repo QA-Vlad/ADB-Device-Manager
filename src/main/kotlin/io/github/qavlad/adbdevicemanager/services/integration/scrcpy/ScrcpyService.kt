@@ -10,6 +10,7 @@ import io.github.qavlad.adbdevicemanager.config.PluginConfig
 import io.github.qavlad.adbdevicemanager.core.Result
 import io.github.qavlad.adbdevicemanager.services.AdbService
 import io.github.qavlad.adbdevicemanager.services.AdbStateManager
+import io.github.qavlad.adbdevicemanager.services.NetworkConnectivityService
 import io.github.qavlad.adbdevicemanager.services.PresetStorageService
 import io.github.qavlad.adbdevicemanager.services.WifiDeviceHistoryService
 import io.github.qavlad.adbdevicemanager.services.integration.scrcpy.ui.ScrcpyCompatibilityDialog
@@ -154,6 +155,21 @@ object ScrcpyService {
             Thread.sleep(5000)
             intentionallyStopped.remove(serialNumber)
         }.start()
+    }
+    
+    /**
+     * Очищает флаг intentionallyStopped для устройства
+     */
+    fun clearIntentionallyStopped(serialNumber: String) {
+        intentionallyStopped.remove(serialNumber)
+        // Также очищаем для всех связанных серийников
+        val relatedSerials = findRelatedSerialNumbers(serialNumber)
+        relatedSerials.forEach { 
+            intentionallyStopped.remove(it)
+        }
+        PluginLogger.info(LogCategory.SCRCPY, 
+            "Cleared intentionallyStopped flag for device %s and related serials", 
+            serialNumber)
     }
 
     /**
@@ -748,9 +764,28 @@ object ScrcpyService {
         
         // Проверяем базовые условия сразу
         if (wasIntentionallyStopped(serialNumber)) {
-            println("ADB_Randomizer: Device $serialNumber was intentionally stopped, not launching scrcpy")
-            PluginLogger.info(LogCategory.SCRCPY, "Device %s was intentionally stopped, not launching scrcpy", serialNumber)
-            return false
+            // Если устройство помечено как intentionally stopped, проверяем его доступность
+            if (serialNumber.contains(":")) {
+                val parts = serialNumber.split(":")
+                if (parts.size == 2) {
+                    val ip = parts[0]
+                    val port = parts[1].toIntOrNull() ?: 5555
+                    if (NetworkConnectivityService.checkAdbPortAvailability(ip, port)) {
+                        // Устройство доступно, очищаем флаг и продолжаем
+                        println("ADB_Randomizer: Device $serialNumber is now reachable, clearing intentionally stopped flag")
+                        clearIntentionallyStopped(serialNumber)
+                    } else {
+                        // Устройство недоступно, не запускаем
+                        println("ADB_Randomizer: Device $serialNumber was intentionally stopped and is still unreachable")
+                        PluginLogger.info(LogCategory.SCRCPY, "Device %s was intentionally stopped and is still unreachable", serialNumber)
+                        return false
+                    }
+                }
+            } else {
+                // USB устройство - всегда очищаем флаг если оно в списке intentionally stopped
+                println("ADB_Randomizer: USB device $serialNumber was intentionally stopped, clearing flag")
+                clearIntentionallyStopped(serialNumber)
+            }
         }
         
         if (scrcpyPath.isBlank() || serialNumber.isBlank()) {
@@ -1579,22 +1614,69 @@ object ScrcpyService {
         // Получаем имя устройства из истории или используем IP
         val deviceName = getDeviceNameFromHistory(wifiSerial) ?: wifiSerial
         
-        // Сразу показываем уведомление о начале процесса переподключения
-        ApplicationManager.getApplication().invokeLater {
-            val project = lastProject
-            if (project != null) {
-                NotificationUtils.showInfo(
-                    project,
-                    "Scrcpy will be restarted for $deviceName. Please wait..."
-                )
-            }
-        }
+        // Сначала проверяем доступность устройства по всем известным IP
+        val connectivityCheckFuture = NetworkConnectivityService.checkDeviceConnectivity(wifiSerial)
         
         Thread {
             try {
-                // Извлекаем IP и порт
-                val ipAddress = wifiSerial.substringBefore(":")
-                val port = wifiSerial.substringAfter(":").toIntOrNull() ?: 5555
+                val connectivityResults = connectivityCheckFuture.get(5, TimeUnit.SECONDS)
+                
+                // Проверяем, есть ли хотя бы один доступный IP
+                val reachableResult = connectivityResults.firstOrNull { it.isReachable }
+                
+                if (reachableResult == null) {
+                    // Устройство недоступно по всем известным IP
+                    PluginLogger.warn(LogCategory.SCRCPY, 
+                        "[CONNECTIVITY] Device %s is not reachable on any known IP addresses", 
+                        wifiSerial)
+                    
+                    // Помечаем как намеренно остановленное, чтобы не показывать диалог ошибки scrcpy
+                    intentionallyStopped.add(wifiSerial)
+                    
+                    // Показываем простое уведомление о проблеме подключения
+                    ApplicationManager.getApplication().invokeLater {
+                        val checkedCount = connectivityResults.size
+                        val message = when {
+                            checkedCount > 1 -> "$deviceName: Device unreachable. Checked $checkedCount known IPs. Check Wi-Fi connection."
+                            else -> "$deviceName: Device unreachable at $wifiSerial. Check if Wi-Fi is enabled on device."
+                        }
+                        
+                        NotificationUtils.showWarning(
+                            "Device Connection Lost",
+                            message
+                        )
+                    }
+                    return@Thread
+                }
+                
+                // Устройство доступно, пытаемся переподключить через ADB
+                PluginLogger.info(LogCategory.SCRCPY, 
+                    "[CONNECTIVITY] Device %s is reachable at %s, attempting ADB reconnection", 
+                    wifiSerial, reachableResult.ipAddress)
+                
+                // Обновляем историю успешного подключения
+                WifiDeviceHistoryService.updateLastSuccessfulConnection(wifiSerial)
+                
+                // Если доступный IP отличается от текущего, добавляем его в альтернативные
+                val currentIp = wifiSerial.substringBefore(":")
+                if (reachableResult.ipAddress != currentIp) {
+                    WifiDeviceHistoryService.addAlternativeIpAddress(wifiSerial, reachableResult.ipAddress)
+                }
+                
+                // Показываем уведомление о начале процесса переподключения
+                ApplicationManager.getApplication().invokeLater {
+                    val project = lastProject
+                    if (project != null) {
+                        NotificationUtils.showInfo(
+                            project,
+                            "Scrcpy will be restarted for $deviceName. Please wait..."
+                        )
+                    }
+                }
+                
+                // Используем доступный IP адрес для переподключения
+                val ipAddress = reachableResult.ipAddress
+                val port = reachableResult.port
                 
                 PluginLogger.info(LogCategory.SCRCPY, 
                     "[AUTO-RECONNECT] Attempting to reconnect device %s", 
@@ -1668,9 +1750,18 @@ object ScrcpyService {
                 }
             } catch (e: Exception) {
                 PluginLogger.warn(LogCategory.SCRCPY, 
-                    "[AUTO-RECONNECT] Error reconnecting device: %s", 
+                    "[AUTO-RECONNECT] Error during connectivity check or reconnection: %s", 
                     e.message)
                 intentionallyStopped.add(wifiSerial)
+                
+                // Показываем простое уведомление об ошибке
+                ApplicationManager.getApplication().invokeLater {
+                    val project = lastProject ?: ProjectManager.getInstance().defaultProject
+                    NotificationUtils.showError(
+                        project,
+                        "Failed to check connectivity for $deviceName: ${e.message}"
+                    )
+                }
             }
         }.start()
     }
