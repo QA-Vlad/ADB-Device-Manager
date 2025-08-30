@@ -1,0 +1,87 @@
+{
+  "id": "iphone-devices",
+  "name": "iPhone",
+  "presets": [
+    {
+      "label": "iPhone 17 Pro Max",
+      "size": "1320x2868",
+      "dpi": "460"
+    },
+    {
+      "label": "iPhone 17 Pro",
+      "size": "1206x2622",
+      "dpi": "460"
+    },
+    {
+      "label": "iPhone 17 Air",
+      "size": "1290x2796",
+      "dpi": "460"
+    },
+    {
+      "label": "iPhone 17",
+      "size": "1179x2556",
+      "dpi": "460"
+    },
+    {
+      "label": "iPhone 16 Pro Max",
+      "size": "1320x2868",
+      "dpi": "460"
+    },
+    {
+      "label": "iPhone 16 Pro",
+      "size": "1206x2622",
+      "dpi": "460"
+    },
+    {
+      "label": "iPhone 16 Plus",
+      "size": "1290x2796",
+      "dpi": "460"
+    },
+    {
+      "label": "iPhone 16",
+      "size": "1179x2556",
+      "dpi": "460"
+    },
+    {
+      "label": "iPhone SE 4",
+      "size": "1170x2532",
+      "dpi": "460"
+    },
+    {
+      "label": "iPhone 15 Pro Max",
+      "size": "1290x2796",
+      "dpi": "460"
+    },
+    {
+      "label": "iPhone 15 Pro",
+      "size": "1179x2556",
+      "dpi": "460"
+    },
+    {
+      "label": "iPhone 15 Plus",
+      "size": "1290x2796",
+      "dpi": "460"
+    },
+    {
+      "label": "iPhone 15",
+      "size": "1179x2556",
+      "dpi": "460"
+    },
+    {
+      "label": "iPhone 14 Pro Max",
+      "size": "1290x2796",
+      "dpi": "460"
+    },
+    {
+      "label": "iPhone 14 Pro",
+      "size": "1179x2556",
+      "dpi": "460"
+    },
+    {
+      "label": "iPhone 14",
+      "size": "1170x2532",
+      "dpi": "460"
+    }
+  ],
+  "isDefault": true
+}

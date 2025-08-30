@@ -1,0 +1,102 @@
+{
+  "id": "foldable-devices",
+  "name": "Foldable Phones",
+  "presets": [
+    {
+      "label": "Galaxy Z Fold6 (Inner)",
+      "size": "1856x2160",
+      "dpi": "374"
+    },
+    {
+      "label": "Galaxy Z Fold6 (Cover)",
+      "size": "968x2376",
+      "dpi": "387"
+    },
+    {
+      "label": "Galaxy Z Flip6",
+      "size": "1080x2640",
+      "dpi": "426"
+    },
+    {
+      "label": "Pixel 9 Pro Fold (Inner)",
+      "size": "2076x2152",
+      "dpi": "373"
+    },
+    {
+      "label": "Pixel 9 Pro Fold (Cover)",
+      "size": "1080x2424",
+      "dpi": "422"
+    },
+    {
+      "label": "Pixel 10 Pro Fold (Inner)",
+      "size": "2156x2076",
+      "dpi": "373"
+    },
+    {
+      "label": "Pixel 10 Pro Fold (Cover)",
+      "size": "1080x2364",
+      "dpi": "408"
+    },
+    {
+      "label": "Moto Razr 50 Ultra (Inner)",
+      "size": "1080x2640",
+      "dpi": "413"
+    },
+    {
+      "label": "Moto Razr 50 Ultra (Cover)",
+      "size": "1080x1272",
+      "dpi": "366"
+    },
+    {
+      "label": "Moto Razr 50 (Inner)",
+      "size": "1080x2640",
+      "dpi": "413"
+    },
+    {
+      "label": "Moto Razr 50 (Cover)",
+      "size": "1066x1056",
+      "dpi": "413"
+    },
+    {
+      "label": "Oppo Find N3 (Inner)",
+      "size": "1792x1920",
+      "dpi": "426"
+    },
+    {
+      "label": "Oppo Find N3 (Cover)",
+      "size": "1116x2484",
+      "dpi": "431"
+    },
+    {
+      "label": "Honor Magic V3 (Inner)",
+      "size": "1856x2156",
+      "dpi": "402"
+    },
+    {
+      "label": "Honor Magic V3 (Cover)",
+      "size": "1060x2376",
+      "dpi": "402"
+    },
+    {
+      "label": "Xiaomi Mix Fold 4 (Inner)",
+      "size": "1856x2160",
+      "dpi": "418"
+    },
+    {
+      "label": "Xiaomi Mix Fold 4 (Cover)",
+      "size": "1080x2520",
+      "dpi": "418"
+    },
+    {
+      "label": "Vivo X Fold3 Pro (Inner)",
+      "size": "2160x2480",
+      "dpi": "413"
+    },
+    {
+      "label": "Vivo X Fold3 Pro (Cover)",
+      "size": "1172x2748",
+      "dpi": "413"
+    }
+  ],
+  "isDefault": true
+}

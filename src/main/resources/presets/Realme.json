@@ -1,0 +1,57 @@
+{
+  "id": "realme-devices", 
+  "name": "Realme",
+  "presets": [
+    {
+      "label": "Realme GT 6 Pro",
+      "size": "1264x2780",
+      "dpi": "450"
+    },
+    {
+      "label": "Realme GT 6",
+      "size": "1264x2780",
+      "dpi": "450"
+    },
+    {
+      "label": "Realme GT 5 Pro",
+      "size": "1264x2780",
+      "dpi": "450"
+    },
+    {
+      "label": "Realme 13 Pro+",
+      "size": "1080x2412",
+      "dpi": "394"
+    },
+    {
+      "label": "Realme 13 Pro",
+      "size": "1080x2412",
+      "dpi": "394"
+    },
+    {
+      "label": "Realme 13",
+      "size": "1080x2400",
+      "dpi": "395"
+    },
+    {
+      "label": "Realme 12 Pro+",
+      "size": "1080x2412",
+      "dpi": "394"
+    },
+    {
+      "label": "Realme 12 Pro",
+      "size": "1080x2412",
+      "dpi": "394"
+    },
+    {
+      "label": "Realme 12",
+      "size": "1080x2400",
+      "dpi": "391"
+    },
+    {
+      "label": "Realme C67",
+      "size": "1080x2400",
+      "dpi": "391"
+    }
+  ],
+  "isDefault": true
+}

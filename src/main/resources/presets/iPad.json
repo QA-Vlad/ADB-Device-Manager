@@ -1,0 +1,57 @@
+{
+  "id": "ipad-devices",
+  "name": "iPad",
+  "presets": [
+    {
+      "label": "iPad Pro 13\" M4",
+      "size": "2064x2752",
+      "dpi": "264"
+    },
+    {
+      "label": "iPad Pro 11\" M4",
+      "size": "1668x2420",
+      "dpi": "264"
+    },
+    {
+      "label": "iPad Air 13\"",
+      "size": "2048x2732",
+      "dpi": "264"
+    },
+    {
+      "label": "iPad Air 11\"",
+      "size": "1640x2360",
+      "dpi": "264"
+    },
+    {
+      "label": "iPad Mini 7",
+      "size": "1488x2266",
+      "dpi": "326"
+    },
+    {
+      "label": "iPad Pro 12.9\" M2",
+      "size": "2048x2732",
+      "dpi": "264"
+    },
+    {
+      "label": "iPad Pro 11\" M2",
+      "size": "1668x2388",
+      "dpi": "264"
+    },
+    {
+      "label": "iPad 10th Gen",
+      "size": "1640x2360",
+      "dpi": "264"
+    },
+    {
+      "label": "iPad 9th Gen",
+      "size": "1620x2160",
+      "dpi": "264"
+    },
+    {
+      "label": "iPad Mini 6",
+      "size": "1488x2266",
+      "dpi": "326"
+    }
+  ],
+  "isDefault": true
+}

@@ -1,0 +1,62 @@
+{
+  "id": "huawei-devices",
+  "name": "Huawei & Honor",
+  "presets": [
+    {
+      "label": "Huawei Mate 70 Pro",
+      "size": "1312x2848",
+      "dpi": "449"
+    },
+    {
+      "label": "Huawei Mate 70",
+      "size": "1224x2700",
+      "dpi": "442"
+    },
+    {
+      "label": "Huawei P70 Pro",
+      "size": "1300x2844",
+      "dpi": "456"
+    },
+    {
+      "label": "Huawei P70",
+      "size": "1220x2700",
+      "dpi": "449"
+    },
+    {
+      "label": "Huawei Mate 60 Pro",
+      "size": "1260x2720",
+      "dpi": "440"
+    },
+    {
+      "label": "Honor Magic 6 Pro",
+      "size": "1280x2800",
+      "dpi": "453"
+    },
+    {
+      "label": "Honor Magic 6",
+      "size": "1224x2664",
+      "dpi": "435"
+    },
+    {
+      "label": "Honor 200 Pro",
+      "size": "1224x2700",
+      "dpi": "437"
+    },
+    {
+      "label": "Honor 200",
+      "size": "1200x2664",
+      "dpi": "436"
+    },
+    {
+      "label": "Honor 90",
+      "size": "1200x2664",
+      "dpi": "435"
+    },
+    {
+      "label": "Honor X9b",
+      "size": "1080x2436",
+      "dpi": "397"
+    }
+  ],
+  "isDefault": true
+}

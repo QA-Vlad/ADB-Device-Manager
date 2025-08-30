@@ -1,0 +1,47 @@
+{
+  "id": "meizu-devices",
+  "name": "Meizu",
+  "presets": [
+    {
+      "label": "Meizu 22 Pro",
+      "size": "1260x2800",
+      "dpi": "453"
+    },
+    {
+      "label": "Meizu 22",
+      "size": "1080x2400",
+      "dpi": "402"
+    },
+    {
+      "label": "Meizu 21 Pro",
+      "size": "1440x3192",
+      "dpi": "509"
+    },
+    {
+      "label": "Meizu 21",
+      "size": "1080x2340",
+      "dpi": "398"
+    },
+    {
+      "label": "Meizu 20 Pro",
+      "size": "1440x3200",
+      "dpi": "509"
+    },
+    {
+      "label": "Meizu 20",
+      "size": "1080x2400",
+      "dpi": "395"
+    },
+    {
+      "label": "Meizu Note 21",
+      "size": "1080x2400",
+      "dpi": "395"
+    },
+    {
+      "label": "Meizu M20",
+      "size": "720x1600",
+      "dpi": "269"
+    }
+  ],
+  "isDefault": true
+}

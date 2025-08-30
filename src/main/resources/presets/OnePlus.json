@@ -1,7 +1,42 @@
 {
-  "id": "example-oneplus",
+  "id": "oneplus-devices",
   "name": "OnePlus",
   "presets": [
+    {
+      "label": "OnePlus 15",
+      "size": "1240x2772",
+      "dpi": "450"
+    },
+    {
+      "label": "OnePlus 13",
+      "size": "1440x3168",
+      "dpi": "510"
+    },
+    {
+      "label": "OnePlus 13s",
+      "size": "1220x2712",
+      "dpi": "443"
+    },
+    {
+      "label": "OnePlus 12",
+      "size": "1440x3168",
+      "dpi": "510"
+    },
+    {
+      "label": "OnePlus 12R",
+      "size": "1240x2772",
+      "dpi": "450"
+    },
+    {
+      "label": "OnePlus Nord 4",
+      "size": "1240x2772",
+      "dpi": "450"
+    },
+    {
+      "label": "OnePlus Nord CE 4",
+      "size": "1080x2412",
+      "dpi": "394"
+    },
     {
       "label": "OnePlus 11",
       "size": "1440x3216",
@@ -13,19 +48,14 @@
       "dpi": "525"
     },
     {
-      "label": "OnePlus 9",
-      "size": "1080x2400",
-      "dpi": "402"
+      "label": "OnePlus 10T",
+      "size": "1080x2412",
+      "dpi": "394"
     },
     {
-      "label": "OnePlus 8T",
-      "size": "1080x2400",
-      "dpi": "402"
-    },
-    {
-      "label": "OnePlus 7 Pro",
-      "size": "1440x3120",
-      "dpi": "516"
+      "label": "OnePlus Ace 3",
+      "size": "1240x2772",
+      "dpi": "450"
     }
   ],
   "isDefault": true

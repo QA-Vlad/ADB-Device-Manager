@@ -1,0 +1,57 @@
+{
+  "id": "motorola-devices",
+  "name": "Motorola",
+  "presets": [
+    {
+      "label": "Moto Edge 50 Ultra",
+      "size": "1220x2712",
+      "dpi": "444"
+    },
+    {
+      "label": "Moto Edge 50 Pro",
+      "size": "1220x2712",
+      "dpi": "444"
+    },
+    {
+      "label": "Moto Edge 50",
+      "size": "1220x2712",
+      "dpi": "444"
+    },
+    {
+      "label": "Moto Edge 50 Fusion",
+      "size": "1080x2400",
+      "dpi": "393"
+    },
+    {
+      "label": "Moto G75",
+      "size": "1080x2388",
+      "dpi": "387"
+    },
+    {
+      "label": "Moto G55",
+      "size": "1080x2400",
+      "dpi": "405"
+    },
+    {
+      "label": "Moto G54",
+      "size": "1080x2400",
+      "dpi": "405"
+    },
+    {
+      "label": "Moto G84",
+      "size": "1080x2400",
+      "dpi": "409"
+    },
+    {
+      "label": "Moto G34",
+      "size": "720x1600",
+      "dpi": "269"
+    },
+    {
+      "label": "ThinkPhone",
+      "size": "1080x2400",
+      "dpi": "388"
+    }
+  ],
+  "isDefault": true
+}

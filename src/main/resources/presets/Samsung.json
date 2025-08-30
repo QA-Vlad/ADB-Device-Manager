@@ -1,0 +1,72 @@
+{
+  "id": "samsung-devices",
+  "name": "Samsung",
+  "presets": [
+    {
+      "label": "Galaxy S26 Ultra",
+      "size": "1440x3120",
+      "dpi": "495"
+    },
+    {
+      "label": "Galaxy S26 Pro",
+      "size": "1440x3120",
+      "dpi": "513"
+    },
+    {
+      "label": "Galaxy S26",
+      "size": "1080x2340",
+      "dpi": "422"
+    },
+    {
+      "label": "Galaxy S25 Ultra",
+      "size": "1440x3120",
+      "dpi": "498"
+    },
+    {
+      "label": "Galaxy S25+",
+      "size": "1440x3120",
+      "dpi": "513"
+    },
+    {
+      "label": "Galaxy S25",
+      "size": "1080x2340",
+      "dpi": "422"
+    },
+    {
+      "label": "Galaxy S25 Edge",
+      "size": "1260x2800",
+      "dpi": "451"
+    },
+    {
+      "label": "Galaxy A55",
+      "size": "1080x2340",
+      "dpi": "390"
+    },
+    {
+      "label": "Galaxy A35",
+      "size": "1080x2340",
+      "dpi": "390"
+    },
+    {
+      "label": "Galaxy S24 Ultra",
+      "size": "1440x3120",
+      "dpi": "505"
+    },
+    {
+      "label": "Galaxy S24+",
+      "size": "1440x3120",
+      "dpi": "513"
+    },
+    {
+      "label": "Galaxy S24",
+      "size": "1080x2340",
+      "dpi": "416"
+    },
+    {
+      "label": "Galaxy A54",
+      "size": "1080x2340",
+      "dpi": "390"
+    }
+  ],
+  "isDefault": true
+}

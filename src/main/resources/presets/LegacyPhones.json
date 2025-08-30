@@ -1,0 +1,117 @@
+{
+  "id": "legacy-phones",
+  "name": "Legacy Phones (2018-2020)",
+  "presets": [
+    {
+      "label": "Samsung Galaxy S10+",
+      "size": "1440x3040",
+      "dpi": "522"
+    },
+    {
+      "label": "Samsung Galaxy S10",
+      "size": "1440x3040",
+      "dpi": "550"
+    },
+    {
+      "label": "Samsung Galaxy Note 10+",
+      "size": "1440x3040",
+      "dpi": "498"
+    },
+    {
+      "label": "Samsung Galaxy S20",
+      "size": "1440x3200",
+      "dpi": "563"
+    },
+    {
+      "label": "Samsung Galaxy A50",
+      "size": "1080x2340",
+      "dpi": "403"
+    },
+    {
+      "label": "Samsung Galaxy A20",
+      "size": "720x1560",
+      "dpi": "268"
+    },
+    {
+      "label": "iPhone 11 Pro Max",
+      "size": "1242x2688",
+      "dpi": "458"
+    },
+    {
+      "label": "iPhone 11 Pro",
+      "size": "1125x2436",
+      "dpi": "458"
+    },
+    {
+      "label": "iPhone 11",
+      "size": "828x1792",
+      "dpi": "326"
+    },
+    {
+      "label": "iPhone XR",
+      "size": "828x1792",
+      "dpi": "326"
+    },
+    {
+      "label": "Google Pixel 4 XL",
+      "size": "1440x3040",
+      "dpi": "537"
+    },
+    {
+      "label": "Google Pixel 4",
+      "size": "1080x2280",
+      "dpi": "444"
+    },
+    {
+      "label": "Google Pixel 3a",
+      "size": "1080x2220",
+      "dpi": "441"
+    },
+    {
+      "label": "OnePlus 7 Pro",
+      "size": "1440x3120",
+      "dpi": "516"
+    },
+    {
+      "label": "OnePlus 8 Pro",
+      "size": "1440x3168",
+      "dpi": "513"
+    },
+    {
+      "label": "Xiaomi Mi 9T",
+      "size": "1080x2340",
+      "dpi": "403"
+    },
+    {
+      "label": "Xiaomi Redmi Note 8",
+      "size": "1080x2340",
+      "dpi": "409"
+    },
+    {
+      "label": "Huawei P30 Pro",
+      "size": "1080x2340",
+      "dpi": "398"
+    },
+    {
+      "label": "Huawei Y6 2019",
+      "size": "720x1560",
+      "dpi": "282"
+    },
+    {
+      "label": "Nokia 7.2",
+      "size": "1080x2280",
+      "dpi": "400"
+    },
+    {
+      "label": "Realme 5 Pro",
+      "size": "1080x2340",
+      "dpi": "409"
+    },
+    {
+      "label": "LG G8 ThinQ",
+      "size": "1440x3120",
+      "dpi": "564"
+    }
+  ],
+  "isDefault": true
+}

@@ -1,0 +1,72 @@
+{
+  "id": "google-pixel",
+  "name": "Google Pixel",
+  "presets": [
+    {
+      "label": "Pixel 10 Pro XL",
+      "size": "1344x2992",
+      "dpi": "486"
+    },
+    {
+      "label": "Pixel 10 Pro",
+      "size": "1280x2856",
+      "dpi": "495"
+    },
+    {
+      "label": "Pixel 10",
+      "size": "1080x2424",
+      "dpi": "422"
+    },
+    {
+      "label": "Pixel 9 Pro XL",
+      "size": "1344x2992",
+      "dpi": "486"
+    },
+    {
+      "label": "Pixel 9 Pro",
+      "size": "1280x2856",
+      "dpi": "495"
+    },
+    {
+      "label": "Pixel 9",
+      "size": "1080x2424",
+      "dpi": "422"
+    },
+    {
+      "label": "Pixel 9a",
+      "size": "1080x2424",
+      "dpi": "422"
+    },
+    {
+      "label": "Pixel 8 Pro",
+      "size": "1344x2992",
+      "dpi": "489"
+    },
+    {
+      "label": "Pixel 8",
+      "size": "1080x2400",
+      "dpi": "428"
+    },
+    {
+      "label": "Pixel 8a",
+      "size": "1080x2400",
+      "dpi": "430"
+    },
+    {
+      "label": "Pixel 7 Pro",
+      "size": "1440x3120",
+      "dpi": "512"
+    },
+    {
+      "label": "Pixel 7",
+      "size": "1080x2400",
+      "dpi": "416"
+    },
+    {
+      "label": "Pixel 7a",
+      "size": "1080x2400",
+      "dpi": "429"
+    }
+  ],
+  "isDefault": true
+}

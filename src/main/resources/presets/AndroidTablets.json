@@ -1,0 +1,67 @@
+{
+  "id": "android-tablets",
+  "name": "Android Tablets",
+  "presets": [
+    {
+      "label": "Galaxy Tab S10 Ultra",
+      "size": "1848x2960",
+      "dpi": "240"
+    },
+    {
+      "label": "Galaxy Tab S10+",
+      "size": "1752x2800",
+      "dpi": "266"
+    },
+    {
+      "label": "Galaxy Tab S10",
+      "size": "1600x2560",
+      "dpi": "274"
+    },
+    {
+      "label": "Galaxy Tab S10 FE",
+      "size": "1440x2304",
+      "dpi": "249"
+    },
+    {
+      "label": "Xiaomi Pad 7 Pro",
+      "size": "1800x2880",
+      "dpi": "309"
+    },
+    {
+      "label": "Xiaomi Pad 7",
+      "size": "1800x2880",
+      "dpi": "309"
+    },
+    {
+      "label": "OnePlus Pad 2",
+      "size": "2120x3000",
+      "dpi": "296"
+    },
+    {
+      "label": "OnePlus Pad Go",
+      "size": "1200x2000",
+      "dpi": "220"
+    },
+    {
+      "label": "Lenovo Tab P12 Pro",
+      "size": "1600x2560",
+      "dpi": "240"
+    },
+    {
+      "label": "Lenovo Tab P11 Plus",
+      "size": "1200x2000",
+      "dpi": "212"
+    },
+    {
+      "label": "Huawei MatePad Pro 13.2",
+      "size": "1920x2880",
+      "dpi": "262"
+    },
+    {
+      "label": "Huawei MatePad 11.5",
+      "size": "1440x2200",
+      "dpi": "229"
+    }
+  ],
+  "isDefault": true
+}

@@ -1,0 +1,57 @@
+{
+  "id": "vivo-devices",
+  "name": "Vivo",
+  "presets": [
+    {
+      "label": "Vivo X100 Ultra",
+      "size": "1260x2800",
+      "dpi": "453"
+    },
+    {
+      "label": "Vivo X100 Pro",
+      "size": "1260x2800",
+      "dpi": "453"
+    },
+    {
+      "label": "Vivo X100",
+      "size": "1260x2800",
+      "dpi": "453"
+    },
+    {
+      "label": "Vivo V30 Pro",
+      "size": "1260x2800",
+      "dpi": "453"
+    },
+    {
+      "label": "Vivo V30",
+      "size": "1260x2800",
+      "dpi": "453"
+    },
+    {
+      "label": "iQOO 13",
+      "size": "1440x3168",
+      "dpi": "510"
+    },
+    {
+      "label": "iQOO 12 Pro",
+      "size": "1440x3200",
+      "dpi": "517"
+    },
+    {
+      "label": "iQOO 12",
+      "size": "1260x2800",
+      "dpi": "453"
+    },
+    {
+      "label": "iQOO Neo 9 Pro",
+      "size": "1260x2800",
+      "dpi": "453"
+    },
+    {
+      "label": "Vivo Y100",
+      "size": "1080x2400",
+      "dpi": "388"
+    }
+  ],
+  "isDefault": true
+}

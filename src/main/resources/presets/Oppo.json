@@ -1,0 +1,57 @@
+{
+  "id": "oppo-devices",
+  "name": "Oppo",
+  "presets": [
+    {
+      "label": "Oppo Find X7 Ultra",
+      "size": "1440x3168",
+      "dpi": "510"
+    },
+    {
+      "label": "Oppo Find X7",
+      "size": "1264x2780",
+      "dpi": "450"
+    },
+    {
+      "label": "Oppo Find X6 Pro",
+      "size": "1440x3168",
+      "dpi": "510"
+    },
+    {
+      "label": "Oppo Reno12 Pro",
+      "size": "1080x2412",
+      "dpi": "394"
+    },
+    {
+      "label": "Oppo Reno12",
+      "size": "1080x2412",
+      "dpi": "394"
+    },
+    {
+      "label": "Oppo Reno12 F",
+      "size": "1080x2400",
+      "dpi": "395"
+    },
+    {
+      "label": "Oppo Reno11 Pro",
+      "size": "1240x2772",
+      "dpi": "450"
+    },
+    {
+      "label": "Oppo Reno11",
+      "size": "1080x2412",
+      "dpi": "394"
+    },
+    {
+      "label": "Oppo A79",
+      "size": "1080x2400",
+      "dpi": "391"
+    },
+    {
+      "label": "Oppo A18",
+      "size": "720x1612",
+      "dpi": "269"
+    }
+  ],
+  "isDefault": true
+}

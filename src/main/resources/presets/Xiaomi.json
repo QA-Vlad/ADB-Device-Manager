@@ -1,0 +1,67 @@
+{
+  "id": "xiaomi-devices",
+  "name": "Xiaomi",
+  "presets": [
+    {
+      "label": "Xiaomi 15 Pro",
+      "size": "1440x3200",
+      "dpi": "522"
+    },
+    {
+      "label": "Xiaomi 15",
+      "size": "1200x2670",
+      "dpi": "460"
+    },
+    {
+      "label": "Xiaomi 14 Ultra",
+      "size": "1440x3200",
+      "dpi": "522"
+    },
+    {
+      "label": "Xiaomi 14 Pro",
+      "size": "1440x3200",
+      "dpi": "522"
+    },
+    {
+      "label": "Xiaomi 14",
+      "size": "1200x2670",
+      "dpi": "460"
+    },
+    {
+      "label": "Redmi Note 14 Pro",
+      "size": "1220x2712",
+      "dpi": "446"
+    },
+    {
+      "label": "Redmi Note 14",
+      "size": "1080x2400",
+      "dpi": "395"
+    },
+    {
+      "label": "POCO X7 Pro",
+      "size": "1220x2712",
+      "dpi": "446"
+    },
+    {
+      "label": "POCO X7",
+      "size": "1080x2400",
+      "dpi": "395"
+    },
+    {
+      "label": "POCO F6 Pro",
+      "size": "1440x3200",
+      "dpi": "526"
+    },
+    {
+      "label": "Redmi K70",
+      "size": "1440x3200",
+      "dpi": "526"
+    },
+    {
+      "label": "Mi 13T Pro",
+      "size": "1220x2712",
+      "dpi": "446"
+    }
+  ],
+  "isDefault": true
+}
