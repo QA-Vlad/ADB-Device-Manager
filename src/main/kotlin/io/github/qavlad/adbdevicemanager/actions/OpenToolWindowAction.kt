@@ -23,6 +23,7 @@ class OpenToolWindowAction : AnAction(), DumbAware {
         }
     }
     
+    @Suppress("OVERRIDE_DEPRECATION") // Required for action updates
     override fun update(e: AnActionEvent) {
         // Action is always available when a project is open
         e.presentation.isEnabledAndVisible = e.project != null
