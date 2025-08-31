@@ -96,10 +96,8 @@
     <!--suppress PluginXmlValidity -->
     <depends optional="true" config-file="plugin-android.xml">org.jetbrains.android</depends>
 
-    <!-- 6. Секция расширений. Здесь мы "встраиваемся" в IDE. -->
+    <!-- Секция расширений. Здесь мы "встраиваемся" в IDE. -->
     <extensions defaultExtensionNs="com.intellij">
-        <!-- Startup activity для инициализации плагина при открытии проекта -->
-        <postStartupActivity implementation="io.github.qavlad.adbdevicemanager.startup.PluginStartupActivity"/>
         
         <!-- Регистрация  бокового окна (Tool Window) -->
         <toolWindow
