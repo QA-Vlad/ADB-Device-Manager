@@ -1,28 +1,29 @@
 package io.github.qavlad.adbdevicemanager.startup
 
-import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.startup.StartupActivity
+import com.intellij.openapi.startup.ProjectActivity
 import com.intellij.openapi.wm.ToolWindowManager
 import io.github.qavlad.adbdevicemanager.settings.PluginSettings
 import io.github.qavlad.adbdevicemanager.telemetry.SentryInitializer
 import io.github.qavlad.adbdevicemanager.utils.PluginLogger
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * Startup activity для автоматической инициализации плагина при открытии проекта
- * Использует StartupActivity.DumbAware для совместимости с билдом 223+
+ * Использует ProjectActivity для совместимости с билдом 223+
  */
-class PluginStartupActivity : StartupActivity.DumbAware {
+class PluginStartupActivity : ProjectActivity {
     
-    override fun runActivity(project: Project) {
+    override suspend fun execute(project: Project) {
         PluginLogger.info("ADB Device Manager startup activity executing")
         
         // Инициализируем Sentry при запуске (opt-out модель)
         val settings = PluginSettings.instance
         SentryInitializer.initialize(settings.enableTelemetry)
         
-        // Запускаем в UI потоке, после небольшой задержки
-        ApplicationManager.getApplication().invokeLater {
+        // Переключаемся на EDT (UI поток) для работы с UI
+        withContext(Dispatchers.Main) {
             initializeToolWindow(project)
         }
     }

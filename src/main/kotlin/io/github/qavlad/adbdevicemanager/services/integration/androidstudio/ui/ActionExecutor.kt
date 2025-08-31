@@ -6,7 +6,6 @@ import com.intellij.openapi.actionSystem.ActionManager
 import com.intellij.openapi.actionSystem.ActionPlaces
 import com.intellij.openapi.actionSystem.ActionToolbar
 import com.intellij.openapi.actionSystem.AnAction
-import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.actionSystem.impl.SimpleDataContext
 import com.intellij.openapi.application.ApplicationManager
@@ -16,6 +15,8 @@ import com.intellij.openapi.project.ProjectManager
 import com.intellij.openapi.wm.ToolWindowManager
 import io.github.qavlad.adbdevicemanager.services.AdbServiceAsync
 import io.github.qavlad.adbdevicemanager.services.integration.androidstudio.constants.AndroidStudioConstants
+import io.github.qavlad.adbdevicemanager.utils.ActionEventHelper
+import io.github.qavlad.adbdevicemanager.utils.ActionExecutionHelper
 import io.github.qavlad.adbdevicemanager.utils.ConsoleLogger
 import io.github.qavlad.adbdevicemanager.utils.FileLogger
 import kotlinx.coroutines.runBlocking
@@ -73,17 +74,15 @@ class ActionExecutor(
                                     contentManager.removeContent(selectedContent, true)
                                     executed = true
                                 } else {
-                                    val event = AnActionEvent.createFromDataContext(
+                                    val event = ActionEventHelper.createActionEvent(
                                         "AdbRandomizer",
                                         null,
                                         dataContext
                                     )
                                     
-                                    action.update(event)
-                                    if (event.presentation.isEnabled) {
+                                    if (ActionExecutionHelper.updateAndCheckEnabled(action, event)) {
                                         ConsoleLogger.logRunningDevices("Action $actionId is enabled, executing...")
-                                        action.actionPerformed(event)
-                                        executed = true
+                                        executed = ActionExecutionHelper.performAction(action, event)
                                         
                                         // Return focus to Running Devices window
                                         runningDevicesWindow.activate(null, true, true)
@@ -275,12 +274,12 @@ class ActionExecutor(
             ApplicationManager.getApplication().invokeAndWait({
                 try {
                     val dataContext = DataManager.getInstance().getDataContext(toolbar.component)
-                    val event = AnActionEvent.createFromDataContext(
+                    val event = ActionEventHelper.createActionEvent(
                         ActionPlaces.TOOLWINDOW_TOOLBAR_BAR,
                         null,
                         dataContext
                     )
-                    actions = toolbar.actionGroup.getChildren(event)
+                    actions = ActionExecutionHelper.getActionGroupChildren(toolbar.actionGroup, event)
                     actionsRetrieved = true
                 } catch (e: Exception) {
                     ConsoleLogger.logRunningDevices("Error getting toolbar actions: ${e.message}")
@@ -327,12 +326,12 @@ class ActionExecutor(
         ApplicationManager.getApplication().invokeAndWait({
             try {
                 val dataContext = DataManager.getInstance().getDataContext(toolbar.component)
-                val actionEvent = AnActionEvent.createFromDataContext(
+                val actionEvent = ActionEventHelper.createActionEvent(
                     ActionPlaces.TOOLWINDOW_TOOLBAR_BAR,
                     null,
                     dataContext
                 )
-                action.actionPerformed(actionEvent)
+                ActionExecutionHelper.performAction(action, actionEvent)
                 ConsoleLogger.logRunningDevices("Successfully executed add button action")
                 success = true
             } catch (e: Exception) {
@@ -391,12 +390,12 @@ class ActionExecutor(
                             // IntelliJ ActionButton - execute the action directly
                             ConsoleLogger.logRunningDevices("Executing action directly")
                             val dataContext = DataManager.getInstance().getDataContext(button)
-                            val event = AnActionEvent.createFromDataContext(
+                            val event = ActionEventHelper.createActionEvent(
                                 ActionPlaces.TOOLWINDOW_TOOLBAR_BAR,
                                 null,
                                 dataContext
                             )
-                            action.actionPerformed(event)
+                            ActionExecutionHelper.performAction(action, event)
                             ConsoleLogger.logRunningDevices("Action executed directly")
                             clicked = true
                         }
@@ -510,14 +509,14 @@ class ActionExecutor(
                     .getToolWindow(AndroidStudioConstants.RUNNING_DEVICES_TOOL_WINDOW)
                 if (toolWindow != null) {
                     val dataContext = DataManager.getInstance().getDataContext(toolWindow.component)
-                    val event = AnActionEvent.createFromDataContext(
+                    val event = ActionEventHelper.createActionEvent(
                         ActionPlaces.TOOLWINDOW_TOOLBAR_BAR,
                         null,
                         dataContext
                     )
                     
                     ConsoleLogger.logRunningDevices("Executing action: $actionId")
-                    action.actionPerformed(event)
+                    ActionExecutionHelper.performAction(action, event)
                     FileLogger.log("Running Devices", "Action $actionId executed")
                     success = true
                 }

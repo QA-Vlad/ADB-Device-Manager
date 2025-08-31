@@ -50,12 +50,13 @@ internal object AdbConnectionManager {
             process.waitFor(PluginConfig.Adb.SERVER_START_TIMEOUT_SECONDS, TimeUnit.SECONDS)
 
             if (!isInitialized) {
+                @Suppress("DEPRECATION") // No alternative API available yet
                 AndroidDebugBridge.initIfNeeded(false)
                 isInitialized = true
                 PluginLogger.info("AndroidDebugBridge initialized")
             }
 
-            @Suppress("DEPRECATION")
+            @Suppress("DEPRECATION") // No alternative API available yet
             customBridge = AndroidDebugBridge.createBridge(adbPath, false)
 
             var attempts = PluginConfig.Adb.BRIDGE_CONNECTION_ATTEMPTS

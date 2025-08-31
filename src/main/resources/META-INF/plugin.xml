@@ -127,6 +127,7 @@
                 order="first"/>
     </extensions>
     
+    
     <!-- Actions section -->
     <actions>
         <!-- Add action to Tools menu -->

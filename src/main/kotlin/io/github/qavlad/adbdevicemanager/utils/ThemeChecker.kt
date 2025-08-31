@@ -2,6 +2,7 @@ package io.github.qavlad.adbdevicemanager.utils
 
 import com.intellij.ui.JBColor
 import javax.swing.UIManager
+import kotlin.math.pow
 
 /**
  * Утилитный класс для проверки текущей темы IDE.
@@ -38,9 +39,9 @@ object ThemeChecker {
         val blue = b / 255.0
         
         // Применяем гамма-коррекцию
-        val rLinear = if (red <= 0.03928) red / 12.92 else Math.pow((red + 0.055) / 1.055, 2.4)
-        val gLinear = if (green <= 0.03928) green / 12.92 else Math.pow((green + 0.055) / 1.055, 2.4)
-        val bLinear = if (blue <= 0.03928) blue / 12.92 else Math.pow((blue + 0.055) / 1.055, 2.4)
+        val rLinear = if (red <= 0.03928) red / 12.92 else ((red + 0.055) / 1.055).pow(2.4)
+        val gLinear = if (green <= 0.03928) green / 12.92 else ((green + 0.055) / 1.055).pow(2.4)
+        val bLinear = if (blue <= 0.03928) blue / 12.92 else ((blue + 0.055) / 1.055).pow(2.4)
         
         // Возвращаем взвешенную сумму
         return 0.2126 * rLinear + 0.7152 * gLinear + 0.0722 * bLinear
