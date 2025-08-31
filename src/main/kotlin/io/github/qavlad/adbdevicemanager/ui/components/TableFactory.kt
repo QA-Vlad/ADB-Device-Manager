@@ -47,7 +47,7 @@ class TableFactory {
         return object : JBTable(model) {
             override fun isCellEditable(row: Int, column: Int): Boolean {
                 // Проверяем, что это не строка с кнопкой
-                if (row >= 0 && row < rowCount) {
+                if (row in 0..<rowCount) {
                     val firstColumnValue = model.getValueAt(row, 0)
                     if (firstColumnValue == "+") {
                         return false // Не позволяем редактировать строку с кнопкой
@@ -56,7 +56,6 @@ class TableFactory {
                 return super.isCellEditable(row, column)
             }
 
-            @Suppress("DEPRECATION")
             override fun prepareRenderer(renderer: TableCellRenderer, row: Int, column: Int): Component {
                 // Проверяем, что индексы в допустимых пределах
                 if (row >= rowCount || column >= columnCount) {

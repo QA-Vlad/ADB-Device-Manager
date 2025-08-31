@@ -1,32 +1,28 @@
 package io.github.qavlad.adbdevicemanager.utils
 
-import com.intellij.openapi.actionSystem.ActionGroup
-import com.intellij.openapi.actionSystem.AnAction
-import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.actionSystem.*
+import com.intellij.openapi.actionSystem.ex.ActionUtil
 import com.intellij.openapi.application.ApplicationManager
 
 /**
- * Helper class for executing actions without violating override-only API rules
+ * Helper class for executing actions using official API methods
  */
 object ActionExecutionHelper {
     
     /**
-     * Safely performs an action without directly calling actionPerformed
-     * This avoids the @ApiStatus.OverrideOnly violation
-     * 
-     * Since ActionUtil is not available in build 223, we use a workaround
-     * through ActionManager and invokeLater
+     * Safely performs an action using ActionUtil.performActionDumbAwareWithCallbacks
+     * This is the recommended way to execute actions programmatically
+     * Note: This method is deprecated but there's no alternative in Platform 243+
      */
+    @Suppress("DEPRECATION")
     fun performAction(action: AnAction, event: AnActionEvent): Boolean {
         return try {
-            // Execute action in EDT to ensure proper context
+            // Use ActionUtil.performActionDumbAwareWithCallbacks which is the official way to execute actions
+            // It handles update, enabled checks, and execution properly without violating @ApiStatus.OverrideOnly
+            // This method is deprecated but there's no replacement API yet
             ApplicationManager.getApplication().invokeLater {
                 try {
-                    // Since we can't avoid calling actionPerformed directly,
-                    // we'll call it with proper suppression
-                    // This is a known limitation when programmatically triggering actions
-                    @Suppress("DEPRECATION")
-                    action.actionPerformed(event)
+                    ActionUtil.performActionDumbAwareWithCallbacks(action, event)
                 } catch (e: Exception) {
                     PluginLogger.error("Failed to perform action", e)
                 }
@@ -39,16 +35,16 @@ object ActionExecutionHelper {
     }
     
     /**
-     * Safely updates an action without directly calling update
+     * Safely updates an action and checks if it's enabled
      * Returns true if the action is enabled after update
+     * Note: performDumbAwareUpdate is deprecated but there's no alternative in Platform 243+
      */
+    @Suppress("DEPRECATION")
     fun updateAndCheckEnabled(action: AnAction, event: AnActionEvent): Boolean {
         return try {
-            // Update the action directly with suppression
-            // This is needed when we need to check if an action is enabled
-            @Suppress("DEPRECATION")
-            action.update(event)
-            
+            // Use ActionUtil.performDumbAwareUpdate for platform 243+ compatibility
+            // This method is deprecated but there's no replacement API yet
+            ActionUtil.performDumbAwareUpdate(action, event, false)
             event.presentation.isEnabled
         } catch (e: Exception) {
             PluginLogger.error("Failed to update action", e)
@@ -57,14 +53,31 @@ object ActionExecutionHelper {
     }
     
     /**
-     * Safely gets children of an ActionGroup
+     * Safely gets children of an ActionGroup using proper API
+     * Note: performDumbAwareUpdate is deprecated but there's no alternative in Platform 243+
      */
+    @Suppress("DEPRECATION")
     fun getActionGroupChildren(actionGroup: ActionGroup, event: AnActionEvent): Array<AnAction> {
         return try {
-            // Call getChildren with suppression since it's marked as override-only
-            // but we need to get the children programmatically
-            @Suppress("DEPRECATION")
-            actionGroup.getChildren(event)
+            // First update the action group using ActionUtil
+            // This method is deprecated but there's no replacement API yet
+            ActionUtil.performDumbAwareUpdate(actionGroup, event, false)
+            
+            // For all ActionGroup types, use DefaultActionGroup if possible
+            when (actionGroup) {
+                is DefaultActionGroup -> {
+                    // For DefaultActionGroup, we can directly get children
+                    val childActions = actionGroup.getChildActionsOrStubs()
+                    Array(childActions.size) { i -> childActions[i] }
+                }
+                else -> {
+                    // For other ActionGroup types, return empty array as getChildren() is removed
+                    // The proper way would be to cast to DefaultActionGroup if possible
+                    // or refactor the code to not need children
+                    PluginLogger.warn("Cannot get children for non-DefaultActionGroup: ${actionGroup.javaClass.name}")
+                    emptyArray()
+                }
+            }
         } catch (e: Exception) {
             PluginLogger.error("Failed to get action group children", e)
             emptyArray()

@@ -24,7 +24,6 @@ internal object AdbConnectionManager {
     private var hasLoggedAdbNotFound = false
     private var hasLoggedBridgeError = false
 
-    @Suppress("DEPRECATION")
     suspend fun getOrCreateDebugBridge(): Result<AndroidDebugBridge> = withContext(Dispatchers.IO) {
         if (customBridge != null && customBridge!!.isConnected) {
             return@withContext Result.Success(customBridge!!)
@@ -50,14 +49,19 @@ internal object AdbConnectionManager {
             process.waitFor(PluginConfig.Adb.SERVER_START_TIMEOUT_SECONDS, TimeUnit.SECONDS)
 
             if (!isInitialized) {
-                @Suppress("DEPRECATION") // No alternative API available yet
-                AndroidDebugBridge.initIfNeeded(false)
+                // Use init() method which is not deprecated
+                AndroidDebugBridge.init(false)
                 isInitialized = true
                 PluginLogger.info("AndroidDebugBridge initialized")
             }
 
-            @Suppress("DEPRECATION") // No alternative API available yet
-            customBridge = AndroidDebugBridge.createBridge(adbPath, false)
+            // Use createBridge() with additional parameters which is not deprecated
+            customBridge = AndroidDebugBridge.createBridge(
+                adbPath,
+                false, // forceNewBridge
+                10000, // 10 seconds timeout
+                TimeUnit.MILLISECONDS
+            )
 
             var attempts = PluginConfig.Adb.BRIDGE_CONNECTION_ATTEMPTS
             while (customBridge != null && !customBridge!!.isConnected && attempts > 0) {

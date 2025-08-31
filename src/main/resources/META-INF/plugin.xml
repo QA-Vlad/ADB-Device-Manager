@@ -88,7 +88,7 @@
     ]]></change-notes>
     
     <!-- Версии IDE -->
-    <idea-version since-build="223"/>
+    <idea-version since-build="243"/>
 
     <!-- 5. Секция зависимостей. Это критически важно. -->
     <depends>com.intellij.modules.platform</depends>

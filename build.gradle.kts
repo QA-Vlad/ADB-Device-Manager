@@ -29,7 +29,7 @@ repositories {
 }
 
 intellij {
-    version.set("2023.2")
+    version.set("2024.3")
     type.set("IC")
     plugins.set(listOf())
 
@@ -95,7 +95,7 @@ tasks {
             </ul>
         """.trimIndent())
 
-        sinceBuild.set("223")
+        sinceBuild.set("243")
         untilBuild.set("")  // Пустая строка означает отсутствие ограничения максимальной версии
     }
 }

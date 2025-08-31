@@ -424,7 +424,8 @@ class PresetListManagerPanel(
                     val (list, name) = listsToExport.first()
                     val sanitizedName = name.replace(Regex("[^a-zA-Z0-9\\s_-]"), "_")
                     
-                    // FileSaverDescriptor constructor with extension parameter
+                    // FileSaverDescriptor constructor is deprecated but there's no alternative in Platform 243
+                    @Suppress("DEPRECATION")
                     val descriptor = FileSaverDescriptor(
                         "Export Preset List",
                         "Choose location to save preset list",
