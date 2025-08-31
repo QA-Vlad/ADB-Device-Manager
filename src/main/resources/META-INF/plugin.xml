@@ -41,7 +41,7 @@
     <h3>Who Should Use This Plugin</h3>
     <ul>
         <li>QA Engineers testing responsive layouts</li>
-        <li>Mobile Developers checking UI on different screens</li>
+        <li>Mobile Developers testing apps on various screen configurations</li>
         <li>UI/UX Designers validating designs across devices</li>
         <li>Automation Engineers setting up test environments</li>
     </ul>

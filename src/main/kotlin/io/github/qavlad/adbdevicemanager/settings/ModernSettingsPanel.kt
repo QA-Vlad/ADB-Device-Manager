@@ -158,7 +158,7 @@ open class ModernSettingsPanel : JBPanel<ModernSettingsPanel>() {
         }
         
         // Создаём карточки для каждой категории
-        SettingsCategory.values().forEach { category ->
+        SettingsCategory.entries.forEach { category ->
             contentPanel.add(createCategoryPanel(category), category.name)
         }
         
@@ -180,13 +180,13 @@ open class ModernSettingsPanel : JBPanel<ModernSettingsPanel>() {
             )
             
             // Создаём кнопки для каждой категории
-            SettingsCategory.values().forEach { category ->
+            SettingsCategory.entries.forEach { category ->
                 val button = createNavigationButton(category)
                 categoryButtons[category] = button
                 add(button)
                 
                 // Добавляем небольшой отступ между кнопками
-                if (category != SettingsCategory.values().last()) {
+                if (category != SettingsCategory.entries.last()) {
                     add(Box.createHorizontalStrut(4))
                 }
             }
@@ -1003,20 +1003,26 @@ open class ModernSettingsPanel : JBPanel<ModernSettingsPanel>() {
                 foreground = JBColor(Color(156, 39, 176), Color(186, 85, 211))
             })
             
-            add(JLabel(" plugin for Android ").apply {
+            add(JLabel(" plugin for ").apply {
                 font = UIUtil.getLabelFont().deriveFont(21f)
                 foreground = JBColor.GRAY
             })
             
-            // QA with gradient-like green-yellow colors
-            add(JLabel("QA").apply {
+            // QA with gradient-like green colors
+            add(JLabel("QA engineers").apply {
                 font = UIUtil.getLabelFont().deriveFont(Font.BOLD, 21f)
                 foreground = JBColor(Color(52, 168, 83), Color(100, 200, 120))
             })
             
-            add(JLabel(" testing").apply {
+            add(JLabel(" and ").apply {
                 font = UIUtil.getLabelFont().deriveFont(21f)
                 foreground = JBColor.GRAY
+            })
+            
+            // Developers with blue gradient colors
+            add(JLabel("developers").apply {
+                font = UIUtil.getLabelFont().deriveFont(Font.BOLD, 21f)
+                foreground = JBColor(Color(66, 133, 244), Color(80, 150, 255))
             })
         }
     }

@@ -4,7 +4,7 @@
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Version](https://img.shields.io/badge/Version-1.0-green.svg)]()
-[![JetBrains Marketplace](https://img.shields.io/badge/JetBrains-Marketplace-blue.svg)](https://plugins.jetbrains.com/)
+[![JetBrains Marketplace](https://img.shields.io/badge/JetBrains-Marketplace-blue.svg)](https://plugins.jetbrains.com/plugin/28335-adb-device-manager)
 
 ## 📱 About
 
