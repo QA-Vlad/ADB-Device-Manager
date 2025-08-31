@@ -82,16 +82,16 @@ tasks {
         changeNotes.set("""
             <b>v1.0 - Stable Release</b><br>
             <ul>
-                <li>🚀 First stable release of ADB Device Manager</li>
-                <li>📱 Complete device screen management (resolution & DPI)</li>
-                <li>🎲 Random screen parameters with one click</li>
-                <li>📋 Device presets system with 100+ popular devices</li>
-                <li>📡 Wi-Fi debugging support</li>
-                <li>🖥️ Screen mirroring via scrcpy integration</li>
-                <li>🎨 Modern UI with dark/light theme support</li>
-                <li>⚡ Auto-rotation state management</li>
-                <li>🔧 Advanced settings and configuration</li>
-                <li>📊 Anonymous crash reporting via Sentry (opt-out available)</li>
+                <li>First stable release of ADB Device Manager</li>
+                <li>Complete device screen management (resolution & DPI)</li>
+                <li>Random screen parameters with one click</li>
+                <li>Device presets system with 100+ popular devices</li>
+                <li>Wi-Fi debugging support</li>
+                <li>Screen mirroring via scrcpy integration</li>
+                <li>Modern UI with dark/light theme support</li>
+                <li>Auto-rotation state management</li>
+                <li>Advanced settings and configuration</li>
+                <li>Anonymous crash reporting via Sentry (opt-out available)</li>
             </ul>
         """.trimIndent())
 
