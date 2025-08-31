@@ -251,9 +251,16 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
 
     private fun selectRandomPreset(setSize: Boolean, setDpi: Boolean): DevicePreset? {
         var availablePresets = filterSuitablePresets(setSize, setDpi)
-
+        println("ADB_DEBUG [Random Selection]: Total suitable presets: ${availablePresets.size}")
+        
         if (availablePresets.size > 1 && lastUsedPreset != null) {
-            availablePresets = availablePresets.filter { it != lastUsedPreset }
+            println("ADB_DEBUG [Random Selection]: Filtering out previous preset: ${lastUsedPreset!!.label} (id: ${lastUsedPreset!!.id})")
+            val beforeFilter = availablePresets.size
+            // Сравниваем по label и id, так как lastUsedPreset может быть модифицированной копией
+            availablePresets = availablePresets.filter { preset ->
+                !(preset.label == lastUsedPreset!!.label && preset.id == lastUsedPreset!!.id)
+            }
+            println("ADB_DEBUG [Random Selection]: After filtering: ${availablePresets.size} presets (removed ${beforeFilter - availablePresets.size})")
         }
 
         if (availablePresets.isEmpty()) {
@@ -267,6 +274,7 @@ class AdbControlsPanel(private val project: Project) : JPanel(BorderLayout()) {
         }
 
         val randomPreset = availablePresets.random()
+        println("ADB_DEBUG [Random Selection]: Selected preset: ${randomPreset.label} (id: ${randomPreset.id})")
         updateCurrentPresetIndex(randomPreset)
         return randomPreset
     }

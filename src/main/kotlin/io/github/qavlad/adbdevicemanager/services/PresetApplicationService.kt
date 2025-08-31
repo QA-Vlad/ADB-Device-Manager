@@ -12,8 +12,22 @@ import io.github.qavlad.adbdevicemanager.utils.PluginLogger
 import io.github.qavlad.adbdevicemanager.utils.logging.LogCategory
 import io.github.qavlad.adbdevicemanager.settings.PluginSettings
 import javax.swing.SwingUtilities
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.locks.ReentrantLock
 
 object PresetApplicationService {
+    // Карта блокировок для каждого устройства, чтобы предотвратить race conditions
+    private val deviceLocks = ConcurrentHashMap<String, ReentrantLock>()
+    
+    // Очистка устаревших блокировок для отключенных устройств
+    fun cleanupDeviceLocks(connectedDeviceSerials: Set<String>) {
+        val locksToRemove = deviceLocks.keys.filter { it !in connectedDeviceSerials }
+        locksToRemove.forEach { deviceLocks.remove(it) }
+        if (locksToRemove.isNotEmpty()) {
+            PluginLogger.debug(LogCategory.PRESET_SERVICE, 
+                "Cleaned up locks for %d disconnected devices", locksToRemove.size)
+        }
+    }
     
     fun applyPreset(project: Project, preset: DevicePreset, setSize: Boolean, setDpi: Boolean, currentTablePosition: Int? = null, selectedDevices: List<IDevice>? = null) {
         println("ADB_Randomizer: applyPreset called - preset: ${preset.label}, setSize: $setSize, setDpi: $setDpi")
@@ -289,7 +303,13 @@ object PresetApplicationService {
         devices.forEach { device ->
             indicator.text = "Applying '${preset.label}' to ${device.name}..."
             
-            if (presetData.width != null && presetData.height != null) {
+            // Получаем или создаём блокировку для устройства
+            val deviceLock = deviceLocks.computeIfAbsent(device.serialNumber) { ReentrantLock() }
+            
+            // Блокируем устройство на время применения настроек
+            deviceLock.lock()
+            try {
+                if (presetData.width != null && presetData.height != null) {
                 // Определяем естественную ориентацию устройства
                 val naturalOrientation = AdbService.getNaturalOrientation(device).getOrNull() ?: "portrait"
                 val isNaturallyPortrait = naturalOrientation == "portrait"
@@ -437,30 +457,66 @@ object PresetApplicationService {
                         presetData.dpi, maxDpiLimit
                     )
                 } else {
+                    // Применяем DPI с синхронизацией
+                    PluginLogger.debug(LogCategory.PRESET_SERVICE, 
+                        "Applying DPI %d to device %s (lock acquired)", 
+                        presetData.dpi, device.serialNumber
+                    )
+                    
                     AdbService.setDpi(device, presetData.dpi)
                     dpiWasActuallyApplied = true
                     
-                    // Проверяем реальное DPI после установки
-                    Thread.sleep(300)
+                    // Увеличиваем задержку для более надёжной проверки
+                    // Даём время на применение DPI перед проверкой
+                    Thread.sleep(1500) // Увеличиваем задержку до 1.5 секунд
+                    
+                    // Первая проверка
                     val actualDpiResult = AdbService.getCurrentDpi(device)
                     val actualDpi = actualDpiResult.getOrNull()
                     
+                    PluginLogger.debug(LogCategory.PRESET_SERVICE, 
+                        "First DPI check for %s: requested=%d, actual=%d", 
+                        device.serialNumber, presetData.dpi, actualDpi ?: -1
+                    )
+                    
                     if (actualDpi != null && actualDpi != presetData.dpi) {
-                        SwingUtilities.invokeLater {
-                            NotificationUtils.showWarning(
-                                project,
-                                "<html>Device <b>${device.name}</b> limited the DPI due to hardware constraints.<br>" +
-                                "Requested: <b>${presetData.dpi}</b><br>" +
-                                "Applied: <b>$actualDpi</b></html>"
+                        // Повторная проверка через ещё 1000ms для исключения race condition
+                        Thread.sleep(1000)
+                        val secondCheckResult = AdbService.getCurrentDpi(device)
+                        val secondCheckDpi = secondCheckResult.getOrNull()
+                        
+                        PluginLogger.debug(LogCategory.PRESET_SERVICE, 
+                            "Second DPI check for %s: requested=%d, actual=%d", 
+                            device.serialNumber, presetData.dpi, secondCheckDpi ?: -1
+                        )
+                        
+                        // Показываем предупреждение только если оба раза DPI не совпадает
+                        if (secondCheckDpi != null && secondCheckDpi != presetData.dpi && secondCheckDpi == actualDpi) {
+                            SwingUtilities.invokeLater {
+                                NotificationUtils.showWarning(
+                                    project,
+                                    "<html>Device <b>${device.name}</b> limited the DPI due to hardware constraints.<br>" +
+                                    "Requested: <b>${presetData.dpi}</b><br>" +
+                                    "Applied: <b>$actualDpi</b></html>"
+                                )
+                            }
+                            
+                            PluginLogger.info(LogCategory.PRESET_SERVICE, 
+                                "DPI limited by device %s: requested %d, got %d (confirmed after double-check)", 
+                                device.name, presetData.dpi, actualDpi
+                            )
+                        } else {
+                            PluginLogger.info(LogCategory.PRESET_SERVICE, 
+                                "DPI check inconsistent for %s: first check %d, second check %d, requested %d - skipping warning", 
+                                device.name, actualDpi, secondCheckDpi ?: -1, presetData.dpi
                             )
                         }
-                        
-                        PluginLogger.info(LogCategory.PRESET_SERVICE, 
-                            "DPI limited by device %s: requested %d, got %d", 
-                            device.name, presetData.dpi, actualDpi
-                        )
                     }
                 }
+            }
+            } finally {
+                // Обязательно освобождаем блокировку
+                deviceLock.unlock()
             }
         }
         

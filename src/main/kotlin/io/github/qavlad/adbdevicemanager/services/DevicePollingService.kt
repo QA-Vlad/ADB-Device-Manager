@@ -275,6 +275,10 @@ class DevicePollingService(private val project: Project) {
         val startTime = System.currentTimeMillis()
         PluginLogger.info("combineDevices: Starting with %d devices", devices.size)
         
+        // Очищаем устаревшие блокировки для отключенных устройств
+        val connectedSerials = devices.map { it.logicalSerialNumber }.toSet()
+        PresetApplicationService.cleanupDeviceLocks(connectedSerials)
+        
         // Логируем все переданные устройства
         devices.forEach { device ->
             PluginLogger.info("combineDevices: Device serial=%s, display=%s, isWifi=%s", 
